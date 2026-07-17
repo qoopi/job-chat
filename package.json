@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
-    "prepare": "husky"
+    "format": "prettier --write ."
   },
   "dependencies": {
     "@ai-sdk/amazon-bedrock": "^5.0.24",
@@ -32,8 +32,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
-    "husky": "^9.1.7",
-    "lint-staged": "^17.0.8",
     "prettier": "^3.9.5",
     "tailwindcss": "^4",
     "typescript": "^5",
@@ -46,8 +44,5 @@
   "trustedDependencies": [
     "sharp",
     "unrs-resolver"
-  ],
-  "lint-staged": {
-    "*.{ts,tsx,md,json,css}": "prettier --write"
-  }
+  ]
 }
