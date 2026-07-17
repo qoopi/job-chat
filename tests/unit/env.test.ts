@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getEnv, resetEnvCache } from "./env";
+import { getEnv, resetEnvCache } from "../../src/lib/env";
 
 const complete: Record<string, string> = {
   TRIGGER_SECRET_KEY: "tr_dev_x",
