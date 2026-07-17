@@ -42,6 +42,11 @@ yarn-error.log*
 next-env.d.ts
 
 # playwright
-/test-results/
-/playwright-report/
+/tests/test-results/
+/tests/playwright-report/
 /playwright/.cache/
+
+# editors & local tools
+.idea/
+.vscode/
+.serena/

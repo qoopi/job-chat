@@ -5,6 +5,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests/e2e",
   use: { baseURL: "http://localhost:3111" },
+  outputDir: "./tests/test-results",
   webServer: {
     // next dev daemonizes in Next 16 (parent exits -> Playwright thinks it failed), so e2e runs
     // against the production server. For a fast local loop: run `bunx next dev --port 3111`
