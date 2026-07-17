@@ -53,3 +53,7 @@ next-env.d.ts
 
 # claude.ai/design local mirror (pull-only, see design-pull skill)
 /.claude/design-spec/
+
+# process artifacts live in Job.Chat.Playbook (operator ruling 2026-07-17)
+/.design-sync/
+/.claude/tasks/
