@@ -50,3 +50,6 @@ next-env.d.ts
 .idea/
 .vscode/
 .serena/
+
+# claude.ai/design local mirror (pull-only, see design-pull skill)
+/.claude/design-spec/
