@@ -10,7 +10,7 @@ import {
   buildSkeleton,
   errorPart,
   toModelOutput,
-  type AgentErrorKind,
+  type ErrorPart,
 } from "./parts";
 
 // The agent's tool catalog: one tool per question shape, each a thin wrapper over analytics.runQuery
@@ -45,8 +45,8 @@ const DESCRIPTIONS: Record<TemplateName, string> = {
 };
 
 export type InsightPart = { type: "data-insight"; id: string; data: unknown };
-export type ErrorPart = { type: "data-error"; id: string; data: { kind: AgentErrorKind } };
 export type EmitPart = InsightPart | ErrorPart;
+export type { ErrorPart };
 export type Emit = (part: EmitPart) => void;
 
 export interface CatalogDeps {
