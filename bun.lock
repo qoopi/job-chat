@@ -9,7 +9,7 @@
         "@ai-sdk/react": "^4.0.34",
         "@aws-sdk/credential-providers": "^3.1090.0",
         "@clickhouse/client": "^1.23.1",
-        "@trigger.dev/sdk": "^4.5.4",
+        "@trigger.dev/sdk": "4.5.4",
         "ai": "^7.0.31",
         "next": "16.2.10",
         "postgres": "^3.4.9",

@@ -71,6 +71,14 @@ export function chatTokenScopes(conversationId: string) {
  * `payload.message`, and `extractLastUserMessageText` reads the text from the message's `text` parts.
  * It mirrors what the browser transport's `sendRaw` posts, so the preloaded agent run - which waits on
  * `.in` before it ever calls `run()` - consumes the turn server-side instead of idling until timeout.
+ *
+ * VERSION-PINNED to @trigger.dev/sdk 4.5.4 (pinned EXACT in package.json - no caret - for this reason).
+ * This reproduces a PRIVATE SDK envelope, NOT a public API: `replaySessionInTail` /
+ * `extractLastUserMessageText` (SDK dist ai.js) are internals. On ANY @trigger.dev/sdk bump, re-verify
+ * that {kind:"message", payload:{trigger:"submit-message", chatId, message}} still round-trips through
+ * that drain before shipping - a silent drift here breaks user-turn delivery (the agent boots as a
+ * preload and idles forever) with NO automated guard, because every inbox test mocks `sendToInbox`.
+ * Only the operator's manual live smoke (007) exercises the real drain.
  */
 export function userTurnChunk(chatId: string, messageId: string, text: string) {
   return {
