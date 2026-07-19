@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   locationKindLabel,
   mapPostingToRow,
+  PostingSchema,
   type Posting,
 } from "@shared/postings";
 
@@ -30,6 +31,34 @@ describe("locationKindLabel", () => {
 
   it("defaults an unknown kind to onsite (the dominant category)", () => {
     expect(locationKindLabel(9)).toBe("onsite");
+  });
+});
+
+describe("PostingSchema publishedAt boundary", () => {
+  it("rejects a timezone-less timestamp (would silently shift when parsed as local time)", () => {
+    // Regression: z.string() accepted this and new Date() read it as LOCAL time,
+    // so 2026-07-17T23:38:42 stored as 03:38:42 in a UTC+4 runner. Must fail fast.
+    const result = PostingSchema.safeParse({ ...base, publishedAt: "2026-07-17T23:38:42" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a malformed publishedAt at the boundary (previously threw mid-batch)", () => {
+    // Regression: a non-date string parsed fine, then toChDateTime threw RangeError
+    // partway through a batch. The invalid state is now defined away at the boundary.
+    const result = PostingSchema.safeParse({ ...base, publishedAt: "not-a-timestamp" });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a Z-suffixed UTC timestamp (the jobs-api contract / fixtures)", () => {
+    const result = PostingSchema.safeParse({ ...base, publishedAt: "2026-07-17T23:38:42Z" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts an offset timestamp and converts it to UTC for ClickHouse", () => {
+    const result = PostingSchema.safeParse({ ...base, publishedAt: "2026-07-17T23:38:42+02:00" });
+    expect(result.success).toBe(true);
+    const row = mapPostingToRow(result.data as Posting, ingestedAt);
+    expect(row.published_at).toBe("2026-07-17 21:38:42"); // +02:00 normalized to UTC
   });
 });
 

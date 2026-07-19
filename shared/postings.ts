@@ -24,7 +24,10 @@ export const PostingSchema = z.object({
   experienceLevel: z.string().nullish(),
   salary: SalarySchema.nullish(),
   locations: z.array(LocationSchema).default([]),
-  publishedAt: z.string(),
+  // Require an explicit UTC (`Z`) or numeric offset: a timezone-less string would be
+  // read as local time by new Date() and shift; a malformed one would throw in
+  // toChDateTime mid-batch. Reject both at the boundary (offsets normalize to UTC there).
+  publishedAt: z.string().datetime({ offset: true }),
 });
 
 export type Posting = z.infer<typeof PostingSchema>;
