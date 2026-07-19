@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import type { UIMessage } from "ai";
 import { Bubble } from "./Bubble";
 import { InsightCard } from "@/components/insight/InsightCard";
@@ -19,7 +20,14 @@ function dataParts(message: UIMessage): { id: string; data: unknown }[] {
     .map((p, i) => ({ id: (p as { id?: string }).id ?? `${message.id}-p${i}`, data: (p as { data?: unknown }).data }));
 }
 
-function AssistantMessage({
+// Memoized so a settled turn does NOT re-render while a later turn streams: `useChat` fires a
+// messages-changed callback per data-* delta, MessageList re-maps the whole thread, and each prior
+// card (Recharts is heavy) would otherwise re-render on every chunk. The props are all ref-stable
+// across a stream - `message` keeps its object ref once settled (the SDK preserves settled refs via
+// slice), `usedFollowups` is unchanged mid-turn, and `onFollowup`/`onRetry` are useCallback-stable in
+// ChatClient - so the default shallow compare bails on every settled turn. Proven by
+// tests/component/message-list-memo.test.tsx (render-count probe).
+const AssistantMessage = memo(function AssistantMessage({
   message,
   usedFollowups,
   onFollowup,
@@ -77,7 +85,7 @@ function AssistantMessage({
       })}
     </>
   );
-}
+});
 
 export function MessageList({
   messages,

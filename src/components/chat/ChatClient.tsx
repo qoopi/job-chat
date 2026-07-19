@@ -137,6 +137,10 @@ export function ChatClient({
     void send(text);
   }, [draft, send]);
 
+  // Ref-stable so `React.memo(AssistantMessage)` can bail on settled turns: an inline lambda here would
+  // be a fresh ref every ChatClient render and defeat the memo (regenerate is stable across renders).
+  const onRetry = useCallback(() => void regenerate(), [regenerate]);
+
   const composerState: ComposerState = isStreaming(status) ? "streaming" : "default";
 
   return (
@@ -151,7 +155,7 @@ export function ChatClient({
               status={status}
               usedFollowups={used}
               onFollowup={onFollowup}
-              onRetry={() => void regenerate()}
+              onRetry={onRetry}
             />
           </div>
           <Composer
