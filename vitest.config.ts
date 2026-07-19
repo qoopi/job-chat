@@ -3,6 +3,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: { alias: { "@shared": new URL("./shared", import.meta.url).pathname } },
   test: {
-    include: ["tests/unit/**/*.test.ts"],
+    include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
+    setupFiles: ["tests/setup.env.ts"],
+    // Integration tests hit real ClickHouse; give them room beyond the 5s default.
+    testTimeout: 30_000,
   },
 });
