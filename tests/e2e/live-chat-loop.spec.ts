@@ -117,8 +117,13 @@ test("AC-7 Should_SendAndDisableChip_When_FollowupTapped", async ({ page }) => {
   await setScript(page, insightScript(120)); // the chip's own turn streams the next answer
   await chip.click();
 
-  // the chip text is sent as the next user message, and that chip is permanently disabled with a check
+  // the chip text is sent as the next user message
   await expect(page.locator(".bubble.user").filter({ hasText: "Only remote roles" })).toBeVisible();
+
+  // wait for the SECOND turn's card to actually land (a real re-render) BEFORE re-checking the first
+  // card's chip - an assertion made right after the click could pass even if the marking did not survive
+  // the re-render, since it would already be true on the very first (near-instant) Playwright poll.
+  await expect(page.locator(".insight").nth(1).locator(".verdict")).toContainText("Amazon leads hiring with");
   await expect(card.getByRole("button", { name: "Only remote roles ✓" })).toBeDisabled();
 });
 

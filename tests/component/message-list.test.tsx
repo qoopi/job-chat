@@ -70,6 +70,35 @@ describe("MessageList", () => {
     expect(onFollowup).toHaveBeenCalledWith("card-1", "Amazon's open roles");
   });
 
+  test("AC-7: a used chip's one-shot marking survives a re-render (a new turn appends a second card)", () => {
+    const used = new Set(["card-1::Only remote roles"]);
+    const messages: UIMessage[] = [
+      { id: "a1", role: "assistant", parts: [{ type: "data-insight", id: "a1-c0", data: insight }] },
+    ];
+    const { container, rerender } = render(
+      <MessageList messages={messages} status="ready" usedFollowups={used} onFollowup={noop} onRetry={noop} />,
+    );
+    expect(btn("Only remote roles ✓").disabled).toBe(true);
+
+    // a second turn arrives (its own card, DIFFERENT id) - a re-render, not a fresh mount
+    const secondInsight: DataInsight = { ...insight, id: "card-2", verdict: "Stripe leads next quarter." };
+    const messages2: UIMessage[] = [
+      ...messages,
+      { id: "u2", role: "user", parts: [{ type: "text", text: "Only remote roles" }] },
+      { id: "a2", role: "assistant", parts: [{ type: "data-insight", id: "a2-c0", data: secondInsight }] },
+    ];
+    rerender(<MessageList messages={messages2} status="ready" usedFollowups={used} onFollowup={noop} onRetry={noop} />);
+
+    const cards = container.querySelectorAll(".insight");
+    expect(cards.length).toBe(2);
+    const originalChip = cards[0].querySelector(".chip") as HTMLButtonElement;
+    const freshChip = cards[1].querySelector(".chip") as HTMLButtonElement;
+    expect(originalChip.disabled).toBe(true); // survived the re-render
+    expect(originalChip.textContent).toBe("Only remote roles ✓");
+    expect(freshChip.disabled).toBe(false); // per-card scoping: the new card's own chip starts fresh
+    expect(freshChip.textContent).toBe("Only remote roles");
+  });
+
   test("AC-8: a loading part renders the skeleton card, not a filled insight", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "data-insight", id: "a1-c0", data: { id: "a1-c0", kind: "chart", chartType: "bars", status: "loading" } }] },
