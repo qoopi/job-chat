@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { DataInsight } from "@shared/insight";
+import type { UIMessage } from "ai";
 import {
   classifyCardData,
   isStreaming,
   messageText,
+  reconcileMessagesById,
   storeToUiMessages,
   type StoredMessage,
 } from "@/lib/chat-ui";
@@ -76,6 +78,38 @@ describe("messageText", () => {
         ] as never,
       }),
     ).toBe("Postings are up 12% this quarter.");
+  });
+});
+
+describe("reconcileMessagesById (hydrated + replayed duplicate seam)", () => {
+  const mk = (id: string, role: "user" | "assistant", text: string): UIMessage => ({
+    id,
+    role,
+    parts: [{ type: "text", text }],
+  });
+
+  it("returns the list untouched (same refs, same order) when every id is unique", () => {
+    const list = [mk("u1", "user", "q"), mk("a1", "assistant", "answer")];
+    const out = reconcileMessagesById(list);
+    expect(out.map((m) => m.id)).toEqual(["u1", "a1"]);
+    expect(out[0]).toBe(list[0]);
+    expect(out[1]).toBe(list[1]);
+  });
+
+  it("folds a duplicate id into one, keeping its FIRST position and the LATEST content (replace, never append)", () => {
+    // A hydrated turn (id a1) that the SDK's reconnect replays re-appends under the same id.
+    const stale = mk("a1", "assistant", "hydrated");
+    const replayed = mk("a1", "assistant", "replayed");
+    const out = reconcileMessagesById([mk("u1", "user", "q"), stale, mk("u2", "user", "q2"), replayed]);
+    expect(out.map((m) => m.id)).toEqual(["u1", "a1", "u2"]); // one a1, order preserved
+    expect(out[1]).toBe(replayed); // latest content wins, at the original a1 position
+  });
+
+  it("does not mutate the input array", () => {
+    const list = [mk("a1", "assistant", "x"), mk("a1", "assistant", "y")];
+    const copy = [...list];
+    reconcileMessagesById(list);
+    expect(list).toEqual(copy);
   });
 });
 

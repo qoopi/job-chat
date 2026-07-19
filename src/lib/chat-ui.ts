@@ -55,6 +55,37 @@ export function isStreaming(status: string): boolean {
   return status === "submitted" || status === "streaming";
 }
 
+/**
+ * Collapse duplicate message ids into a single entry, keeping first-seen order and replacing in place
+ * with the latest occurrence (never appending a second copy).
+ *
+ * The merge seam: an existing conversation is hydrated into `useChat` from the store
+ * (`storeToUiMessages` -> `initialMessages`). On a follow-up, `ChatClient` appends the user turn and
+ * calls `resumeStream()`; the SDK's `reconnectToStream` subscribes with no `lastEventId` cursor, so the
+ * server replays the session's `.out` tail from the start - re-emitting the ALREADY-HYDRATED assistant
+ * turn under its original id. The AI SDK's write then `pushMessage`s that replayed turn (its id != the
+ * just-appended user turn's id, so it is not treated as a continuation), landing a turn that is already
+ * in the list a SECOND time under the same id. That is the operator's "two children with the same key"
+ * at `MessageList` (`AssistantMessage key={m.id}`) and the old card visibly re-appearing.
+ *
+ * Reconciling by id here - replace, never append, order preserved - renders each turn exactly once
+ * without suffixing keys (suffixing would key the duplicate uniquely and render the card twice).
+ */
+export function reconcileMessagesById(messages: UIMessage[]): UIMessage[] {
+  const indexById = new Map<string, number>();
+  const out: UIMessage[] = [];
+  for (const m of messages) {
+    const at = indexById.get(m.id);
+    if (at === undefined) {
+      indexById.set(m.id, out.length);
+      out.push(m);
+    } else {
+      out[at] = m; // replace in place: latest content wins, original position kept
+    }
+  }
+  return out;
+}
+
 /** The concatenated text of a message's text parts (a plain answer or the one-line verdict prose). */
 export function messageText(message: Pick<UIMessage, "parts">): string {
   return message.parts

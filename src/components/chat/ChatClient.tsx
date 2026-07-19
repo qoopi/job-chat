@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { Sidebar } from "./Sidebar";
@@ -8,7 +8,7 @@ import { TitleBar } from "./TitleBar";
 import { Composer, type ComposerState } from "./Composer";
 import { MessageList } from "./MessageList";
 import { useJobChatTransport } from "@/lib/chat-transport";
-import { isStreaming } from "@/lib/chat-ui";
+import { isStreaming, reconcileMessagesById } from "@/lib/chat-ui";
 import { mintChatToken, sendMessage as sendMessageAction } from "@/app/actions";
 
 // The live chat surface (mock 2a): it swaps 005's static fixture for `useChat` message parts fed by the
@@ -141,6 +141,13 @@ export function ChatClient({
   // be a fresh ref every ChatClient render and defeat the memo (regenerate is stable across renders).
   const onRetry = useCallback(() => void regenerate(), [regenerate]);
 
+  // Reconcile by id at the merge seam: a hydrated conversation that reconnects to a live run re-receives
+  // its already-present assistant tail from the SDK's session replay, which the AI SDK appends under the
+  // same id. Fold those duplicates (replace in place, order preserved) so each turn renders exactly once
+  // and MessageList never keys two children the same. Non-duplicated messages keep their object ref, so
+  // `React.memo(AssistantMessage)` still bails on settled turns. See reconcileMessagesById.
+  const view = useMemo(() => reconcileMessagesById(messages), [messages]);
+
   const composerState: ComposerState = isStreaming(status) ? "streaming" : "default";
 
   return (
@@ -151,7 +158,7 @@ export function ChatClient({
           <TitleBar title={title} />
           <div className="thread-scroll">
             <MessageList
-              messages={messages}
+              messages={view}
               status={status}
               usedFollowups={used}
               onFollowup={onFollowup}

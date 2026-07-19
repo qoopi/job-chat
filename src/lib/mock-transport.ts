@@ -18,6 +18,14 @@ declare global {
   interface Window {
     /** The next turn's chunk script (consumed by `sendMessages`). Set by the e2e spec before a send. */
     __CHAT_SCRIPT__?: ScriptStep[];
+    /**
+     * An optional persisted-tail replay for `reconnectToStream` (resume / reconnect). The real Trigger
+     * transport, on a fresh reconnect with no `lastEventId` cursor, replays the session's `.out` log
+     * from the start - which re-emits already-hydrated turns under their original ids. Set this to make
+     * the mock reproduce that replay honestly. Absent -> reconnect no-ops (returns null), the default
+     * every existing e2e path relies on (E2E arrival streams via `sendMessages`, never a reconnect).
+     */
+    __CHAT_REPLAY__?: ScriptStep[];
   }
 }
 
@@ -69,9 +77,12 @@ export class MockChatTransport implements ChatTransport<UIMessage> {
   };
 
   reconnectToStream = async (): Promise<ReadableStream<UIMessageChunk> | null> => {
-    // E2E arrival is driven by a mount-time send (not a resumed stream), so there is nothing to
-    // reconnect to. The real transport's reconnect (Trigger session.out) is manual-smoke territory.
-    return null;
+    // E2E arrival is driven by a mount-time send (not a resumed stream), so by default there is nothing
+    // to reconnect to. When a test arms `__CHAT_REPLAY__`, replay it as the session's `.out` tail - the
+    // honest way to reproduce the real transport's replay-on-reconnect (which re-delivers hydrated turns).
+    const tail = typeof window !== "undefined" ? window.__CHAT_REPLAY__ : undefined;
+    if (!tail || tail.length === 0) return null;
+    return replay(tail, undefined);
   };
 
   // Session hydration is a no-op in E2E: the mock streams via `sendMessages`, never `reconnectToStream`,
