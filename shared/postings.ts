@@ -84,7 +84,7 @@ export function mapPostingToRow(posting: Posting, ingestedAt: Date): PostingRow 
     experience_level: posting.experienceLevel ?? "",
     salary_min: salary?.normalizedMin ?? null,
     salary_max: salary?.normalizedMax ?? null,
-    salary_currency: salary ? (salary.currency ?? null) : null,
+    salary_currency: salary?.currency ?? null,
     published_at: toChDateTime(posting.publishedAt),
     ingested_at: toChDateTime(ingestedAt),
   };

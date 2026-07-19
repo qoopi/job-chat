@@ -37,12 +37,11 @@ const MIGRATIONS_DIR = join(
 // idempotent (CREATE TABLE IF NOT EXISTS), so this is safe to re-run.
 export async function applyClickhouseMigrations(
   client: ClickHouseClient,
-  dir: string = MIGRATIONS_DIR,
 ): Promise<string[]> {
-  const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
+  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
   for (const file of files) {
     await client.command({
-      query: readFileSync(join(dir, file), "utf8"),
+      query: readFileSync(join(MIGRATIONS_DIR, file), "utf8"),
       clickhouse_settings: { wait_end_of_query: 1 },
     });
   }
