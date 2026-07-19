@@ -6,6 +6,9 @@ const schema = z.object({
   CLICKHOUSE_URL: z.string().min(1),
   CLICKHOUSE_USER: z.string().min(1),
   CLICKHOUSE_PASSWORD: z.string().min(1),
+  // Dedicated read-only user (SELECT on postings only) - the analytics catalog's client.
+  CLICKHOUSE_RO_USER: z.string().min(1),
+  CLICKHOUSE_RO_PASSWORD: z.string().min(1),
   DATABASE_URL: z.string().min(1),
   AWS_REGION: z.string().min(1),
   AWS_ACCESS_KEY_ID: z.string().min(1),

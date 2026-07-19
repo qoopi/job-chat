@@ -6,6 +6,8 @@ const complete: Record<string, string> = {
   CLICKHOUSE_URL: "https://example.clickhouse.cloud:8443",
   CLICKHOUSE_USER: "default",
   CLICKHOUSE_PASSWORD: "secret",
+  CLICKHOUSE_RO_USER: "jobchat_ro",
+  CLICKHOUSE_RO_PASSWORD: "ro_secret",
   DATABASE_URL: "postgres://user:pass@host:5432/jobchat",
   AWS_REGION: "eu-central-1",
   AWS_ACCESS_KEY_ID: "AKIA_TEST",

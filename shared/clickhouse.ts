@@ -13,8 +13,7 @@ const ClickhouseEnvSchema = z.object({
   CLICKHOUSE_PASSWORD: z.string().min(1),
 });
 
-// The ingestion writer path uses the default ClickHouse user. The read-only
-// analytics user (jobchat_ro) arrives with task 003; keep this factory writer-only.
+// The ingestion writer path uses the default ClickHouse user.
 export function createWriterClient(
   source: Record<string, string | undefined> = process.env,
 ): ClickHouseClient {
@@ -23,6 +22,25 @@ export function createWriterClient(
     url: env.CLICKHOUSE_URL,
     username: env.CLICKHOUSE_USER,
     password: env.CLICKHOUSE_PASSWORD,
+  });
+}
+
+// The analytics read path uses the dedicated read-only user `jobchat_ro` (SELECT on postings only).
+// Validates only its own slice (ISP) - CLICKHOUSE_URL + the RO credentials.
+const ClickhouseRoEnvSchema = z.object({
+  CLICKHOUSE_URL: z.string().min(1),
+  CLICKHOUSE_RO_USER: z.string().min(1),
+  CLICKHOUSE_RO_PASSWORD: z.string().min(1),
+});
+
+export function createReadOnlyClient(
+  source: Record<string, string | undefined> = process.env,
+): ClickHouseClient {
+  const env = ClickhouseRoEnvSchema.parse(source);
+  return createClient({
+    url: env.CLICKHOUSE_URL,
+    username: env.CLICKHOUSE_RO_USER,
+    password: env.CLICKHOUSE_RO_PASSWORD,
   });
 }
 
