@@ -1,6 +1,6 @@
 import { DataInsightSchema, type ChartType, type DataInsight, type DataPoint } from "@shared/insight";
 import type { QueryResult, TemplateName } from "@shared/analytics";
-import type { Store } from "@shared/store";
+import type { MessageRole, Store } from "@shared/store";
 import { MAX_INPUT_CHARS, type GuardRefusal } from "./guard";
 
 // The agent's part vocabulary: turning an analytics QueryResult into the ONE `data-insight` part per
@@ -274,7 +274,31 @@ function userMessageText(content: unknown): string {
 }
 
 /** A run's reconstructed history is model messages - only the role + user text matter for persistence. */
-type RunMessage = { role: string; content?: unknown };
+export type RunMessage = { role: string; content?: unknown };
+
+/** A model-input message: role + text content - the alternating history the model replays each turn. */
+export type ModelMessage = { role: MessageRole; content: string };
+
+/**
+ * Rebuild the model-input history for a turn from the store's persisted conversation - the SOURCE OF
+ * TRUTH (004 round 4 fix). The SDK reconstructs its cross-turn model input from the durable session
+ * replay, which across a continuation boot carries the prior USER messages but NOT their ASSISTANT
+ * answers; the model then sees a pile of unanswered questions and re-answers every one. Postgres holds
+ * the full, correct history (persisted by `startConversation`, `persistIncomingUserTurns`, and
+ * `persistAssistantTurn`), so the durable run rebuilds the model input from it instead of trusting the
+ * SDK replay - turn N gets the full alternating user+assistant history with the newest user message as
+ * the sole trailing turn.
+ *
+ * Only role + text `content` reach the model (the card payload is a UI artifact, and each assistant
+ * verdict already carries its headline number in prose, so plain text is a faithful, compact record of
+ * what the assistant said). Empty-content rows are dropped so a refused/errored turn - persisted with
+ * empty content - never emits an invalid empty model message.
+ */
+export function buildModelHistory(messages: { role: MessageRole; content: string }[]): ModelMessage[] {
+  return messages
+    .filter((m) => m.content.trim().length > 0)
+    .map((m) => ({ role: m.role, content: m.content }));
+}
 
 /**
  * Persist the newly-arrived user turn(s) present in the run's reconstructed `messages` but not yet in
