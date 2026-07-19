@@ -8,10 +8,10 @@ import { createAnalytics, type Analytics } from "@shared/analytics";
 import { createStore, type Store } from "@shared/store";
 import { getAgentLimits, getGuardConfig } from "@shared/env";
 import { AGENT_ID } from "./agent-id";
-import { checkConversationGuards } from "./guard";
 import { ADVISER_V1 } from "./prompts/adviser-v1";
 import { buildCatalogTools, type EmitPart } from "./tools";
-import { persistAssistantTurn, persistIncomingUserTurns, refusalPart } from "./parts";
+import { persistAssistantTurn } from "./parts";
+import { createChatRun, type StreamModelArgs } from "./run";
 
 // The conversation loop: ONE durable Trigger.dev chat.agent per conversation (keyed on chatId = our
 // conversation id). Bedrock runs the eu. Claude sonnet inference profile; the catalog tools are the
@@ -53,44 +53,37 @@ async function withStore<T>(fn: (store: Store) => Promise<T>): Promise<T> {
   }
 }
 
+// The model seam (real path): stream the rebuilt history to Bedrock. The orchestration - persist the
+// incoming turn, apply the cap/budget/size backstop, and REBUILD the model input from the store so the
+// model sees the full alternating history (004 round 4) - lives in `createChatRun` (trigger/run.ts),
+// with this as the injected model. `chat.toStreamTextOptions` contributes prepareStep (compaction /
+// background injection); our explicit system + rebuilt `messages` win after the spread (the app never
+// calls `chat.prompt.set()`, so the SDK sets neither).
+const streamModel = ({ system, messages, tools, signal }: StreamModelArgs) =>
+  streamText({
+    ...chat.toStreamTextOptions({ tools }),
+    model,
+    system,
+    messages,
+    tools,
+    abortSignal: signal,
+    stopWhen: stepCountIs(AGENT_LIMITS.maxSteps),
+  });
+
+const chatRun = createChatRun({
+  withStore,
+  guards: getGuardConfig(),
+  emit,
+  now: () => new Date(),
+  system: ADVISER_V1,
+  streamModel,
+});
+
 export const jobChatAgent = chat.agent({
   id: AGENT_ID,
   maxTurns: AGENT_LIMITS.maxTurns,
   tools: () => buildCatalogTools({ analytics: analytics(), emit }),
-  run: async ({ chatId, messages, tools, signal }) => {
-    // Persist the newly-arrived user turn(s) BEFORE the guard counts them, then apply the backstop -
-    // both on ONE connection so the persist-then-count ordering is atomic. Mechanism (a): a follow-up
-    // is delivered by the client transport's `sendMessages` (deliver+watch, the only SDK path that
-    // streams a freshly-triggered turn live), NOT by the server action, so `run()` is the single
-    // persist site (no-op on turn-1 arrival + regenerate; see persistIncomingUserTurns).
-    //
-    // The hard backstop (AC-15 cap / AC-20 daily budget / input size) on the token's REAL path to
-    // Bedrock: the browser holds a write-scoped session token and the standard transport appends
-    // follow-ups straight to the inbox, bypassing the server action's early refusal. So the guards -
-    // counted via the store, same as the action - MUST also hold here. `persistIncomingUserTurns`
-    // refuses an over-length turn ("too_long") before it persists or the model runs; the cap/budget
-    // guard then counts the now-persisted turn. Any refusal: stream a taxonomized refusal part (006
-    // renders it like an action refusal) and return WITHOUT calling the model, so a guest can never
-    // drive Bedrock past the cap/budget or with an unbounded payload.
-    const refusal = await withStore(async (store) => {
-      const tooLong = await persistIncomingUserTurns(store, chatId, messages);
-      if (tooLong) return tooLong;
-      return checkConversationGuards({ store, guards: getGuardConfig(), now: () => new Date() }, chatId);
-    });
-    if (refusal) {
-      emit(refusalPart(crypto.randomUUID(), refusal));
-      return;
-    }
-    return streamText({
-      ...chat.toStreamTextOptions({ tools }),
-      model,
-      system: ADVISER_V1,
-      messages,
-      tools,
-      abortSignal: signal,
-      stopWhen: stepCountIs(AGENT_LIMITS.maxSteps),
-    });
-  },
+  run: (payload) => chatRun(payload),
   // Persist the assistant turn on completion. Fires for stopped turns too (responseMessage has its
   // aborted parts cleaned up), which is how a stopped answer's partial card survives to resume -
   // verified live, see the epic decision log (no client-snapshot fallback needed).
