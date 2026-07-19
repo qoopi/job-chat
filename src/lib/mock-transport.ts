@@ -1,0 +1,76 @@
+"use client";
+
+import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
+
+// The E2E transport. `useChat` accepts any `ChatTransport`; in E2E mode we swap the real Trigger.dev
+// transport for this one, which replays a scripted `UIMessageChunk` sequence the Playwright spec pins
+// on `window.__CHAT_SCRIPT__` before each send. That keeps the whole client loop (streaming, skeleton
+// reconciliation, stop, retry) exercisable against the built app with ZERO Trigger.dev / Bedrock calls
+// - the one thing the automated suite must never touch. The real integration is the manual smoke.
+
+export interface ScriptStep {
+  chunk: UIMessageChunk;
+  /** Wait this long (ms) BEFORE emitting the chunk - lets a spec observe the skeleton / stop mid-stream. */
+  delayMs?: number;
+}
+
+declare global {
+  interface Window {
+    /** The next turn's chunk script (consumed by `sendMessages`). Set by the e2e spec before a send. */
+    __CHAT_SCRIPT__?: ScriptStep[];
+  }
+}
+
+function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
+function replay(script: ScriptStep[], signal: AbortSignal | undefined): ReadableStream<UIMessageChunk> {
+  return new ReadableStream<UIMessageChunk>({
+    async start(controller) {
+      for (const step of script) {
+        if (signal?.aborted) break; // stop() aborts: leave the partial answer already enqueued (AC-9)
+        if (step.delayMs) await abortableSleep(step.delayMs, signal);
+        if (signal?.aborted) break;
+        controller.enqueue(step.chunk);
+      }
+      controller.close();
+    },
+  });
+}
+
+/** A tiny default so a bare send still streams a visible answer if a spec forgot to set a script. */
+const DEFAULT_SCRIPT: ScriptStep[] = [
+  { chunk: { type: "start" } as UIMessageChunk },
+  { chunk: { type: "text-start", id: "t" } as UIMessageChunk },
+  { chunk: { type: "text-delta", id: "t", delta: "OK." } as UIMessageChunk },
+  { chunk: { type: "text-end", id: "t" } as UIMessageChunk },
+  { chunk: { type: "finish" } as UIMessageChunk },
+];
+
+export class MockChatTransport implements ChatTransport<UIMessage> {
+  private next(): ScriptStep[] {
+    return (typeof window !== "undefined" && window.__CHAT_SCRIPT__) || DEFAULT_SCRIPT;
+  }
+
+  sendMessages = async (options: { abortSignal?: AbortSignal }): Promise<ReadableStream<UIMessageChunk>> => {
+    return replay(this.next(), options.abortSignal);
+  };
+
+  reconnectToStream = async (): Promise<ReadableStream<UIMessageChunk> | null> => {
+    // E2E arrival is driven by a mount-time send (not a resumed stream), so there is nothing to
+    // reconnect to. The real transport's reconnect (Trigger session.out) is manual-smoke territory.
+    return null;
+  };
+}

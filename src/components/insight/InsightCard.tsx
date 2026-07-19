@@ -40,9 +40,11 @@ function freshness(chTs: string): string {
 export function InsightCard({
   insight,
   usedFollowups = [],
+  onFollowup,
 }: {
   insight: DataInsight;
   usedFollowups?: string[];
+  onFollowup?: (text: string) => void;
 }) {
   const isChart = insight.kind === "chart";
   const [tab, setTab] = useState<Tab>(isChart ? "chart" : "table");
@@ -110,7 +112,13 @@ export function InsightCard({
           {insight.followups.map((f) => {
             const used = usedFollowups.includes(f);
             return (
-              <button key={f} className="chip" type="button" disabled={used}>
+              <button
+                key={f}
+                className="chip"
+                type="button"
+                disabled={used}
+                onClick={() => onFollowup?.(f)}
+              >
                 {used ? `${f} ✓` : f}
               </button>
             );

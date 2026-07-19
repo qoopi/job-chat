@@ -3,12 +3,12 @@ import { errorCopy, refusalCopy, type ErrorKind, type RefusalReason } from "@/li
 
 // AC-10 error card: compact message + Retry (re-runs the same question). Distinct copy for a system
 // failure vs an unanswerable question; never a stack trace. Retry is inert here - 006 wires it.
-export function ErrorCard({ kind }: { kind: ErrorKind }) {
+export function ErrorCard({ kind, onRetry }: { kind: ErrorKind; onRetry?: () => void }) {
   return (
     <div className="err-card">
       <InfoIcon />
       {errorCopy(kind)}
-      <button className="btn btn-outline btn-sm" type="button">
+      <button className="btn btn-outline btn-sm" type="button" onClick={() => onRetry?.()}>
         Retry
       </button>
     </div>

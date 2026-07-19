@@ -1,16 +1,11 @@
 import Link from "next/link";
-import { SendIcon } from "@/components/icons";
+import { LandingComposer } from "@/components/landing/LandingComposer";
 import { GITHUB_URL, HACKATHON_URL, SEARCHNAPPLY_URL } from "@/lib/links";
+import { isE2E } from "@/lib/e2e";
 
-// Landing (mock 4b) - product in one shell-colored screen. The form and chips submit the first message
-// and hand off to the chat (006 wires the handoff; inert here). AC-19: credit links live here - the
-// hackathon credit in the header, GitHub + searchnapply in the footer.
-const CHIPS = [
-  "Find me a job that fits",
-  "Median salary for a Data Engineer in SF",
-  "Top companies hiring right now",
-];
-
+// Landing (mock 4b) - product in one shell-colored screen. The ask box + chips (LandingComposer) submit
+// the first message and hand off to the chat with the stream already attached (AC-3). AC-19: credit
+// links live here - the hackathon credit in the header, GitHub + searchnapply in the footer.
 export default function Landing() {
   return (
     <div
@@ -82,34 +77,7 @@ export default function Landing() {
           Ask a question, get a verdict with a chart — from 3,483 live postings. Add your resume
           and it finds the roles that fit you.
         </p>
-        <div style={{ width: "100%", maxWidth: 560, marginTop: 10 }}>
-          <div className="input-bar focused" style={{ padding: "12px 12px 12px 18px" }}>
-            <textarea rows={1} aria-label="What are you looking for" placeholder="What are you looking for?" />
-            <button className="send" type="button" aria-label="Send" style={{ width: 38, height: 38 }}>
-              <SendIcon size={16} />
-            </button>
-          </div>
-        </div>
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-            justifyContent: "center",
-            maxWidth: 640,
-          }}
-        >
-          {CHIPS.map((c) => (
-            <button
-              key={c}
-              className="chip"
-              type="button"
-              style={{ background: "transparent", borderColor: "var(--shell-border)", color: "var(--shell-fg)" }}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
+        <LandingComposer e2e={isE2E()} />
       </main>
 
       {/* footer credits: GitHub + searchnapply */}

@@ -6,6 +6,7 @@ import { auth } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore } from "@shared/store";
 import { getGuardConfig } from "@shared/env";
+import { isE2E } from "@/lib/e2e";
 import { AGENT_ID } from "../../trigger/agent-id";
 import {
   chatTokenScopes,
@@ -67,6 +68,9 @@ export async function ensureGuest(): Promise<string> {
       maxAge: GUEST_COOKIE_MAX_AGE,
     });
   }
+  // E2E has no Postgres: the cookie is the AC-12 slice under test; the users-row half is covered by the
+  // store/session integration tests against real PG.
+  if (isE2E()) return guestId;
   await createStore(sql()).getOrCreateUser(guestId);
   return guestId;
 }
