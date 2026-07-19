@@ -38,6 +38,16 @@ function chStr(value: string): string {
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
+/**
+ * Escape LIKE/ILIKE metacharacters (`%`, `_`) in a free-text search value so they match literally
+ * instead of acting as wildcards (`a_b` must not match "axb", `50%` must not match anything after
+ * "50"). Applied BEFORE the `%...%` substring wrapping - the outer `%` stay wildcards. ClickHouse's
+ * LIKE escape char is backslash; chStr then doubles it for the string-literal layer.
+ */
+function likeEscape(value: string): string {
+  return value.replace(/[%_]/g, "\\$&");
+}
+
 function whereClause(filters: string[]): string {
   return filters.length ? `WHERE ${filters.join(" AND ")}` : "";
 }
@@ -47,7 +57,7 @@ function assemble(lines: string[]): string {
 }
 
 function roleFilter(role: string): string {
-  return `title ILIKE ${chStr(`%${role}%`)}`;
+  return `title ILIKE ${chStr(`%${likeEscape(role)}%`)}`;
 }
 
 function trendWindow(table: string, days: number): string {
@@ -203,7 +213,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
     case "latest_postings": {
       const p = LatestPostingsParams.parse(rawParams);
       const filters: string[] = [];
-      if (p.company) filters.push(`company ILIKE ${chStr(`%${p.company}%`)}`);
+      if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
       if (p.level) filters.push(`experience_level = ${chStr(p.level)}`);
       const where = whereClause(filters);
       const sql = assemble([

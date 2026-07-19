@@ -63,6 +63,21 @@ describe("buildTemplateSql", () => {
     expect(sql).toContain("company ILIKE '%x\\' OR \\'1\\'=\\'1%'");
   });
 
+  // LIKE metacharacters in a free-text param would otherwise act as wildcards: `a_b` (role) would
+  // match "axb", `50%` (company) would match anything starting "50". These come from the agent's
+  // free-text tool call, so they must match literally. Escape `%`/`_` (backslash-prefixed) BEFORE
+  // the `%...%` substring wrapping; chStr then doubles the backslash for the string-literal layer,
+  // so a literal underscore lands as `\\_` in the emitted SQL. The outer `%` stay as wildcards.
+  it("escapes an underscore in a role param so it matches literally (not a LIKE wildcard)", () => {
+    const { sql } = buildTemplateSql("salary_distribution", { role: "a_b" }, "postings");
+    expect(sql).toContain("title ILIKE '%a\\\\_b%'");
+  });
+
+  it("escapes a percent in a company param so it matches literally (not a LIKE wildcard)", () => {
+    const { sql } = buildTemplateSql("latest_postings", { company: "50%" }, "postings");
+    expect(sql).toContain("company ILIKE '%50\\\\%%'");
+  });
+
   it("rejects invalid params via Zod at the boundary", () => {
     expect(() => buildTemplateSql("salary_compare", { cities: ["SF"] }, "postings")).toThrow(); // needs 2
     expect(() => buildTemplateSql("postings_trend", { days: 0 }, "postings")).toThrow(); // positive
