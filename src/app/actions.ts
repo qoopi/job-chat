@@ -62,6 +62,17 @@ function service() {
   });
 }
 
+/**
+ * Read the guest cookie WITHOUT the `getOrCreateUser` upsert - for actions where the caller must
+ * already exist (a follow-up send / a token re-mint on an owned conversation). No cookie means the
+ * caller owns nothing, so the action's ownership check would refuse anyway; we short-circuit to the
+ * same `not_found` and skip both a wasted cookie mint and a redundant users-row write. The upsert
+ * stays on `ensureGuest` (the first-contact / landing path that also mints the cookie).
+ */
+async function guestIdFromCookie(): Promise<string | undefined> {
+  return (await cookies()).get(GUEST_COOKIE)?.value;
+}
+
 /** AC-12: first visit mints an httpOnly cookie guest id with a users row; returns the guest id. */
 export async function ensureGuest(): Promise<string> {
   const jar = await cookies();
@@ -91,7 +102,8 @@ export async function startConversation(question: string): Promise<SessionResult
 
 /** Follow-up send: input-bounded, ownership-checked, cap (AC-15) + daily-budget (AC-20) guarded. */
 export async function sendMessage(conversationId: string, text: string): Promise<SessionResult> {
-  const guestId = await ensureGuest();
+  const guestId = await guestIdFromCookie();
+  if (!guestId) return { ok: false, reason: "not_found" };
   return service().sendMessage(conversationId, text, guestId);
 }
 
@@ -100,6 +112,7 @@ export async function sendMessage(conversationId: string, text: string): Promise
  * OWN conversation (typed `not_found` otherwise, so one guest's token never grants another's session).
  */
 export async function mintChatToken(conversationId: string): Promise<MintResult> {
-  const guestId = await ensureGuest();
+  const guestId = await guestIdFromCookie();
+  if (!guestId) return { ok: false, reason: "not_found" };
   return service().mintChatToken(conversationId, guestId);
 }
