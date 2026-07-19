@@ -31,6 +31,25 @@ export function formatUsd(value: number): string {
   return `$${n}`;
 }
 
+/**
+ * Data-freshness label ("just now" / "5m ago" / "3h ago" / "2d ago") from a ClickHouse timestamp.
+ * Returns "" when the timestamp is unparseable OR clearly a placeholder (pre-2000): `max(ingested_at)`
+ * over an EMPTY result set comes back as the 1970 epoch, which must never render as "20654d ago". The
+ * source line is also suppressed entirely when sampleN is 0 (see InsightCard) - this is the second line
+ * of defense so any pre-2000 timestamp is dropped even where a count is shown.
+ */
+export function freshnessLabel(chTs: string): string {
+  const parsed = Date.parse(chTs.includes("T") ? chTs : `${chTs.replace(" ", "T")}Z`);
+  if (Number.isNaN(parsed)) return "";
+  if (parsed < Date.UTC(2000, 0, 1)) return ""; // epoch / placeholder over 0 rows
+  const mins = Math.round((Date.now() - parsed) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
 function isNumeric(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }

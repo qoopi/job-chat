@@ -3,6 +3,7 @@ import {
   errorCopy,
   refusalCopy,
   formatUsd,
+  freshnessLabel,
   labelKeyOf,
   valueKeyOf,
   valueKeysOf,
@@ -44,6 +45,26 @@ describe("formatUsd (verdict/axis money - numbers are the heroes)", () => {
   });
   it("renders sub-thousand values in full", () => {
     expect(formatUsd(750)).toBe("$750");
+  });
+});
+
+describe("freshnessLabel (data-freshness source line - never a placeholder epoch)", () => {
+  it("returns empty for the 1970 epoch (max(ingested_at) over 0 rows) - no '20654d ago'", () => {
+    expect(freshnessLabel("1970-01-01 00:00:00")).toBe("");
+  });
+  it("returns empty for any pre-2000 placeholder timestamp", () => {
+    expect(freshnessLabel("1999-12-31 23:59:59")).toBe("");
+  });
+  it("returns empty for an unparseable timestamp", () => {
+    expect(freshnessLabel("not-a-date")).toBe("");
+  });
+  it("labels a very recent timestamp as 'just now'", () => {
+    expect(freshnessLabel(new Date(Date.now() - 10_000).toISOString())).toBe("just now");
+  });
+  it("labels minutes, hours, and days relative to now", () => {
+    expect(freshnessLabel(new Date(Date.now() - 5 * 60_000).toISOString())).toBe("5m ago");
+    expect(freshnessLabel(new Date(Date.now() - 3 * 3_600_000).toISOString())).toBe("3h ago");
+    expect(freshnessLabel(new Date(Date.now() - 2 * 86_400_000).toISOString())).toBe("2d ago");
   });
 });
 

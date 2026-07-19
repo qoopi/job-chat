@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { DataInsight } from "@shared/insight";
-import { splitFirstNumber } from "@/lib/insight-format";
+import { freshnessLabel, splitFirstNumber } from "@/lib/insight-format";
 import { InsightChart } from "./charts/InsightChart";
 import { DataTable } from "./charts/DataTable";
 import { CodeBlock } from "./CodeBlock";
@@ -26,17 +26,6 @@ function Verdict({ text }: { text: string }) {
   );
 }
 
-function freshness(chTs: string): string {
-  const parsed = Date.parse(chTs.includes("T") ? chTs : `${chTs.replace(" ", "T")}Z`);
-  if (Number.isNaN(parsed)) return "";
-  const mins = Math.round((Date.now() - parsed) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.round(hrs / 24)}d ago`;
-}
-
 export function InsightCard({
   insight,
   usedFollowups = [],
@@ -51,7 +40,10 @@ export function InsightCard({
   const [sqlOpen, setSqlOpen] = useState(false);
 
   const rows = isChart ? insight.series : insight.rows;
-  const rel = freshness(insight.meta.updatedAt);
+  // Suppress the whole source line on an empty (sampleN 0) result: no "0 postings", no epoch freshness.
+  // A real answer always has sampleN > 0; this is defensive - an empty result now renders no card at all.
+  const showSource = insight.meta.sampleN > 0;
+  const rel = freshnessLabel(insight.meta.updatedAt);
 
   // A stable element reference (keyed on the insight identity, not on tab/sqlOpen) so React bails out
   // of re-rendering the Recharts subtree when only the Show-query reveal toggles.
@@ -124,15 +116,17 @@ export function InsightCard({
             );
           })}
         </div>
-        <span className="src">
-          {insight.meta.sampleN.toLocaleString()} postings
-          {/* freshness is Date.now()-relative, so a server/client render straddling a minute boundary
-             would mismatch on hydration - suppress the (benign) warning on just this text. */}
-          <span suppressHydrationWarning>{rel ? ` — updated ${rel}` : ""}</span> ·{" "}
-          <button className="src-link" type="button" onClick={() => setSqlOpen((v) => !v)}>
-            {sqlOpen ? "Hide query" : "Show query"}
-          </button>
-        </span>
+        {showSource ? (
+          <span className="src">
+            {insight.meta.sampleN.toLocaleString()} postings
+            {/* freshness is Date.now()-relative, so a server/client render straddling a minute boundary
+               would mismatch on hydration - suppress the (benign) warning on just this text. */}
+            <span suppressHydrationWarning>{rel ? ` — updated ${rel}` : ""}</span> ·{" "}
+            <button className="src-link" type="button" onClick={() => setSqlOpen((v) => !v)}>
+              {sqlOpen ? "Hide query" : "Show query"}
+            </button>
+          </span>
+        ) : null}
       </div>
     </div>
   );
