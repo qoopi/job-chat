@@ -50,6 +50,12 @@ export interface Store {
   getConversation(
     conversationId: string,
   ): Promise<{ conversation: Conversation; messages: Message[] } | null>;
+  /**
+   * The conversation's owner id, or `null` for an unknown/malformed id. A lightweight
+   * authorization + guard lookup - one indexed row, no message history (contrast `getConversation`,
+   * which loads the full, unbounded thread).
+   */
+  getConversationOwner(conversationId: string): Promise<{ user_id: string } | null>;
   /** Count user-turn messages since `sinceUtcMidnight`. No `userId` => global (the daily budget). */
   messageCounts(args: { userId?: string; sinceUtcMidnight: Date }): Promise<number>;
 }
@@ -110,6 +116,15 @@ export function createStore(sql: Sql): Store {
         FROM messages WHERE conversation_id = ${conversationId}
         ORDER BY created_at ASC, id ASC`;
       return { conversation: conversations[0], messages: [...messages] };
+    },
+
+    async getConversationOwner(conversationId) {
+      // Same "null = not found" contract as getConversation (malformed id reads as not found), but
+      // one row and no message join - the authorization + guard path never needs the history.
+      if (!UUID_RE.test(conversationId)) return null;
+      const rows = await sql<{ user_id: string }[]>`
+        SELECT user_id FROM conversations WHERE id = ${conversationId}`;
+      return rows.length === 0 ? null : { user_id: rows[0].user_id };
     },
 
     async messageCounts({ userId, sinceUtcMidnight }) {

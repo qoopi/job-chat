@@ -7,6 +7,7 @@ import {
   chartTypeFor,
   errorPart,
   extractAssistantPersistence,
+  refusalPart,
   toModelOutput,
 } from "../../trigger/parts";
 
@@ -58,6 +59,16 @@ describe("buildInsight produces a strict-valid data-insight with the headline va
     expect(insight.verdict).toContain("San Francisco");
     expect(insight.verdict).toContain("180000");
     if (insight.kind === "chart") expect(insight.chartType).toBe("bars");
+  });
+
+  // Honesty nit: with only one city row (the other city had no salaried postings) there was no
+  // comparison, so the verdict must NOT claim one city "pays more" than an absent other.
+  it("salary_compare stays honest on a single city row - no false 'pays more' comparison", () => {
+    const r = result([{ city: "San Francisco", median: 180000, n: 3 }], 3);
+    const insight = buildInsight({ id: "m2b", tool: "salary_compare", params: {}, result: r });
+    expect(insight.verdict).not.toContain("pays more");
+    expect(insight.verdict).toContain("San Francisco");
+    expect(insight.verdict).toContain("180000");
   });
 
   it("postings_trend -> trend, total count in the verdict", () => {
@@ -142,6 +153,21 @@ describe("errorPart carries the taxonomy kind for the UI to copy (AC-10)", () =>
   });
 });
 
+describe("refusalPart carries the guard reason for the UI to render like an action refusal (AC-15/AC-20)", () => {
+  it("emits guest_cap vs daily_budget reasons on a distinct data-refusal part", () => {
+    expect(refusalPart("m1", "guest_cap")).toEqual({
+      type: "data-refusal",
+      id: "m1",
+      data: { reason: "guest_cap" },
+    });
+    expect(refusalPart("m1", "daily_budget")).toEqual({
+      type: "data-refusal",
+      id: "m1",
+      data: { reason: "daily_budget" },
+    });
+  });
+});
+
 describe("extractAssistantPersistence pulls the persisted content + card payload (AC-13)", () => {
   it("joins text parts and keeps the single data-insight payload", () => {
     const insight = buildInsight({
@@ -185,5 +211,40 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
     const { content, parts } = extractAssistantPersistence(message);
     expect(content).toBe("Two words.");
     expect(parts).toBeNull();
+  });
+
+  // AC-10/AC-13 regression: on a tool failure the tool emits a loading skeleton then a data-error
+  // under the SAME id. The persisted card must be the ERROR marker, never the stuck loading skeleton
+  // (which would resume as a spinner that never resolves and lose the error).
+  it("persists the error marker, not the loading skeleton, when a tool fails", () => {
+    const message = {
+      role: "assistant",
+      parts: [
+        { type: "data-insight", id: "call-1", data: buildSkeleton("call-1", "salary_distribution") },
+        { type: "data-error", id: "call-1", data: { kind: "system" } },
+      ],
+    };
+    const { parts } = extractAssistantPersistence(message);
+    expect(parts).toEqual({ kind: "system" });
+  });
+
+  // Defensive: a skeleton that was never superseded (neither filled nor errored) is dropped rather
+  // than persisted, so resume never restores a stuck spinner.
+  it("drops an orphan loading skeleton rather than persisting it", () => {
+    const message = {
+      role: "assistant",
+      parts: [{ type: "data-insight", id: "x", data: buildSkeleton("x", "top_companies") }],
+    };
+    expect(extractAssistantPersistence(message).parts).toBeNull();
+  });
+
+  // A guard refusal (cap/budget) streamed by the agent backstop persists as its marker, so a returning
+  // guest still sees the polite limit notice rather than an empty assistant turn.
+  it("persists a refusal marker from the agent backstop", () => {
+    const message = {
+      role: "assistant",
+      parts: [{ type: "data-refusal", id: "r1", data: { reason: "guest_cap" } }],
+    };
+    expect(extractAssistantPersistence(message).parts).toEqual({ reason: "guest_cap" });
   });
 });

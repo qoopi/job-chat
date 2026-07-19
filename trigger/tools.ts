@@ -11,6 +11,7 @@ import {
   errorPart,
   toModelOutput,
   type ErrorPart,
+  type RefusalPart,
 } from "./parts";
 
 // The agent's tool catalog: one tool per question shape, each a thin wrapper over analytics.runQuery
@@ -45,8 +46,10 @@ const DESCRIPTIONS: Record<TemplateName, string> = {
 };
 
 export type InsightPart = { type: "data-insight"; id: string; data: unknown };
-export type EmitPart = InsightPart | ErrorPart;
-export type { ErrorPart };
+// Every part the agent writes to the chat stream: the tools emit insight/error; the run-level guard
+// backstop emits refusal (below).
+export type EmitPart = InsightPart | ErrorPart | RefusalPart;
+export type { ErrorPart, RefusalPart };
 export type Emit = (part: EmitPart) => void;
 
 export interface CatalogDeps {
@@ -70,8 +73,11 @@ function catalogTool(name: TemplateName, deps: CatalogDeps) {
         const insight = buildInsight({ id, tool: name, params, result });
         deps.emit({ type: "data-insight", id, data: insight });
         return toModelOutput(insight);
-      } catch {
+      } catch (err) {
         // Never leak the raw error to the model or the user (AC-10) - tag it `system` and move on.
+        // But DO log it server-side (Trigger.dev captures console.error) so a prod failure is not
+        // invisible when the user only ever sees the taxonomized card.
+        console.error(`[catalog:${name}] query failed`, err);
         deps.emit(errorPart(id, "system"));
         return { error: "The query failed - tell the user something went wrong and to try again." };
       }

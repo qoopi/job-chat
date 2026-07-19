@@ -76,6 +76,15 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     expect(await store.getConversation("123")).toBeNull();
   });
 
+  // The lightweight owner lookup backing authorization + the agent guard: one row, no history.
+  it("getConversationOwner returns the owner id, or null for missing/malformed ids", async () => {
+    await store.getOrCreateUser(guestId);
+    const conv = await store.createConversation(guestId, "Who owns this?");
+    expect(await store.getConversationOwner(conv.id)).toEqual({ user_id: guestId });
+    expect(await store.getConversationOwner(crypto.randomUUID())).toBeNull(); // unknown
+    expect(await store.getConversationOwner("not-a-uuid")).toBeNull(); // malformed, not a DB error
+  });
+
   it("messageCounts scopes to a user (cap) and aggregates globally (daily budget)", async () => {
     const freshGuest = `test-guest-${crypto.randomUUID()}`;
     await store.getOrCreateUser(freshGuest);

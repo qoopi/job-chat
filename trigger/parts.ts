@@ -1,6 +1,7 @@
 import { DataInsightSchema, type ChartType, type DataInsight, type DataPoint } from "@shared/insight";
 import type { QueryResult, TemplateName } from "@shared/analytics";
 import type { Store } from "@shared/store";
+import type { GuardRefusal } from "./guard";
 
 // The agent's part vocabulary: turning an analytics QueryResult into the ONE `data-insight` part per
 // answer (built via the strict shared insight schema), the loading skeleton written before the tool
@@ -45,7 +46,11 @@ function verdictFor(tool: TemplateName, rows: Record<string, unknown>[], params:
     case "salary_distribution":
       return `The median salary is ${num(top.median)} across ${sampleN} postings.`;
     case "salary_compare":
-      return `${String(top.city)} pays more, with a median of ${num(top.median)}.`;
+      // With a single city row (the other city had no salaried postings) there is no comparison to
+      // report, so state the one median plainly rather than claiming it "pays more" than an absent one.
+      return rows.length < 2
+        ? `The median salary in ${String(top.city)} is ${num(top.median)}.`
+        : `${String(top.city)} pays more, with a median of ${num(top.median)}.`;
     case "postings_trend": {
       const total = rows.reduce((sum, r) => sum + num(r.count), 0);
       const days = (params as { days?: number })?.days;
@@ -143,14 +148,44 @@ export function errorPart(id: string, kind: AgentErrorKind): ErrorPart {
   return { type: "data-error", id, data: { kind } };
 }
 
+export interface RefusalPart {
+  type: "data-refusal";
+  id: string;
+  data: { reason: GuardRefusal };
+}
+
+/**
+ * The guard refusal part (AC-15 cap / AC-20 daily budget), streamed by the agent-side backstop when
+ * a turn is over the limit. A DISTINCT taxonomy from `data-error`: not a failure, but a polite limit
+ * - the client renders it like the server action's typed refusal, not the error card.
+ */
+export function refusalPart(id: string, reason: GuardRefusal): RefusalPart {
+  return { type: "data-refusal", id, data: { reason } };
+}
+
 type MessagePartLike = { type: string; text?: string; id?: string; data?: unknown };
 type MessageLike = { parts?: MessagePartLike[] };
 
+// A persisted card payload is a strict-valid insight, an error marker, or a refusal marker - anything
+// else (notably a loading skeleton, whose `status:"loading"` fails every branch) is dropped so a
+// failed/refused turn never resumes as a stuck spinner.
+function isPersistablePayload(data: unknown): boolean {
+  if (DataInsightSchema.safeParse(data).success) return true;
+  if (typeof data !== "object" || data === null) return false;
+  const d = data as Record<string, unknown>;
+  if (d.kind === "system" || d.kind === "unanswerable") return true; // error marker
+  if (d.reason === "guest_cap" || d.reason === "daily_budget") return true; // refusal marker
+  return false;
+}
+
 /**
  * Extract the persisted assistant content + card payload from a completed turn's response message.
- * Text parts are joined; `data-insight` parts are de-duped by id (last write wins, so a skeleton is
- * superseded by its filled part) and returned as the payload (single object for the usual one-card
- * answer, array if several, `null` for a plain text-only answer). AC-13 resume source.
+ * Text parts are joined; the card parts (`data-insight`, `data-error`, `data-refusal`) are de-duped
+ * by id - last write wins, so a skeleton is superseded by its filled insight (success) or by the
+ * error/refusal emitted under the same id (failure). Loading skeletons that were never superseded are
+ * then dropped (they fail `isPersistablePayload`), so a failed or refused turn resumes as its error /
+ * refusal card, never a stuck skeleton. Payload: a single object for the usual one-card answer, an
+ * array if several, `null` for a plain text-only answer. AC-13 resume source.
  */
 export function extractAssistantPersistence(message: MessageLike): {
   content: string;
@@ -166,10 +201,12 @@ export function extractAssistantPersistence(message: MessageLike): {
   const byId = new Map<string, unknown>();
   let anon = 0;
   for (const p of parts) {
-    if (p.type === "data-insight") byId.set(p.id ?? `#${anon++}`, p.data);
+    if (p.type === "data-insight" || p.type === "data-error" || p.type === "data-refusal") {
+      byId.set(p.id ?? `#${anon++}`, p.data);
+    }
   }
-  const insights = [...byId.values()];
-  const payload = insights.length === 0 ? null : insights.length === 1 ? insights[0] : insights;
+  const payloads = [...byId.values()].filter(isPersistablePayload);
+  const payload = payloads.length === 0 ? null : payloads.length === 1 ? payloads[0] : payloads;
   return { content, parts: payload };
 }
 

@@ -5,19 +5,21 @@ import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 import postgres from "postgres";
 import { createReadOnlyClient } from "@shared/clickhouse";
 import { createAnalytics, type Analytics } from "@shared/analytics";
-import { createStore } from "@shared/store";
-import { getAgentLimits } from "@shared/env";
+import { createStore, type Store } from "@shared/store";
+import { getAgentLimits, getGuardConfig } from "@shared/env";
+import { AGENT_ID } from "./agent-id";
+import { checkConversationGuards } from "./guard";
 import { ADVISER_V1 } from "./prompts/adviser-v1";
 import { buildCatalogTools, type EmitPart } from "./tools";
-import { persistAssistantTurn } from "./parts";
+import { persistAssistantTurn, refusalPart } from "./parts";
 
 // The conversation loop: ONE durable Trigger.dev chat.agent per conversation (keyed on chatId = our
 // conversation id). Bedrock runs the eu. Claude sonnet inference profile; the catalog tools are the
 // only path to ClickHouse; each data answer streams one `data-insight` part; and every completed
-// turn (normal OR stopped) persists the assistant message for resume (AC-13). Guards: maxTurns +
-// per-step ceiling from env (AC-17).
+// turn (normal OR stopped) persists the assistant message for resume (AC-13). Guards: the cap/budget
+// backstop (below), maxTurns + per-step ceiling from env (AC-17).
 
-export const AGENT_ID = "job-chat-agent";
+export { AGENT_ID };
 export const AGENT_LIMITS = getAgentLimits();
 
 // Bedrock via the AWS default credential chain: env vars in the deployed Trigger task (007), the
@@ -35,15 +37,41 @@ function analytics(): Analytics {
   return (analyticsSingleton ??= createAnalytics({ client: createReadOnlyClient() }));
 }
 
-// The tools stream their `data-insight` / `data-error` parts straight onto the chat response message.
-const emit = (part: EmitPart) => chat.response.write(part as unknown as UIMessageChunk);
+// The tools (and the guard backstop) stream their data parts straight onto the chat response message.
+// One typed cast to the SDK's UIMessageChunk union - our parts are structurally data-part chunks, so
+// a shape drift (e.g. a bad `type`) is caught here, not silently forwarded.
+const emit = (part: EmitPart) => chat.response.write(part as UIMessageChunk);
+
+// A short-lived, single-connection store for one hook (the Trigger task pattern - no module-level
+// pool; open, use, close). Used by the guard backstop and the persist hook.
+async function withStore<T>(fn: (store: Store) => Promise<T>): Promise<T> {
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  try {
+    return await fn(createStore(sql));
+  } finally {
+    await sql.end();
+  }
+}
 
 export const jobChatAgent = chat.agent({
   id: AGENT_ID,
   maxTurns: AGENT_LIMITS.maxTurns,
   tools: () => buildCatalogTools({ analytics: analytics(), emit }),
-  run: async ({ messages, tools, signal }) =>
-    streamText({
+  run: async ({ chatId, messages, tools, signal }) => {
+    // The hard backstop (AC-15 cap / AC-20 daily budget) on the token's REAL path to Bedrock: the
+    // browser holds a write-scoped session token and the standard transport appends follow-ups
+    // straight to the inbox, bypassing the server action's early refusal. So the guard - counted via
+    // the store, same as the action - MUST also hold here. Over the limit: stream a taxonomized
+    // refusal part (006 renders it like an action refusal) and return WITHOUT calling the model, so a
+    // guest can never drive Bedrock past the cap/budget.
+    const refusal = await withStore((store) =>
+      checkConversationGuards({ store, guards: getGuardConfig(), now: () => new Date() }, chatId),
+    );
+    if (refusal) {
+      emit(refusalPart(crypto.randomUUID(), refusal));
+      return;
+    }
+    return streamText({
       ...chat.toStreamTextOptions({ tools }),
       model,
       system: ADVISER_V1,
@@ -51,17 +79,13 @@ export const jobChatAgent = chat.agent({
       tools,
       abortSignal: signal,
       stopWhen: stepCountIs(AGENT_LIMITS.maxSteps),
-    }),
+    });
+  },
   // Persist the assistant turn on completion. Fires for stopped turns too (responseMessage has its
   // aborted parts cleaned up), which is how a stopped answer's partial card survives to resume -
   // verified live, see the epic decision log (no client-snapshot fallback needed).
   onTurnComplete: async ({ chatId, responseMessage }) => {
     if (!responseMessage) return;
-    const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
-    try {
-      await persistAssistantTurn(createStore(sql), { conversationId: chatId, responseMessage });
-    } finally {
-      await sql.end();
-    }
+    await withStore((store) => persistAssistantTurn(store, { conversationId: chatId, responseMessage }));
   },
 });
