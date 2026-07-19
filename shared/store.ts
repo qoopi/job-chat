@@ -8,6 +8,12 @@ import type { Sql } from "postgres";
 
 export type MessageRole = "user" | "assistant";
 
+// Canonical UUID shape (8-4-4-4-12 hex). Postgres rejects a non-UUID id with a raw
+// `invalid input syntax for type uuid`, which would break `getConversation`'s "null = not found"
+// contract at the trust boundary (006 feeds it an untrusted `/chat/[id]` param). Guard before the
+// query so a malformed id reads as "not found" - without swallowing real DB errors on a valid one.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** A persisted JSON payload (the insight-card parts). Opaque here; validated by `insight.ts`. */
 export type Json = unknown;
 
@@ -93,6 +99,8 @@ export function createStore(sql: Sql): Store {
     },
 
     async getConversation(conversationId) {
+      // A malformed id is "not found" from the caller's view (contract: null = not found).
+      if (!UUID_RE.test(conversationId)) return null;
       const conversations = await sql<Conversation[]>`
         SELECT id, user_id, title, created_at
         FROM conversations WHERE id = ${conversationId}`;

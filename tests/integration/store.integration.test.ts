@@ -66,6 +66,16 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     expect(await store.getConversation(crypto.randomUUID())).toBeNull();
   });
 
+  // The module contract says "`null` always means not found". A malformed (non-UUID) id must honor
+  // that from the caller's view - not surface Postgres' `invalid input syntax for type uuid` as an
+  // unhandled error. 006 wires `/chat/[id]` from an untrusted URL param, so a garbage id must land
+  // on the null/404 path, not a 500.
+  it("getConversation returns null for a malformed (non-UUID) id, not a DB error", async () => {
+    expect(await store.getConversation("not-a-valid-uuid")).toBeNull();
+    expect(await store.getConversation("")).toBeNull();
+    expect(await store.getConversation("123")).toBeNull();
+  });
+
   it("messageCounts scopes to a user (cap) and aggregates globally (daily budget)", async () => {
     const freshGuest = `test-guest-${crypto.randomUUID()}`;
     await store.getOrCreateUser(freshGuest);
