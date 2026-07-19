@@ -53,6 +53,31 @@ describe("DataInsightSchema (the data-insight part)", () => {
     expect([...CHART_TYPES]).toEqual(["trend", "bars", "histogram", "donut"]);
   });
 
+  it("rejects an unknown extra key on a variant (strict: reject a mis-shaped writer payload)", () => {
+    const bad = {
+      id: "x",
+      kind: "table",
+      verdict: "v",
+      rows: [],
+      followups: [],
+      meta,
+      extra: "nope", // not stripped silently - rejected at the boundary
+    };
+    expect(DataInsightSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it("rejects an unknown extra key inside meta (strict)", () => {
+    const bad = {
+      id: "x",
+      kind: "table",
+      verdict: "v",
+      rows: [],
+      followups: [],
+      meta: { ...meta, extra: "nope" },
+    };
+    expect(DataInsightSchema.safeParse(bad).success).toBe(false);
+  });
+
   it("rejects a part whose meta lacks the sql (Show query needs the executed SQL)", () => {
     const bad = {
       id: "x",

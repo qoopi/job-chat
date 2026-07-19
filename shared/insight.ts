@@ -15,32 +15,38 @@ export type ChartType = z.infer<typeof ChartTypeSchema>;
 const DataPointSchema = z.record(z.string(), z.union([z.string(), z.number(), z.null()]));
 export type DataPoint = z.infer<typeof DataPointSchema>;
 
-const MetaSchema = z.object({
-  sql: z.string(), // the exact executed ClickHouse SQL - Show query reveals this verbatim
-  sampleN: z.number(),
-  updatedAt: z.string(), // data freshness (max ingested_at), CH text form
-});
+const MetaSchema = z
+  .object({
+    sql: z.string(), // the exact executed ClickHouse SQL - Show query reveals this verbatim
+    sampleN: z.number(),
+    updatedAt: z.string(), // data freshness (max ingested_at), CH text form
+  })
+  .strict();
 export type InsightMeta = z.infer<typeof MetaSchema>;
 
-const ChartInsightSchema = z.object({
-  id: z.string(),
-  kind: z.literal("chart"),
-  chartType: ChartTypeSchema,
-  verdict: z.string(),
-  series: z.array(DataPointSchema),
-  followups: z.array(z.string()),
-  meta: MetaSchema,
-});
+const ChartInsightSchema = z
+  .object({
+    id: z.string(),
+    kind: z.literal("chart"),
+    chartType: ChartTypeSchema,
+    verdict: z.string(),
+    series: z.array(DataPointSchema),
+    followups: z.array(z.string()),
+    meta: MetaSchema,
+  })
+  .strict();
 export type ChartInsight = z.infer<typeof ChartInsightSchema>;
 
-const TableInsightSchema = z.object({
-  id: z.string(),
-  kind: z.literal("table"),
-  verdict: z.string(),
-  rows: z.array(DataPointSchema),
-  followups: z.array(z.string()),
-  meta: MetaSchema,
-});
+const TableInsightSchema = z
+  .object({
+    id: z.string(),
+    kind: z.literal("table"),
+    verdict: z.string(),
+    rows: z.array(DataPointSchema),
+    followups: z.array(z.string()),
+    meta: MetaSchema,
+  })
+  .strict();
 export type TableInsight = z.infer<typeof TableInsightSchema>;
 
 export const DataInsightSchema = z.discriminatedUnion("kind", [
