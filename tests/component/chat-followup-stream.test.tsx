@@ -62,6 +62,7 @@ vi.mock("@/lib/chat-transport", () => ({
       return streamOf(settledChunks); // peekSettled: only the settled prior turn, never the fresh one
     },
     setSession: () => {},
+    getSession: () => undefined,
   }),
 }));
 

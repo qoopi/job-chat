@@ -17,6 +17,13 @@ export interface JobChatTransport extends ChatTransport<UIMessage> {
     chatId: string,
     session: { publicAccessToken: string; isStreaming?: boolean; lastEventId?: string },
   ): void;
+  // Reads the transport's tracked session state - the `.out` cursor (`lastEventId`) in particular, which
+  // a follow-up send must thread back through `setSession` so the subscribe resumes AFTER the prior turn
+  // instead of replaying the session log from the start (006 live-stream replay fix). Both the real
+  // transport and the E2E mock implement it.
+  getSession(
+    chatId: string,
+  ): { publicAccessToken: string; isStreaming?: boolean; lastEventId?: string } | undefined;
 }
 
 // The transport seam. Production: the standard Trigger.dev chat transport (skill-endorsed, unchanged) -
