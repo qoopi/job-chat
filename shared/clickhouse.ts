@@ -35,6 +35,8 @@ const MIGRATIONS_DIR = join(
 
 // Apply every migrations/clickhouse/*.sql in filename order. Statements are
 // idempotent (CREATE TABLE IF NOT EXISTS), so this is safe to re-run.
+// Each file MUST hold exactly ONE statement: the ClickHouse HTTP interface rejects
+// multi-statement queries, and each file is sent as a single client.command({ query }).
 export async function applyClickhouseMigrations(
   client: ClickHouseClient,
 ): Promise<string[]> {
