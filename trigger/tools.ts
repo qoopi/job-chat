@@ -8,6 +8,8 @@ import {
 import {
   buildInsight,
   buildSkeleton,
+  emptyModelOutput,
+  emptyPart,
   errorPart,
   toModelOutput,
   type ErrorPart,
@@ -70,6 +72,13 @@ function catalogTool(name: TemplateName, deps: CatalogDeps) {
       deps.emit({ type: "data-insight", id, data: buildSkeleton(id, name) });
       try {
         const result = await deps.analytics.runQuery(name, params);
+        // Empty result = plain mode (spec: one data-insight part per answer). Clear the skeleton with an
+        // empty marker so no dangling "No data" card is left - even across an internal retry - and hand
+        // the model a plain-prose signal instead of an empty insight card.
+        if (result.rows.length === 0) {
+          deps.emit(emptyPart(id));
+          return emptyModelOutput(name);
+        }
         const insight = buildInsight({ id, tool: name, params, result });
         deps.emit({ type: "data-insight", id, data: insight });
         return toModelOutput(insight);

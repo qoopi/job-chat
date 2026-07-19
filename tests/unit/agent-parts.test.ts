@@ -5,6 +5,8 @@ import {
   buildInsight,
   buildSkeleton,
   chartTypeFor,
+  emptyModelOutput,
+  emptyPart,
   errorPart,
   extractAssistantPersistence,
   refusalPart,
@@ -131,6 +133,23 @@ describe("buildSkeleton is the loading part written before the tool returns", ()
   });
 });
 
+describe("emptyPart clears a tool's skeleton on a 0-row result (empty = plain mode, no card)", () => {
+  it("supersedes the skeleton in place and carries no insight payload", () => {
+    const part = emptyPart("call-1");
+    expect(part).toEqual({ type: "data-insight", id: "call-1", data: { status: "empty" } });
+    // It must NOT classify as a valid insight (would render an empty card) ...
+    expect(DataInsightSchema.safeParse(part.data).success).toBe(false);
+    // ... nor as the loading skeleton (would render a stuck spinner).
+    expect((part.data as { status: string }).status).not.toBe("loading");
+  });
+
+  it("emptyModelOutput signals the model to answer in plain prose, not a chart", () => {
+    const out = emptyModelOutput("salary_distribution");
+    expect(out.empty).toBe(true);
+    expect(out.note.toLowerCase()).toContain("plain");
+  });
+});
+
 describe("toModelOutput is compact - the model sees the verdict, not the raw rows", () => {
   it("returns the verdict, sample size, and row count only", () => {
     const r = result([{ company: "Google", count: 4 }], 10);
@@ -246,6 +265,46 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
       parts: [{ type: "data-insight", id: "x", data: buildSkeleton("x", "top_companies") }],
     };
     expect(extractAssistantPersistence(message).parts).toBeNull();
+  });
+
+  // P1 polish: a 0-row tool result emits a skeleton then an empty marker under the same id. The empty
+  // marker supersedes the skeleton and is NOT persistable, so the turn persists no card (plain-prose
+  // answer) - never a stuck skeleton nor an empty "No data" card.
+  it("drops a skeleton superseded by an empty marker - the empty turn persists no card", () => {
+    const message = {
+      role: "assistant",
+      parts: [
+        { type: "text", text: "I could not find any matching postings." },
+        { type: "data-insight", id: "call-1", data: buildSkeleton("call-1", "salary_distribution") },
+        { type: "data-insight", id: "call-1", data: emptyPart("call-1").data },
+      ],
+    };
+    const { content, parts } = extractAssistantPersistence(message);
+    expect(content).toBe("I could not find any matching postings.");
+    expect(parts).toBeNull();
+  });
+
+  // The one-part-per-answer invariant across an internal retry: a first tool call that matched nothing
+  // (skeleton -> empty) followed by a retry that landed rows (skeleton -> insight) persists EXACTLY the
+  // one filled insight - the empty first attempt leaves no dangling card.
+  it("keeps only the filled insight when an empty attempt precedes a successful retry", () => {
+    const insight = buildInsight({
+      id: "call-2",
+      tool: "salary_distribution",
+      params: {},
+      result: result([{ bucket: 160000, count: 3, median: 180000 }], 3),
+    });
+    const message = {
+      role: "assistant",
+      parts: [
+        { type: "data-insight", id: "call-1", data: buildSkeleton("call-1", "salary_distribution") },
+        { type: "data-insight", id: "call-1", data: emptyPart("call-1").data },
+        { type: "data-insight", id: "call-2", data: buildSkeleton("call-2", "salary_distribution") },
+        { type: "data-insight", id: "call-2", data: insight },
+      ],
+    };
+    const { parts } = extractAssistantPersistence(message);
+    expect(parts).toEqual(insight);
   });
 
   // A guard refusal (cap/budget) streamed by the agent backstop persists as its marker, so a returning

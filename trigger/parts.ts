@@ -115,6 +115,35 @@ export function buildSkeleton(id: string, tool: TemplateName): SkeletonPart {
     : { id, kind: "chart", chartType: visual, status: "loading" };
 }
 
+/**
+ * The marker a tool writes when its query matched NO rows. An empty result renders NO card - the answer
+ * is plain prose (mode selection: empty result = plain mode). Written under the tool's part id so it
+ * SUPERSEDES the loading skeleton in place (data parts reconcile last-write-wins by id), leaving no
+ * dangling card. `status:"empty"` classifies as neither a valid insight nor an error/refusal, so the UI
+ * renders nothing and `isPersistablePayload` drops it - the empty turn resumes as its plain prose alone.
+ */
+export interface EmptyPart {
+  type: "data-insight";
+  id: string;
+  data: { status: "empty" };
+}
+
+export function emptyPart(id: string): EmptyPart {
+  return { type: "data-insight", id, data: { status: "empty" } };
+}
+
+/**
+ * The compact model-facing signal for an empty (0-row) tool result: no postings matched, so the model
+ * must answer in plain prose (no chart, no invented numbers) rather than narrate a retry or emit a card.
+ */
+export function emptyModelOutput(tool: TemplateName): { empty: true; tool: TemplateName; note: string } {
+  return {
+    empty: true,
+    tool,
+    note: "No postings matched this query - there is nothing to chart. Answer in plain prose (at most two sentences) that there is no matching data yet; do not invent numbers and do not describe the tool call.",
+  };
+}
+
 /** A compact view for the model - the verdict + counts, never the full rows (keeps context small). */
 export function toModelOutput(insight: DataInsight): {
   verdict: string;
