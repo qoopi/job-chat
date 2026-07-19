@@ -471,13 +471,6 @@ a:hover {
   gap: 10px;
   justify-content: center;
 }
-/* accent-tinted chip = primary intent */
-.chip-intent {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-  font-weight: 500;
-}
 
 /* editable tag (profile skills) */
 .tag {

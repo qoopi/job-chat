@@ -1,5 +1,5 @@
 // Tiny inline SVG icons lifted verbatim from the design mocks (send arrow, stop square, plus,
-// info, chevron, hamburger). Kept as exact paths rather than a lucide dependency so the glyphs
+// info, chevron). Kept as exact paths rather than a lucide dependency so the glyphs
 // match the handoff pixel-for-pixel. currentColor inherits the button/text color.
 
 export function SendIcon({ size = 15 }: { size?: number }) {
@@ -58,14 +58,6 @@ export function ChevronLeftIcon({ size = 16 }: { size?: number }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-    </svg>
-  );
-}
-
-export function HamburgerIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 18 18" fill="none" aria-hidden>
-      <path d="M2.5 4.5h13M2.5 9h13M2.5 13.5h13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }

@@ -20,7 +20,7 @@ function BrandCredit() {
   );
 }
 
-export function Sidebar({ activeTitle, activeTime }: { activeTitle?: string; activeTime?: string }) {
+export function Sidebar({ activeTitle }: { activeTitle?: string }) {
   const [collapsed, setCollapsed] = useState(false);
 
   if (collapsed) {
@@ -83,7 +83,7 @@ export function Sidebar({ activeTitle, activeTime }: { activeTitle?: string; act
         {activeTitle ? (
           <div className="sb-item active">
             {activeTitle}
-            <time>{activeTime ?? "just now"}</time>
+            <time>just now</time>
           </div>
         ) : null}
         <div className="sb-teaser">
