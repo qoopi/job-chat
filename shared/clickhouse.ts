@@ -7,7 +7,10 @@ import { z } from "zod";
 // The ingestion path validates only its own ClickHouse slice, not the whole env:
 // the full getEnv() also requires AWS_* keys that local dev provides via AWS_PROFILE,
 // and ingestion touches neither AWS nor Bedrock (ISP - don't couple to what it can't use).
-const ClickhouseEnvSchema = z.object({
+// Exported so shared/env.ts composes the full env schema from the per-domain slices instead of
+// re-declaring the same keys (decision log 2026-07-18, 002 review). Additive - the ingestion path
+// still parses it the same way below.
+export const ClickhouseEnvSchema = z.object({
   CLICKHOUSE_URL: z.string().min(1),
   CLICKHOUSE_USER: z.string().min(1),
   CLICKHOUSE_PASSWORD: z.string().min(1),
@@ -27,7 +30,7 @@ export function createWriterClient(
 
 // The analytics read path uses the dedicated read-only user `jobchat_ro` (SELECT on postings only).
 // Validates only its own slice (ISP) - CLICKHOUSE_URL + the RO credentials.
-const ClickhouseRoEnvSchema = z.object({
+export const ClickhouseRoEnvSchema = z.object({
   CLICKHOUSE_URL: z.string().min(1),
   CLICKHOUSE_RO_USER: z.string().min(1),
   CLICKHOUSE_RO_PASSWORD: z.string().min(1),
