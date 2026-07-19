@@ -73,4 +73,9 @@ export class MockChatTransport implements ChatTransport<UIMessage> {
     // reconnect to. The real transport's reconnect (Trigger session.out) is manual-smoke territory.
     return null;
   };
+
+  // Session hydration is a no-op in E2E: the mock streams via `sendMessages`, never `reconnectToStream`,
+  // so there is no session cache to fill. Present only so the mock satisfies the `JobChatTransport` seam
+  // ChatClient's prod attach path calls (the real transport's `setSession` is the one that matters).
+  setSession = (): void => {};
 }

@@ -9,7 +9,7 @@ import { Composer, type ComposerState } from "./Composer";
 import { MessageList } from "./MessageList";
 import { useJobChatTransport } from "@/lib/chat-transport";
 import { isStreaming } from "@/lib/chat-ui";
-import { sendMessage as sendMessageAction } from "@/app/actions";
+import { mintChatToken, sendMessage as sendMessageAction } from "@/app/actions";
 
 // The live chat surface (mock 2a): it swaps 005's static fixture for `useChat` message parts fed by the
 // Trigger transport, and wires every interaction the interaction-spec calls for - composer send / stop
@@ -82,7 +82,10 @@ export function ChatClient({
           setDraft(text); // draft preserved (interaction-spec section 4)
           return;
         }
-        // Optimistically show the user turn, then attach to the run the action just triggered.
+        // Optimistically show the user turn, then attach to the run the action just triggered. The
+        // action's own session token hydrates the transport BEFORE resumeStream so reconnectToStream
+        // finds a live session instead of an empty cache and returns null (006 P0).
+        transport.setSession(conversationId, { publicAccessToken: r.publicAccessToken, isStreaming: true });
         setMessages((prev) => [...prev, makeUserMessage(text)]);
         await resumeStream();
       } catch {
@@ -90,8 +93,19 @@ export function ChatClient({
         setDraft(text);
       }
     },
-    [e2e, conversationId, sendMessage, setMessages, resumeStream],
+    [e2e, conversationId, sendMessage, setMessages, resumeStream, transport],
   );
+
+  // AC-3 arrival attach: the landing action already created the conversation and triggered its run, but
+  // the run's token was discarded on the redirect. Mint a fresh session-scoped token (ownership-checked)
+  // and hydrate the transport so resumeStream subscribes to the in-flight run instead of no-op'ing on an
+  // empty session cache (006 P0). Prod only - E2E arrival streams via the mock's mount-time send.
+  const attachOnArrival = useCallback(async () => {
+    const r = await mintChatToken(conversationId);
+    if (!r.ok) return;
+    transport.setSession(conversationId, { publicAccessToken: r.token, isStreaming: true });
+    await resumeStream();
+  }, [conversationId, transport, resumeStream]);
 
   // AC-3 arrival: the landing question is already answered on this screen. E2E streams it via the mock
   // send; prod attaches to the run the landing action already triggered. Runs exactly once.
@@ -102,7 +116,7 @@ export function ChatClient({
     // must not run synchronously during the mount effect (cascading-render rule).
     queueMicrotask(() => {
       if (e2e && pendingQuestion) void send(pendingQuestion);
-      else if (!e2e && autoStream) void resumeStream();
+      else if (!e2e && autoStream) void attachOnArrival();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
