@@ -127,6 +127,13 @@ test("AC-7 Should_SendAndDisableChip_When_FollowupTapped", async ({ page }) => {
   await expect(card.getByRole("button", { name: "Only remote roles ✓" })).toBeDisabled();
 });
 
+test("Should_Return404_When_ChatIdIsMalformed", async ({ page }) => {
+  // A non-UUID :id is a bad route, not a blank new-chat shell (epic decision 2026-07-19, 006 review):
+  // the page Zod-validates the param at the trust boundary and calls notFound().
+  const res = await page.goto("/chat/not-a-uuid");
+  expect(res?.status()).toBe(404);
+});
+
 test("AC-15 Should_ShowLimitNotice_When_CapRefused", async ({ page }) => {
   await armScript(page, refusalScript("guest_cap"));
   await page.goto(freshChat());
