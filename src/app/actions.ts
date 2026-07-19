@@ -6,16 +6,23 @@ import { auth } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore } from "@shared/store";
 import { getGuardConfig } from "@shared/env";
-import { createSessionService, type SessionResult, type StartSession } from "../../trigger/session";
+import { AGENT_ID } from "../../trigger/agent-id";
+import {
+  chatTokenScopes,
+  createSessionService,
+  type MintResult,
+  type MintToken,
+  type SessionResult,
+  type StartSession,
+} from "../../trigger/session";
 import type { jobChatAgent } from "../../trigger/chat";
 
 // The session server actions: the thin Next.js adapter over the injectable session core
 // (trigger/session.ts). They resolve the guest cookie + real store/trigger and delegate the guard +
-// handoff decisions. Business outcomes come back as typed SessionResult - no throws (the UI branches
-// on `reason`). This file holds ONLY async server actions (the "use server" contract); all wiring is
-// module-private.
+// handoff decisions. Business outcomes come back as typed SessionResult/MintResult - no throws (the
+// UI branches on `reason`). This file holds ONLY async server actions (the "use server" contract);
+// all wiring is module-private.
 
-const AGENT_ID = "job-chat-agent";
 const GUEST_COOKIE = "jobchat_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 
@@ -25,19 +32,23 @@ function sql(): Sql {
   return (sqlSingleton ??= postgres(process.env.DATABASE_URL!));
 }
 
-// Session-scoped read+write token for the conversation, minted server-side so the secret key never
-// reaches the browser. Also returned by startSession on create; this is the re-mint for reconnects.
+// Start (or resume) the durable session and mint its browser token, server-side so the secret key
+// never reaches the browser. `mintToken` is the re-mint the transport reconnects with; both are
+// gated by the session core's ownership check.
 const startSessionAction = chat.createStartSessionAction<typeof jobChatAgent>(AGENT_ID);
 const startSession: StartSession = async ({ chatId }) => {
   const r = await startSessionAction({ chatId });
   return { publicAccessToken: r.publicAccessToken, runId: r.runId, sessionId: r.sessionId };
 };
+const mintToken: MintToken = (conversationId) =>
+  auth.createPublicToken({ scopes: chatTokenScopes(conversationId), expirationTime: "1h" });
 
 function service() {
   return createSessionService({
     store: createStore(sql()),
     guards: getGuardConfig(),
     startSession,
+    mintToken,
     now: () => new Date(),
   });
 }
@@ -66,16 +77,17 @@ export async function startConversation(question: string): Promise<SessionResult
   return service().startConversation(guestId, question);
 }
 
-/** Follow-up send with the cap (AC-15) + daily-budget (AC-20) guards enforced before triggering. */
+/** Follow-up send: input-bounded, ownership-checked, cap (AC-15) + daily-budget (AC-20) guarded. */
 export async function sendMessage(conversationId: string, text: string): Promise<SessionResult> {
-  await ensureGuest();
-  return service().sendMessage(conversationId, text);
+  const guestId = await ensureGuest();
+  return service().sendMessage(conversationId, text, guestId);
 }
 
-/** Re-mint a session-scoped public token for the transport to reconnect to this conversation. */
-export async function mintChatToken(conversationId: string): Promise<string> {
-  return auth.createPublicToken({
-    scopes: { read: { sessions: conversationId }, write: { sessions: conversationId } },
-    expirationTime: "1h",
-  });
+/**
+ * Re-mint a session-scoped public token for the transport to reconnect - but only for the caller's
+ * OWN conversation (typed `not_found` otherwise, so one guest's token never grants another's session).
+ */
+export async function mintChatToken(conversationId: string): Promise<MintResult> {
+  const guestId = await ensureGuest();
+  return service().mintChatToken(conversationId, guestId);
 }
