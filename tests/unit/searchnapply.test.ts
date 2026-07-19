@@ -98,4 +98,20 @@ describe("createSearchnapplyClient", () => {
 
     await expect(client.fetchPostingsPage(1, 100)).rejects.toThrow();
   });
+
+  it("throws a clear error naming the status when login fails", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => res(500, { error: "internal" }));
+    const client = createSearchnapplyClient(config, fetchImpl);
+
+    await expect(client.login()).rejects.toThrow(/login failed: 500/);
+  });
+
+  it("throws a clear error naming the status when the postings fetch fails (non-401)", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async (url) =>
+      url.includes("/api/auth/login") ? res(200, loginBody) : res(503, { error: "unavailable" }),
+    );
+    const client = createSearchnapplyClient(config, fetchImpl);
+
+    await expect(client.fetchPostingsPage(1, 100)).rejects.toThrow(/postings failed: 503/);
+  });
 });

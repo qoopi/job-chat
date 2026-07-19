@@ -89,4 +89,13 @@ describe("mapPostingToRow", () => {
     expect(row.location_kind).toBe("remote");
     expect(row.city).toBeNull();
   });
+
+  it("coerces a missing employment_type/experience_level to an empty string (CH columns are non-nullable)", () => {
+    const row = mapPostingToRow(
+      { ...base, employmentType: null, experienceLevel: null },
+      ingestedAt,
+    );
+    expect(row.employment_type).toBe("");
+    expect(row.experience_level).toBe("");
+  });
 });

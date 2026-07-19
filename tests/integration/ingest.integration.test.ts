@@ -9,10 +9,10 @@ const hasCreds = Boolean(process.env.CLICKHOUSE_URL);
 
 const ingestedAt = new Date("2026-07-18T06:00:00Z");
 
-function posting(id: number) {
+function posting(id: number, title = `Job ${id}`) {
   return {
     id,
-    title: `Job ${id}`,
+    title,
     company: "Google",
     source: "GoogleCareers",
     employmentType: "full-time",
@@ -24,7 +24,17 @@ function posting(id: number) {
 }
 
 function page(ids: number[], pageNo: number, totalPages: number, totalCount: number): PostingsPage {
-  return { items: ids.map(posting), page: pageNo, pageSize: 100, totalCount, totalPages };
+  return { items: ids.map((id) => posting(id)), page: pageNo, pageSize: 100, totalCount, totalPages };
+}
+
+// Like `page`, but for pre-built posting items (used to vary content between two runs).
+function pageOf(
+  items: ReturnType<typeof posting>[],
+  pageNo: number,
+  totalPages: number,
+  totalCount: number,
+): PostingsPage {
+  return { items, page: pageNo, pageSize: 100, totalCount, totalPages };
 }
 
 function scriptedClient(pages: (PostingsPage | Error)[]): SearchnapplyClient {
@@ -77,16 +87,25 @@ describe.skipIf(!hasCreds)("ingestPostings against real ClickHouse", () => {
     expect(first).toEqual({ pages: 2, rows: 3, totalCount: 3 });
     expect(await count(table, "FINAL")).toBe(3);
 
-    // Re-run: same 3 keys re-inserted; ReplacingMergeTree collapses on (source, external_id).
-    await ingestPostings({ client, sink, ingestedAt, table });
+    // Re-run: same 3 keys, but a LATER ingestedAt and changed content (title). Proves
+    // ReplacingMergeTree(ingested_at) actually keeps the freshest version, not merely
+    // that duplicates collapse (which identical reinserts would pass on luck alone).
+    const laterIngestedAt = new Date("2026-07-19T06:00:00Z");
+    const rerunClient = scriptedClient([
+      pageOf([posting(1, "Job 1 UPDATED"), posting(2)], 1, 2, 3),
+      page([3], 2, 2, 3),
+    ]);
+    await ingestPostings({ client: rerunClient, sink, ingestedAt: laterIngestedAt, table });
     expect(await count(table, "FINAL")).toBe(3);
 
     const rs = await ch.query({
-      query: `SELECT external_id FROM ${table} FINAL ORDER BY external_id`,
+      query: `SELECT external_id, title FROM ${table} FINAL ORDER BY external_id`,
       format: "JSONEachRow",
     });
-    const keys = (await rs.json<{ external_id: string }>()).map((r) => r.external_id);
-    expect(keys).toEqual(["1", "2", "3"]);
+    const rows = await rs.json<{ external_id: string; title: string }>();
+    expect(rows.map((r) => r.external_id)).toEqual(["1", "2", "3"]);
+    // The freshest ingest's content wins on the duplicate key, not the first insert's.
+    expect(rows[0].title).toBe("Job 1 UPDATED");
   });
 
   it("keeps existing data and fails when a pull errors mid-batch (AC-2)", async () => {
