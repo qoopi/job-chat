@@ -11,6 +11,7 @@ const complete: Record<string, string> = {
   AWS_ACCESS_KEY_ID: "AKIA_TEST",
   AWS_SECRET_ACCESS_KEY: "test",
   SEARCHNAPPLY_API_URL: "https://api.searchnapply.com",
+  SEARCHNAPPLY_AUTH_URL: "https://auth.searchnapply.com",
   SEARCHNAPPLY_EMAIL: "svc@test.dev",
   SEARCHNAPPLY_PASSWORD: "pw",
 };
