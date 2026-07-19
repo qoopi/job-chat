@@ -89,7 +89,19 @@ export function ChatClient({
         // built for reload-resume: attaching to a run triggered milliseconds earlier it reads the
         // settled prior turn and never delivers the fresh chunks (006 diagnosis, routed to 004).
         // `useChat.sendMessage` adds the optimistic user turn itself, so no manual setMessages here.
-        transport.setSession(conversationId, { publicAccessToken: r.publicAccessToken, isStreaming: true });
+        //
+        // Carry the prior turn's `.out` cursor forward. `sendMessages` subscribes with
+        // `lastEventId: state.lastEventId` (SDK 4.5.4 chat.js); `setSession` REPLACES the cached session,
+        // so passing it without `lastEventId` would WIPE the cursor and the follow-up subscribe would
+        // replay the session `.out` log from the START - re-delivering the prior turn's chunks, which the
+        // AI SDK cannot reconcile by id (they accumulate into the one new streaming message: 006 live
+        // artifact). Threading the tracked cursor resumes AFTER the prior turn, so only this turn streams.
+        const prior = transport.getSession(conversationId);
+        transport.setSession(conversationId, {
+          publicAccessToken: r.publicAccessToken,
+          isStreaming: true,
+          lastEventId: prior?.lastEventId,
+        });
         await sendMessage({ text });
       } catch {
         setFailed(text);

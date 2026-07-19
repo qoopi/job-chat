@@ -20,11 +20,13 @@ import type { UIMessage } from "ai";
 const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(async () => new ReadableStream({ start: (c) => c.close() }));
+const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
     sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
     setSession: setSessionMock,
+    getSession: getSessionMock,
   }),
 }));
 
