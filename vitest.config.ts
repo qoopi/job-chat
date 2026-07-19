@@ -8,7 +8,12 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
+    include: [
+      "tests/unit/**/*.test.ts",
+      "tests/integration/**/*.test.ts",
+      // Component tests opt into jsdom per-file via a `// @vitest-environment jsdom` docblock.
+      "tests/component/**/*.test.tsx",
+    ],
     setupFiles: ["tests/setup.env.ts"],
     // Integration tests hit real ClickHouse; give them room beyond the 5s default.
     testTimeout: 30_000,

@@ -55,14 +55,20 @@ export function DataTable({ rows }: { rows: DataPoint[] }) {
             {columns.map((key) => {
               const active = sortKey === key && dir !== "none";
               const numeric = typeof rows[0]?.[key] === "number";
+              // aria-sort exposes the sort state to assistive tech; the <button> makes the control
+              // keyboard-operable (WCAG 2.1.1 / 4.1.2). The label+glyph stay inside the button so the
+              // columnheader's accessible name still reads "Published At ▾" etc.
+              const ariaSort = active ? (dir === "desc" ? "descending" : "ascending") : "none";
               return (
                 <th
                   key={key}
                   className={`${numeric ? "r" : ""} ${active ? "sorted" : ""}`.trim()}
-                  onClick={() => onSort(key)}
+                  aria-sort={ariaSort}
                 >
-                  {humanize(key)}
-                  {active ? (dir === "desc" ? " ▾" : " ▴") : ""}
+                  <button type="button" className="th-sort" onClick={() => onSort(key)}>
+                    {humanize(key)}
+                    {active ? (dir === "desc" ? " ▾" : " ▴") : ""}
+                  </button>
                 </th>
               );
             })}

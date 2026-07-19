@@ -628,6 +628,14 @@ a:hover {
 .tab:hover {
   color: var(--text);
 }
+.tab:disabled {
+  color: var(--text-3);
+  opacity: 0.5;
+  cursor: default;
+}
+.tab:disabled:hover {
+  color: var(--text-3);
+}
 .tab.active {
   background: var(--surface);
   color: var(--text);
@@ -809,6 +817,23 @@ a:hover {
 }
 .data-table th.sorted {
   color: var(--accent-ink);
+}
+/* the sort control is a real <button> for keyboard access; strip its chrome so the header looks
+   unchanged, and inherit the th's alignment (left, or right under .r) and typography. */
+.data-table th .th-sort {
+  all: unset;
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.data-table th .th-sort:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: -2px;
+  border-radius: 3px;
 }
 .data-table td {
   padding: 9px 10px;

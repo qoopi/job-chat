@@ -20,7 +20,7 @@ export function Composer({ state = "default" }: { state?: ComposerState }) {
   return (
     <div className="composer">
       <div className={barClass}>
-        <textarea rows={1} placeholder={PLACEHOLDER[state]} disabled={inputDisabled} />
+        <textarea rows={1} aria-label="Ask a follow-up" placeholder={PLACEHOLDER[state]} disabled={inputDisabled} />
         <button className={streaming ? "send stop" : "send"} type="button" aria-label={streaming ? "Stop" : "Send"}>
           {streaming ? <StopIcon /> : <SendIcon />}
         </button>

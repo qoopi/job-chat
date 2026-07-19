@@ -14,12 +14,12 @@ test.describe("InsightCard - tabs and follow-up chips", () => {
     await expect(barsCard.locator("svg.recharts-surface")).toBeVisible();
     await expect(barsCard.locator("table.data-table")).toHaveCount(0);
 
-    await barsCard.getByRole("button", { name: "Table", exact: true }).click();
+    await barsCard.getByRole("tab", { name: "Table", exact: true }).click();
     await expect(barsCard.locator("table.data-table")).toBeVisible();
     await expect(barsCard.locator("table.data-table")).toContainText("Amazon");
     await expect(barsCard.locator("svg.recharts-surface")).toHaveCount(0);
 
-    await barsCard.getByRole("button", { name: "Chart", exact: true }).click();
+    await barsCard.getByRole("tab", { name: "Chart", exact: true }).click();
     await expect(barsCard.locator("svg.recharts-surface")).toBeVisible();
     await expect(barsCard.locator("table.data-table")).toHaveCount(0);
   });

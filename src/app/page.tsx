@@ -79,12 +79,12 @@ export default function Landing() {
           The jobs market, answered.
         </h1>
         <p style={{ margin: 0, fontSize: 16, color: "var(--shell-fg-dim)", maxWidth: 520 }}>
-          Ask a question, get a verdict with a chart — from thousands of live postings. Add your resume
+          Ask a question, get a verdict with a chart — from 3,483 live postings. Add your resume
           and it finds the roles that fit you.
         </p>
         <div style={{ width: "100%", maxWidth: 560, marginTop: 10 }}>
           <div className="input-bar focused" style={{ padding: "12px 12px 12px 18px" }}>
-            <textarea rows={1} placeholder="What are you looking for?" />
+            <textarea rows={1} aria-label="What are you looking for" placeholder="What are you looking for?" />
             <button className="send" type="button" aria-label="Send" style={{ width: 38, height: 38 }}>
               <SendIcon size={16} />
             </button>

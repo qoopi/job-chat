@@ -33,6 +33,39 @@ test.describe("DataTable - sortable header actually sorts", () => {
     await expect(firstRowCompany()).toHaveText("Airbnb");
   });
 
+  test("Should_ReorderRowsAndCycleAriaSort_When_HeaderDrivenByKeyboard", async ({ page }) => {
+    await page.goto(CHAT);
+
+    const table = page.locator("table.data-table");
+    const firstRowCompany = () => table.locator("tbody tr").first().locator("td").nth(1);
+
+    const header = table.getByRole("columnheader", { name: /Published At/ });
+    // the sort control is a real <button>: in the tab order and activated by Enter/Space, so a keyboard
+    // user triggers the exact same sort a mouse user can (WCAG 2.1.1), and aria-sort exposes the state.
+    const sortButton = header.getByRole("button");
+
+    await expect(firstRowCompany()).toHaveText("Airbnb");
+    await expect(header).toHaveAttribute("aria-sort", "none");
+
+    await sortButton.focus();
+    await expect(sortButton).toBeFocused();
+
+    // Enter -> descending (newest first: Stripe, 2026-07-16)
+    await page.keyboard.press("Enter");
+    await expect(header).toHaveAttribute("aria-sort", "descending");
+    await expect(firstRowCompany()).toHaveText("Stripe");
+
+    // Space -> ascending (oldest first: Databricks, 2026-07-11)
+    await page.keyboard.press("Space");
+    await expect(header).toHaveAttribute("aria-sort", "ascending");
+    await expect(firstRowCompany()).toHaveText("Databricks");
+
+    // Enter -> back to none (original fixture order restored)
+    await page.keyboard.press("Enter");
+    await expect(header).toHaveAttribute("aria-sort", "none");
+    await expect(firstRowCompany()).toHaveText("Airbnb");
+  });
+
   test("Should_SortNumerically_When_SalaryMinHeaderClicked", async ({ page }) => {
     await page.goto(CHAT);
 

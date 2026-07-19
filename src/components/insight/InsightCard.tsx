@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { DataInsight } from "@shared/insight";
 import { splitFirstNumber } from "@/lib/insight-format";
 import { InsightChart } from "./charts/InsightChart";
@@ -51,21 +51,41 @@ export function InsightCard({
   const rows = isChart ? insight.series : insight.rows;
   const rel = freshness(insight.meta.updatedAt);
 
+  // A stable element reference (keyed on the insight identity, not on tab/sqlOpen) so React bails out
+  // of re-rendering the Recharts subtree when only the Show-query reveal toggles.
+  const chartEl = useMemo(
+    () => (insight.kind === "chart" ? <InsightChart chartType={insight.chartType} series={insight.series} /> : null),
+    [insight],
+  );
+
+  // The tabs are an ARIA tablist so a screen reader announces the selected view. A table-only insight
+  // keeps the Chart|Table pair per the mock, with Chart disabled (there is no chart to switch to).
+  const panelId = `${insight.id}-panel`;
+  const chartTabId = `${insight.id}-tab-chart`;
+  const tableTabId = `${insight.id}-tab-table`;
+
   return (
     <div className="insight">
       <div className="insight-head">
         <Verdict text={insight.verdict} />
-        <div className="tabs">
-          {isChart ? (
-            <button
-              className={tab === "chart" ? "tab active" : "tab"}
-              type="button"
-              onClick={() => setTab("chart")}
-            >
-              Chart
-            </button>
-          ) : null}
+        <div className="tabs" role="tablist" aria-label="Result view">
           <button
+            id={chartTabId}
+            role="tab"
+            aria-selected={tab === "chart"}
+            aria-controls={panelId}
+            className={tab === "chart" ? "tab active" : "tab"}
+            type="button"
+            disabled={!isChart}
+            onClick={() => setTab("chart")}
+          >
+            Chart
+          </button>
+          <button
+            id={tableTabId}
+            role="tab"
+            aria-selected={tab === "table"}
+            aria-controls={panelId}
             className={tab === "table" ? "tab active" : "tab"}
             type="button"
             onClick={() => setTab("table")}
@@ -75,12 +95,13 @@ export function InsightCard({
         </div>
       </div>
 
-      <div className="insight-body">
-        {isChart && tab === "chart" ? (
-          <InsightChart chartType={insight.chartType} series={insight.series} />
-        ) : (
-          <DataTable rows={rows} />
-        )}
+      <div
+        className="insight-body"
+        id={panelId}
+        role="tabpanel"
+        aria-labelledby={tab === "chart" ? chartTabId : tableTabId}
+      >
+        {isChart && tab === "chart" ? chartEl : <DataTable rows={rows} />}
         {sqlOpen ? <CodeBlock sql={insight.meta.sql} /> : null}
       </div>
 
@@ -97,7 +118,9 @@ export function InsightCard({
         </div>
         <span className="src">
           {insight.meta.sampleN.toLocaleString()} postings
-          {rel ? ` — updated ${rel}` : ""} ·{" "}
+          {/* freshness is Date.now()-relative, so a server/client render straddling a minute boundary
+             would mismatch on hydration - suppress the (benign) warning on just this text. */}
+          <span suppressHydrationWarning>{rel ? ` — updated ${rel}` : ""}</span> ·{" "}
           <button className="src-link" type="button" onClick={() => setSqlOpen((v) => !v)}>
             {sqlOpen ? "Hide query" : "Show query"}
           </button>
