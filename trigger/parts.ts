@@ -222,3 +222,46 @@ export async function persistAssistantTurn(
   const { content, parts } = extractAssistantPersistence(args.responseMessage);
   await store.appendMessage(args.conversationId, "assistant", content, parts);
 }
+
+
+/** Read a model message's user text (content is a string or an array of text parts). */
+function userMessageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(
+      (p): p is { type: string; text?: unknown } =>
+        typeof p === "object" && p !== null && (p as { type?: unknown }).type === "text",
+    )
+    .map((p) => (typeof p.text === "string" ? p.text : ""))
+    .join("");
+}
+
+/** A run's reconstructed history is model messages - only the role + user text matter for persistence. */
+type RunMessage = { role: string; content?: unknown };
+
+/**
+ * Persist the newly-arrived user turn(s) present in the run's reconstructed `messages` but not yet in
+ * the store, BEFORE the guard backstop counts them. Mechanism (a): a follow-up is delivered by the
+ * client transport's `sendMessages` (append to `.in` + subscribe-with-wait - the only SDK 4.5.4 path
+ * that streams a freshly-triggered turn live; `reconnectToStream` forces peekSettled), so the user turn
+ * is no longer persisted by the server action - the agent's `run()` is the single persist site.
+ *
+ * Count-based (persist the tail of user messages beyond what the store already holds), so it is a no-op
+ * on turn-1 arrival (`startConversation` already persisted message #1 before triggering) and on
+ * regenerate (no new user turn) - it never double-persists. Idempotent across a run retry for the same
+ * reason: once persisted, the stored count catches up and the tail is empty.
+ */
+export async function persistIncomingUserTurns(
+  store: Store,
+  chatId: string,
+  messages: RunMessage[],
+): Promise<void> {
+  const incoming = messages.filter((m) => m.role === "user").map((m) => userMessageText(m.content));
+  const loaded = await store.getConversation(chatId);
+  const persistedUserCount = loaded ? loaded.messages.filter((m) => m.role === "user").length : 0;
+  for (const text of incoming.slice(persistedUserCount)) {
+    if (text.trim().length === 0) continue;
+    await store.appendMessage(chatId, "user", text, null);
+  }
+}

@@ -82,18 +82,21 @@ export function ChatClient({
           setDraft(text); // draft preserved (interaction-spec section 4)
           return;
         }
-        // Optimistically show the user turn, then attach to the run the action just triggered. The
-        // action's own session token hydrates the transport BEFORE resumeStream so reconnectToStream
-        // finds a live session instead of an empty cache and returns null (006 P0).
+        // Hydrate the transport with the action's scoped token, then DELIVER + WATCH the turn via the
+        // transport's `sendMessages` (`useChat.sendMessage`). That one primitive appends the turn to
+        // `.in` (which triggers the run) AND subscribes with wait - the only SDK 4.5.4 path that streams
+        // a freshly-triggered follow-up live. `resumeStream`/`reconnectToStream` forces peekSettled,
+        // built for reload-resume: attaching to a run triggered milliseconds earlier it reads the
+        // settled prior turn and never delivers the fresh chunks (006 diagnosis, routed to 004).
+        // `useChat.sendMessage` adds the optimistic user turn itself, so no manual setMessages here.
         transport.setSession(conversationId, { publicAccessToken: r.publicAccessToken, isStreaming: true });
-        setMessages((prev) => [...prev, makeUserMessage(text)]);
-        await resumeStream();
+        await sendMessage({ text });
       } catch {
         setFailed(text);
         setDraft(text);
       }
     },
-    [e2e, conversationId, sendMessage, setMessages, resumeStream, transport],
+    [e2e, conversationId, sendMessage, setMessages, transport],
   );
 
   // AC-3 arrival attach: the landing action already created the conversation and triggered its run, but

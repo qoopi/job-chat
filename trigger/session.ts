@@ -46,6 +46,15 @@ export type SessionOk = {
 };
 export type SessionResult = SessionOk | { ok: false; reason: RefusalReason };
 
+/**
+ * A follow-up send's outcome. On success it carries ONLY the session-scoped token the client transport
+ * attaches with - NOT a messageId/runId: a follow-up does not persist or trigger server-side. The client
+ * transport's `sendMessages` delivers the turn to `.in` (which triggers the run) and subscribes with
+ * wait - the only SDK 4.5.4 path that streams a freshly-triggered follow-up live (see `sendMessage`).
+ */
+export type SendOk = { ok: true; publicAccessToken: string };
+export type SendResult = SendOk | { ok: false; reason: RefusalReason };
+
 export type MintResult = { ok: true; token: string } | { ok: false; reason: "not_found" };
 
 // Input bounds at the trust boundary (before any store write or trigger): a bounded question/text
@@ -94,8 +103,14 @@ export function userTurnChunk(chatId: string, messageId: string, text: string) {
 export interface SessionService {
   /** Landing handoff (AC-3): create conversation + user message #1, trigger the run, return the id. */
   startConversation(userId: string, question: string): Promise<SessionResult>;
-  /** Follow-up send: bound input, confirm the caller owns the conversation, cap/budget, persist, trigger. */
-  sendMessage(conversationId: string, text: string, callerGuestId: string): Promise<SessionResult>;
+  /**
+   * Follow-up send GATE (mechanism a): bound input, confirm the caller owns the conversation, apply the
+   * cap/budget early refusal, and mint the scoped token. It does NOT persist or trigger - the client
+   * transport's `sendMessages` delivers the turn to `.in` (triggering the run) and subscribes with wait
+   * (the only SDK path that streams a freshly-triggered follow-up live), and the agent's `run()` persists
+   * the user turn before the backstop counts it.
+   */
+  sendMessage(conversationId: string, text: string, callerGuestId: string): Promise<SendResult>;
   /** Mint a session-scoped token, but only for the caller's own conversation (defense in depth). */
   mintChatToken(conversationId: string, callerGuestId: string): Promise<MintResult>;
 }
@@ -103,13 +118,14 @@ export interface SessionService {
 export function createSessionService(deps: SessionDeps): SessionService {
   const { store, guards, startSession, mintToken, sendToInbox, now } = deps;
 
-  // Start (or resume) the durable session, THEN deliver the user turn to its inbox. The order matters:
-  // `startSession` fires a PRELOAD run that boots with empty messages and blocks on `.in` before it ever
-  // reaches the agent's `run()` (SDK ai.js: the preload wait sits ahead of the turn loop). Nothing else
-  // in a server-mediated flow ever writes `.in` - the browser only reconnects/resumes, it never
-  // `sendMessage`s - so without this append the message reaches Postgres but never Bedrock. The user
-  // turn is already persisted (and thus counted) by the caller before we get here, so the agent's guard
-  // backstop counts this turn.
+  // Turn-1 (landing) ONLY: start the durable session, THEN deliver message #1 to its inbox. The order
+  // matters: `startSession` fires a PRELOAD run that boots with empty messages and blocks on `.in` before
+  // it ever reaches the agent's `run()` (SDK ai.js: the preload wait sits ahead of the turn loop), and on
+  // arrival the browser only reconnects to watch - it does not `sendMessages` (that would double-deliver
+  // message #1), so this server-side append is what lands the first turn on Bedrock. Follow-ups take the
+  // OTHER path: the browser's `sendMessages` both appends to `.in` and subscribes with wait, so they never
+  // come through here (see `sendMessage`). Message #1 is already persisted by `startConversation` before
+  // we get here; `run()`'s persist is a no-op for it (count-based, see persistIncomingUserTurns).
   async function trigger(
     conversationId: string,
     messageId: string,
@@ -148,9 +164,14 @@ export function createSessionService(deps: SessionDeps): SessionService {
       const refusal = await checkMessageGuards({ store, guards, now }, callerGuestId);
       if (refusal) return { ok: false, reason: refusal };
 
-      const message = await store.appendMessage(conversationId, "user", text, null);
-      const { publicAccessToken, runId } = await trigger(conversationId, message.id, text);
-      return { ok: true, conversationId, messageId: message.id, publicAccessToken, runId };
+      // Mechanism (a): do NOT persist or trigger here. The client transport's `sendMessages` delivers
+      // this turn to `.in` (which triggers the run) AND subscribes with wait - the only SDK 4.5.4 path
+      // that streams a freshly-triggered follow-up live (`reconnectToStream` forces peekSettled and never
+      // delivers a fresh run's chunks). So this action is the early UX gate (input bounds + ownership +
+      // cap/budget) and mints the scoped token the transport attaches with; `run()` persists the user
+      // turn before the backstop counts it (persistIncomingUserTurns). Persisting here too would
+      // double-persist (run() re-persists from its rebuilt history) and double-count the guard.
+      return { ok: true, publicAccessToken: await mintToken(conversationId) };
     },
 
     async mintChatToken(conversationId, callerGuestId) {

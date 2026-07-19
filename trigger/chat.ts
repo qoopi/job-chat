@@ -11,7 +11,7 @@ import { AGENT_ID } from "./agent-id";
 import { checkConversationGuards } from "./guard";
 import { ADVISER_V1 } from "./prompts/adviser-v1";
 import { buildCatalogTools, type EmitPart } from "./tools";
-import { persistAssistantTurn, refusalPart } from "./parts";
+import { persistAssistantTurn, persistIncomingUserTurns, refusalPart } from "./parts";
 
 // The conversation loop: ONE durable Trigger.dev chat.agent per conversation (keyed on chatId = our
 // conversation id). Bedrock runs the eu. Claude sonnet inference profile; the catalog tools are the
@@ -58,15 +58,22 @@ export const jobChatAgent = chat.agent({
   maxTurns: AGENT_LIMITS.maxTurns,
   tools: () => buildCatalogTools({ analytics: analytics(), emit }),
   run: async ({ chatId, messages, tools, signal }) => {
+    // Persist the newly-arrived user turn(s) BEFORE the guard counts them, then apply the backstop -
+    // both on ONE connection so the persist-then-count ordering is atomic. Mechanism (a): a follow-up
+    // is delivered by the client transport's `sendMessages` (deliver+watch, the only SDK path that
+    // streams a freshly-triggered turn live), NOT by the server action, so `run()` is the single
+    // persist site (no-op on turn-1 arrival + regenerate; see persistIncomingUserTurns).
+    //
     // The hard backstop (AC-15 cap / AC-20 daily budget) on the token's REAL path to Bedrock: the
     // browser holds a write-scoped session token and the standard transport appends follow-ups
     // straight to the inbox, bypassing the server action's early refusal. So the guard - counted via
     // the store, same as the action - MUST also hold here. Over the limit: stream a taxonomized
     // refusal part (006 renders it like an action refusal) and return WITHOUT calling the model, so a
     // guest can never drive Bedrock past the cap/budget.
-    const refusal = await withStore((store) =>
-      checkConversationGuards({ store, guards: getGuardConfig(), now: () => new Date() }, chatId),
-    );
+    const refusal = await withStore(async (store) => {
+      await persistIncomingUserTurns(store, chatId, messages);
+      return checkConversationGuards({ store, guards: getGuardConfig(), now: () => new Date() }, chatId);
+    });
     if (refusal) {
       emit(refusalPart(crypto.randomUUID(), refusal));
       return;

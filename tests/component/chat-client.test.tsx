@@ -12,15 +12,17 @@ import type { UIMessage } from "ai";
 // path, not a bespoke banner. The real transport and server action are mocked (external boundaries);
 // ChatClient's own branching is what is under test.
 //
-// It also proves the 006 P0 attach contract: a prod turn only streams once the transport's session
-// cache is HYDRATED - `setSession(chatId, { publicAccessToken, isStreaming: true })` must run BEFORE
-// `resumeStream()`, or the SDK's `reconnectToStream` finds an empty cache and returns null and nothing
-// ever reaches the browser (no skeleton, no error). setSession + reconnectToStream are spied here.
+// It also proves the attach contract: a prod turn only streams once the transport's session cache is
+// HYDRATED - `setSession(chatId, { publicAccessToken, isStreaming: true })` must run BEFORE the send.
+// A follow-up delivers + watches via `sendMessages` (mechanism a, 004 round 3) - the only SDK path that
+// streams a freshly-triggered turn live; the peekSettled `reconnectToStream` is NOT used for follow-ups.
+// Arrival still attaches via `reconnectToStream` (resumeStream on an in-flight run). All three are spied.
 const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
+const sendMessagesMock = vi.fn(async () => new ReadableStream({ start: (c) => c.close() }));
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
-    sendMessages: async () => new ReadableStream({ start: (c) => c.close() }),
+    sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
     setSession: setSessionMock,
   }),
@@ -43,6 +45,7 @@ afterEach(() => {
   mintChatTokenMock.mockReset();
   setSessionMock.mockClear();
   reconnectMock.mockClear();
+  sendMessagesMock.mockClear();
 });
 
 test("action-refusal: the sendMessage action's cap refusal renders the SAME limit notice as the agent-side refusal", async () => {
@@ -79,33 +82,29 @@ test("action-refusal: an ok send does NOT render a notice (control case)", async
   expect(document.querySelector(".notice")).toBeNull();
 });
 
-// --- 006 P0: the start-session payload must reach the transport attach path ---
+// --- mechanism (a): a follow-up delivers + watches via sendMessages, hydrated first ---
 
-test("follow-up send: the action's session token hydrates the transport BEFORE resumeStream attaches", async () => {
-  sendMessageMock.mockResolvedValue({
-    ok: true,
-    conversationId: CONVERSATION_ID,
-    messageId: "m1",
-    publicAccessToken: "tok-followup",
-    runId: "run-1",
-  });
+test("follow-up send: the action's session token hydrates the transport BEFORE the deliver+watch send (streams live, not peekSettled reconnect)", async () => {
+  sendMessageMock.mockResolvedValue({ ok: true, publicAccessToken: "tok-followup" });
   render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
 
   const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
   fireEvent.change(box, { target: { value: "Any remote roles?" } });
   fireEvent.keyDown(box, { key: "Enter" });
 
-  await screen.findByText("Any remote roles?"); // optimistic user bubble
+  await screen.findByText("Any remote roles?"); // optimistic user bubble (useChat.sendMessage adds it)
   await waitFor(() => expect(setSessionMock).toHaveBeenCalled());
 
-  // The run's own token (not a discarded value) hydrates the session so reconnect can subscribe.
+  // The action's scoped token hydrates the session so `sendMessages` attaches with it.
   expect(setSessionMock).toHaveBeenCalledWith(
     CONVERSATION_ID,
     expect.objectContaining({ publicAccessToken: "tok-followup", isStreaming: true }),
   );
-  await waitFor(() => expect(reconnectMock).toHaveBeenCalled());
-  // Ordering is the whole point of the P0: hydrate, THEN reconnect (else reconnectToStream -> null).
-  expect(setSessionMock.mock.invocationCallOrder[0]).toBeLessThan(reconnectMock.mock.invocationCallOrder[0]);
+  // Delivered + watched via sendMessages (append + subscribe-with-wait), NOT the peekSettled reconnect.
+  await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
+  expect(reconnectMock).not.toHaveBeenCalled();
+  // Ordering: hydrate, THEN send (else the transport attaches with no cached session token).
+  expect(setSessionMock.mock.invocationCallOrder[0]).toBeLessThan(sendMessagesMock.mock.invocationCallOrder[0]);
 });
 
 test("arrival: a new chat mints its session token and hydrates the transport so the first run streams on mount (AC-3)", async () => {

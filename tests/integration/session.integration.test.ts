@@ -138,36 +138,36 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(reloaded!.messages.filter((m) => m.role === "user")).toHaveLength(1);
   });
 
-  // The same inbox delivery must fire on the follow-up path (an already-live session): without it a
-  // second question redirects nowhere and the resumed run idles on an empty inbox.
-  it("sendMessage delivers the follow-up turn to the session inbox (P0)", async () => {
+  // Mechanism (a), 004 round 3: a follow-up is a pure GATE. It mints the scoped token the client
+  // transport attaches with, but does NOT persist, trigger, or deliver server-side - the transport's
+  // `sendMessages` delivers the turn to `.in` (triggering the run) and subscribes with wait (the only SDK
+  // path that streams a freshly-triggered follow-up live), and the agent's `run()` persists the user turn
+  // before the backstop counts it. Persisting/delivering here too would double-persist + double-count.
+  it("sendMessage GATES the follow-up: mints the scoped token, does NOT persist / trigger / deliver (mechanism a)", async () => {
     const owner = freshGuestId();
     await store.getOrCreateUser(owner);
     const conv = await store.createConversation(owner, "owner's thread");
     const startSession = okStartSession();
     const sendToInbox = okSendToInbox();
+    const mintToken = okMintToken();
     const svc = createSessionService({
       store,
       guards: { guestCap: 10, dailyBudget: HUGE },
       startSession,
-      mintToken: okMintToken(),
+      mintToken,
       sendToInbox,
       now: () => new Date(),
     });
 
     const res = await svc.sendMessage(conv.id, "and how about salaries?", owner);
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    expect(sendToInbox).toHaveBeenCalledTimes(1);
-    const [chatId, chunk] = (sendToInbox as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(chatId).toBe(conv.id);
-    expect(chunk).toMatchObject({
-      kind: "message",
-      payload: {
-        trigger: "submit-message",
-        message: { id: res.messageId, role: "user", parts: [{ type: "text", text: "and how about salaries?" }] },
-      },
-    });
+    expect(res).toEqual({ ok: true, publicAccessToken: `pat_${conv.id}` });
+    expect(mintToken).toHaveBeenCalledWith(conv.id);
+    // No server-side delivery/trigger: the client transport delivers + watches in one primitive.
+    expect(sendToInbox).not.toHaveBeenCalled();
+    expect(startSession).not.toHaveBeenCalled();
+    // Nothing persisted server-side: run() is the single persist site for the follow-up turn.
+    const reloaded = await store.getConversation(conv.id);
+    expect(reloaded!.messages.filter((m) => m.role === "user")).toHaveLength(0);
   });
 
   // A refused turn (over cap) must never reach the inbox - the guard short-circuits before trigger.
@@ -266,26 +266,29 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(reloaded!.messages.filter((m) => m.role === "user")).toHaveLength(0); // nothing injected
   });
 
-  it("sendMessage succeeds for the conversation's owner", async () => {
+  it("sendMessage gates through for the conversation's owner (mints for the owner)", async () => {
     const owner = freshGuestId();
     await store.getOrCreateUser(owner);
     const conv = await store.createConversation(owner, "owner's thread");
 
     const startSession = okStartSession();
+    const mintToken = okMintToken();
     const svc = createSessionService({
       store,
       guards: { guestCap: 10, dailyBudget: HUGE },
       startSession,
-      mintToken: okMintToken(),
+      mintToken,
       sendToInbox: okSendToInbox(),
       now: () => new Date(),
     });
 
     const res = await svc.sendMessage(conv.id, "a real follow-up", owner);
-    expect(res.ok).toBe(true);
-    expect(startSession).toHaveBeenCalledWith(expect.objectContaining({ chatId: conv.id }));
+    expect(res).toEqual({ ok: true, publicAccessToken: `pat_${conv.id}` });
+    expect(mintToken).toHaveBeenCalledWith(conv.id);
+    // Mechanism (a): the owner's gate mints a token but does not trigger/persist (the client delivers).
+    expect(startSession).not.toHaveBeenCalled();
     const reloaded = await store.getConversation(conv.id);
-    expect(reloaded!.messages.map((m) => m.content)).toContain("a real follow-up");
+    expect(reloaded!.messages.filter((m) => m.role === "user")).toHaveLength(0);
   });
 
   // AC-20: the global daily budget is the kill switch - a fresh guest is refused even on message #1.

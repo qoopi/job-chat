@@ -13,6 +13,7 @@ import {
   createSessionService,
   type MintResult,
   type MintToken,
+  type SendResult,
   type SendToInbox,
   type SessionResult,
   type StartSession,
@@ -100,8 +101,14 @@ export async function startConversation(question: string): Promise<SessionResult
   return service().startConversation(guestId, question);
 }
 
-/** Follow-up send: input-bounded, ownership-checked, cap (AC-15) + daily-budget (AC-20) guarded. */
-export async function sendMessage(conversationId: string, text: string): Promise<SessionResult> {
+/**
+ * Follow-up send GATE (mechanism a): input-bounded, ownership-checked, cap (AC-15) + daily-budget
+ * (AC-20) guarded, and returns the scoped token the client transport attaches with. It does NOT persist
+ * or trigger - the transport's `sendMessages` delivers the turn to `.in` (triggering the run) and
+ * subscribes with wait (the only SDK path that streams a freshly-triggered follow-up live), and the
+ * agent's `run()` persists the user turn before the backstop counts it.
+ */
+export async function sendMessage(conversationId: string, text: string): Promise<SendResult> {
   const guestId = await guestIdFromCookie();
   if (!guestId) return { ok: false, reason: "not_found" };
   return service().sendMessage(conversationId, text, guestId);

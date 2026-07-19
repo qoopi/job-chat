@@ -7,13 +7,14 @@ import type { DataInsight } from "@shared/insight";
 // Regression for the operator's live-walk duplicate-key error ("Encountered two children with the same
 // key" at MessageList, AssistantMessage key={m.id}). Root cause, verified at source: an existing
 // conversation is hydrated into `useChat` from the store (storeToUiMessages -> initialMessages), then a
-// follow-up send appends the user turn and calls `resumeStream()`. The SDK's `reconnectToStream`
-// subscribes with no `lastEventId` cursor, so the server replays the session's `.out` tail from the
-// start - re-emitting the ALREADY-HYDRATED assistant turn under its original id. The AI SDK's write
-// then `pushMessage`s that replayed turn (its id != the just-appended user turn's id), so a turn that
-// is already in the list lands a SECOND time under the same id -> duplicate React key, and the old card
-// visibly re-appears. This drives that exact flow through the real `useChat` merge (the mock transport
-// replays a tail, as the real one does) and asserts the hydrated card renders EXACTLY ONCE.
+// follow-up send delivers + watches via the transport's `sendMessages` (mechanism a, 004 round 3). That
+// subscribe opens `.out` with no `lastEventId` cursor (the server-rendered page has none), so the server
+// replays the session's `.out` tail from the start - re-emitting the ALREADY-HYDRATED assistant turn
+// under its original id. The AI SDK's write then `pushMessage`s that replayed turn (its id != the
+// just-appended user turn's id), so a turn that is already in the list lands a SECOND time under the same
+// id -> duplicate React key, and the old card visibly re-appears. This drives that exact flow through the
+// real `useChat` merge (the mock transport's `sendMessages` replays the tail, as the real one does when
+// resuming from the start) and asserts the hydrated card renders EXACTLY ONCE.
 
 vi.mock("@/components/insight/charts/InsightChart", () => ({
   InsightChart: () => <div data-testid="chart-subtree" />,
@@ -59,21 +60,16 @@ afterEach(() => {
   cleanup();
   sendMessageMock.mockReset();
   mintChatTokenMock.mockReset();
-  delete window.__CHAT_REPLAY__;
+  delete window.__CHAT_SCRIPT__;
 });
 
 test("a follow-up that replays the hydrated tail renders the existing card exactly once (no duplicate key)", async () => {
-  sendMessageMock.mockResolvedValue({
-    ok: true,
-    conversationId: CONVERSATION_ID,
-    messageId: "m2",
-    publicAccessToken: "tok",
-    runId: "run-1",
-  });
+  sendMessageMock.mockResolvedValue({ ok: true, publicAccessToken: "tok" });
 
-  // The reconnect replays the session `.out` tail: the SAME assistant turn (id = ASSISTANT_ID) that is
-  // already hydrated, plus a marker text so the test can await the replay having been fully processed.
-  window.__CHAT_REPLAY__ = [
+  // The follow-up's `sendMessages` subscribe replays the session `.out` tail from the start: the SAME
+  // assistant turn (id = ASSISTANT_ID) that is already hydrated, plus a marker text so the test can await
+  // the replay having been fully processed.
+  window.__CHAT_SCRIPT__ = [
     { chunk: { type: "start", messageId: ASSISTANT_ID } },
     { chunk: { type: "data-insight", id: `${ASSISTANT_ID}-card-0`, data: insight } },
     { chunk: { type: "text-start", id: "rt" } },
