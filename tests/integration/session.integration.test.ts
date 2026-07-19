@@ -117,6 +117,32 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(count[0].c).toBe(0);
   });
 
+  // AC-20 cross-user check: the budget must be a GLOBAL count, not accidentally scoped to the caller.
+  // A fresh guest with zero messages of their own is still refused once ANOTHER guest's traffic alone
+  // exhausts the shared budget - this fails if `messageCounts` for the budget check were ever scoped
+  // by userId (a fresh guest would then read 0 and wrongly be allowed through).
+  it("refuses a fresh guest once OTHER guests' messages exhaust the shared daily budget (AC-20 cross-user)", async () => {
+    const noisyGuest = freshGuestId();
+    await store.getOrCreateUser(noisyGuest);
+    const noisyConv = await store.createConversation(noisyGuest, "seed");
+    const budget = 3;
+    for (let i = 0; i < budget; i++) await store.appendMessage(noisyConv.id, "user", `seed ${i}`, null);
+
+    const freshGuest = freshGuestId();
+    await store.getOrCreateUser(freshGuest);
+    const startSession = okStartSession();
+    const svc = createSessionService({
+      store,
+      guards: { guestCap: 10, dailyBudget: budget }, // exhausted by noisyGuest alone
+      startSession,
+      now: () => new Date(),
+    });
+
+    const res = await svc.startConversation(freshGuest, "anything at all");
+    expect(res).toEqual({ ok: false, reason: "daily_budget" });
+    expect(startSession).not.toHaveBeenCalled();
+  });
+
   it("sendMessage returns not_found for an unknown conversation id", async () => {
     const svc = createSessionService({
       store,
