@@ -8,6 +8,12 @@ import type { GuardConfig } from "@shared/env";
 
 export type GuardRefusal = "guest_cap" | "daily_budget";
 
+// The input-size bound at the trust boundary, enforced on BOTH layers (like the cap/budget count):
+// the "use server" actions (TextSchema, early UX refusal) and the agent run's ingress backstop
+// (persistIncomingUserTurns, the write-token's real path). One home so the two can never drift - a
+// hostile oversized payload must never reach Bedrock (token cost) or the message store (DB bloat).
+export const MAX_INPUT_CHARS = 2000;
+
 export interface GuardDeps {
   store: Store;
   guards: GuardConfig;

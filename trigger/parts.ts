@@ -1,7 +1,7 @@
 import { DataInsightSchema, type ChartType, type DataInsight, type DataPoint } from "@shared/insight";
 import type { QueryResult, TemplateName } from "@shared/analytics";
 import type { Store } from "@shared/store";
-import type { GuardRefusal } from "./guard";
+import { MAX_INPUT_CHARS, type GuardRefusal } from "./guard";
 
 // The agent's part vocabulary: turning an analytics QueryResult into the ONE `data-insight` part per
 // answer (built via the strict shared insight schema), the loading skeleton written before the tool
@@ -148,18 +148,25 @@ export function errorPart(id: string, kind: AgentErrorKind): ErrorPart {
   return { type: "data-error", id, data: { kind } };
 }
 
+// The reasons the agent streams as a data-refusal part: the cap/budget guard backstop (GuardRefusal)
+// plus the input-size backstop (`too_long`) refused at the run() ingress before persist/model. The UI
+// renders every one of these as a polite RefusalNotice (src/lib/chat-ui.ts classifier + refusalCopy),
+// so this union must stay in step with that handling.
+export type RefusalPartReason = GuardRefusal | "too_long";
+
 export interface RefusalPart {
   type: "data-refusal";
   id: string;
-  data: { reason: GuardRefusal };
+  data: { reason: RefusalPartReason };
 }
 
 /**
- * The guard refusal part (AC-15 cap / AC-20 daily budget), streamed by the agent-side backstop when
- * a turn is over the limit. A DISTINCT taxonomy from `data-error`: not a failure, but a polite limit
- * - the client renders it like the server action's typed refusal, not the error card.
+ * The refusal part (AC-15 cap / AC-20 daily budget, plus `too_long` for an over-length turn), streamed
+ * by the agent-side backstop when a turn is refused before the model. A DISTINCT taxonomy from
+ * `data-error`: not a failure, but a polite limit - the client renders it like the server action's
+ * typed refusal, not the error card.
  */
-export function refusalPart(id: string, reason: GuardRefusal): RefusalPart {
+export function refusalPart(id: string, reason: RefusalPartReason): RefusalPart {
   return { type: "data-refusal", id, data: { reason } };
 }
 
@@ -174,7 +181,7 @@ function isPersistablePayload(data: unknown): boolean {
   if (typeof data !== "object" || data === null) return false;
   const d = data as Record<string, unknown>;
   if (d.kind === "system" || d.kind === "unanswerable") return true; // error marker
-  if (d.reason === "guest_cap" || d.reason === "daily_budget") return true; // refusal marker
+  if (d.reason === "guest_cap" || d.reason === "daily_budget" || d.reason === "too_long") return true; // refusal marker
   return false;
 }
 
@@ -251,17 +258,27 @@ type RunMessage = { role: string; content?: unknown };
  * on turn-1 arrival (`startConversation` already persisted message #1 before triggering) and on
  * regenerate (no new user turn) - it never double-persists. Idempotent across a run retry for the same
  * reason: once persisted, the stored count catches up and the tail is empty.
+ *
+ * Input-size backstop (both-layers, mirrors the cap/budget guard): the client transport appends a
+ * follow-up to `.in` with only a write-scoped token, bypassing the action's `TextSchema` gate. So an
+ * over-length NEW turn is refused HERE - returning "too_long" and persisting NOTHING - before the
+ * oversized payload can reach Postgres or Bedrock. The bound is the SAME `MAX_INPUT_CHARS` the action
+ * enforces (imported from ./guard, no duplicate literal), applied to the trimmed text like `TextSchema`,
+ * so the two layers cannot drift. `null` means the turn(s) were within bound and persisted (or a no-op).
  */
 export async function persistIncomingUserTurns(
   store: Store,
   chatId: string,
   messages: RunMessage[],
-): Promise<void> {
+): Promise<"too_long" | null> {
   const incoming = messages.filter((m) => m.role === "user").map((m) => userMessageText(m.content));
   const loaded = await store.getConversation(chatId);
   const persistedUserCount = loaded ? loaded.messages.filter((m) => m.role === "user").length : 0;
-  for (const text of incoming.slice(persistedUserCount)) {
+  const newTurns = incoming.slice(persistedUserCount);
+  if (newTurns.some((text) => text.trim().length > MAX_INPUT_CHARS)) return "too_long";
+  for (const text of newTurns) {
     if (text.trim().length === 0) continue;
     await store.appendMessage(chatId, "user", text, null);
   }
+  return null;
 }

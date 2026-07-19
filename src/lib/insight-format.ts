@@ -5,8 +5,9 @@ import type { DataPoint } from "@shared/insight";
 
 /** The error taxonomy the agent tags (mirrors trigger/parts.ts AgentErrorKind - UI copy layer). */
 export type ErrorKind = "system" | "unanswerable";
-/** The guard refusal taxonomy (mirrors trigger/guard.ts GuardRefusal - UI copy layer). */
-export type RefusalReason = "guest_cap" | "daily_budget";
+/** The refusal taxonomy (mirrors trigger/parts.ts RefusalPartReason - UI copy layer): the cap/budget
+ *  guard plus `too_long` for an over-length turn refused at the agent-run ingress. */
+export type RefusalReason = "guest_cap" | "daily_budget" | "too_long";
 
 /** AC-10: distinct copy for a system failure vs an unanswerable question. Never a raw error. */
 export function errorCopy(kind: ErrorKind): string {
@@ -15,11 +16,12 @@ export function errorCopy(kind: ErrorKind): string {
     : "I could not answer that - try rephrasing";
 }
 
-/** AC-15/AC-20: a polite limit notice (not an error) shown until the auth dialog exists. */
+/** AC-15/AC-20: a polite limit notice (not an error) shown until the auth dialog exists. `too_long`
+ *  is the agent-run input-size backstop (a payload past MAX_INPUT_CHARS reaching `.in` directly). */
 export function refusalCopy(reason: RefusalReason): string {
-  return reason === "guest_cap"
-    ? "You have reached the guest message limit. Sign in soon to keep going."
-    : "The service has reached today's message limit. Try again tomorrow.";
+  if (reason === "guest_cap") return "You have reached the guest message limit. Sign in soon to keep going.";
+  if (reason === "too_long") return "That message is too long. Please shorten it and try again.";
+  return "The service has reached today's message limit. Try again tomorrow.";
 }
 
 /** Money for verdicts and axes: whole thousands read as $Nk, smaller values in full. */

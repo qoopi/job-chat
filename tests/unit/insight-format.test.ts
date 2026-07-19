@@ -27,6 +27,12 @@ describe("refusalCopy (guest cap / daily budget - polite limit)", () => {
   it("gives a distinct notice for the daily budget", () => {
     expect(refusalCopy("daily_budget")).not.toBe(refusalCopy("guest_cap"));
   });
+  it("gives a distinct 'too long' notice for an over-length turn", () => {
+    const copy = refusalCopy("too_long");
+    expect(copy.toLowerCase()).toContain("too long");
+    expect(copy).not.toBe(refusalCopy("guest_cap"));
+    expect(copy).not.toBe(refusalCopy("daily_budget"));
+  });
 });
 
 describe("formatUsd (verdict/axis money - numbers are the heroes)", () => {

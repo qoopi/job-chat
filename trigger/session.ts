@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
-import { checkMessageGuards } from "./guard";
+import { checkMessageGuards, MAX_INPUT_CHARS } from "./guard";
 
 // The session core: the guard + landing-handoff logic the "use server" actions wrap. Injectable
 // (store, guards, startSession, mintToken, now) so it is testable against a real store without the
@@ -58,9 +58,10 @@ export type SendResult = SendOk | { ok: false; reason: RefusalReason };
 export type MintResult = { ok: true; token: string } | { ok: false; reason: "not_found" };
 
 // Input bounds at the trust boundary (before any store write or trigger): a bounded question/text
-// keeps a hostile 100KB payload out of Bedrock (token cost) and the message store (DB bloat). Trim is
-// only for the empty check - the ORIGINAL text is persisted (the title derivation trims separately).
-const MAX_INPUT_CHARS = 2000;
+// keeps a hostile 100KB payload out of Bedrock (token cost) and the message store (DB bloat). The
+// bound (MAX_INPUT_CHARS) is shared with the agent-run ingress backstop (trigger/guard.ts) so the two
+// layers cannot drift. Trim is only for the empty check - the ORIGINAL text is persisted (the title
+// derivation trims separately).
 const TextSchema = z.string().trim().min(1).max(MAX_INPUT_CHARS);
 const ConversationIdSchema = z.string().uuid();
 

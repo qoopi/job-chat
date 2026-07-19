@@ -64,14 +64,17 @@ export const jobChatAgent = chat.agent({
     // streams a freshly-triggered turn live), NOT by the server action, so `run()` is the single
     // persist site (no-op on turn-1 arrival + regenerate; see persistIncomingUserTurns).
     //
-    // The hard backstop (AC-15 cap / AC-20 daily budget) on the token's REAL path to Bedrock: the
-    // browser holds a write-scoped session token and the standard transport appends follow-ups
-    // straight to the inbox, bypassing the server action's early refusal. So the guard - counted via
-    // the store, same as the action - MUST also hold here. Over the limit: stream a taxonomized
-    // refusal part (006 renders it like an action refusal) and return WITHOUT calling the model, so a
-    // guest can never drive Bedrock past the cap/budget.
+    // The hard backstop (AC-15 cap / AC-20 daily budget / input size) on the token's REAL path to
+    // Bedrock: the browser holds a write-scoped session token and the standard transport appends
+    // follow-ups straight to the inbox, bypassing the server action's early refusal. So the guards -
+    // counted via the store, same as the action - MUST also hold here. `persistIncomingUserTurns`
+    // refuses an over-length turn ("too_long") before it persists or the model runs; the cap/budget
+    // guard then counts the now-persisted turn. Any refusal: stream a taxonomized refusal part (006
+    // renders it like an action refusal) and return WITHOUT calling the model, so a guest can never
+    // drive Bedrock past the cap/budget or with an unbounded payload.
     const refusal = await withStore(async (store) => {
-      await persistIncomingUserTurns(store, chatId, messages);
+      const tooLong = await persistIncomingUserTurns(store, chatId, messages);
+      if (tooLong) return tooLong;
       return checkConversationGuards({ store, guards: getGuardConfig(), now: () => new Date() }, chatId);
     });
     if (refusal) {

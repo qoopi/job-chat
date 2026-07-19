@@ -166,6 +166,16 @@ describe("refusalPart carries the guard reason for the UI to render like an acti
       data: { reason: "daily_budget" },
     });
   });
+
+  // The input-size backstop reuses the same data-refusal part so an over-length turn refused at the
+  // agent-run ingress renders as a polite notice, identically to a cap/budget refusal.
+  it("emits the too_long reason on the same data-refusal part", () => {
+    expect(refusalPart("m1", "too_long")).toEqual({
+      type: "data-refusal",
+      id: "m1",
+      data: { reason: "too_long" },
+    });
+  });
 });
 
 describe("extractAssistantPersistence pulls the persisted content + card payload (AC-13)", () => {
@@ -246,5 +256,13 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
       parts: [{ type: "data-refusal", id: "r1", data: { reason: "guest_cap" } }],
     };
     expect(extractAssistantPersistence(message).parts).toEqual({ reason: "guest_cap" });
+  });
+
+  it("persists the too_long refusal marker so the notice survives resume", () => {
+    const message = {
+      role: "assistant",
+      parts: [{ type: "data-refusal", id: "r1", data: { reason: "too_long" } }],
+    };
+    expect(extractAssistantPersistence(message).parts).toEqual({ reason: "too_long" });
   });
 });

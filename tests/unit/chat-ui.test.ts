@@ -48,9 +48,10 @@ describe("classifyCardData", () => {
     expect(classifyCardData({ kind: "unanswerable" })).toEqual({ kind: "error", errorKind: "unanswerable" });
   });
 
-  it("classifies the refusal markers (AC-15/AC-20) by reason", () => {
+  it("classifies the refusal markers (AC-15/AC-20 + too_long) by reason", () => {
     expect(classifyCardData({ reason: "guest_cap" })).toEqual({ kind: "refusal", reason: "guest_cap" });
     expect(classifyCardData({ reason: "daily_budget" })).toEqual({ kind: "refusal", reason: "daily_budget" });
+    expect(classifyCardData({ reason: "too_long" })).toEqual({ kind: "refusal", reason: "too_long" });
   });
 
   it("falls to unknown for an unrecognized shape (never throws in render)", () => {

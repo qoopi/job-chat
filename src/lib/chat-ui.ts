@@ -43,7 +43,7 @@ export function classifyCardData(data: unknown): CardClass {
     if (data.kind === "system" || data.kind === "unanswerable") {
       return { kind: "error", errorKind: data.kind };
     }
-    if (data.reason === "guest_cap" || data.reason === "daily_budget") {
+    if (data.reason === "guest_cap" || data.reason === "daily_budget" || data.reason === "too_long") {
       return { kind: "refusal", reason: data.reason };
     }
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Store, Message } from "@shared/store";
 import { persistIncomingUserTurns } from "../../trigger/parts";
+import { MAX_INPUT_CHARS } from "../../trigger/guard";
 
 // The single persist site for a follow-up user turn (mechanism a, 004 round 3). Because a follow-up is
 // delivered by the client transport's `sendMessages` (deliver+watch - the only SDK path that streams a
@@ -73,5 +74,24 @@ describe("persistIncomingUserTurns (the run() single persist site)", () => {
     const { store, appended } = fakeStore([user("q1"), assistant("a1")]);
     await persistIncomingUserTurns(store, "c1", [user("q1"), assistant("a1"), user("   ")]);
     expect(appended).toEqual([]);
+  });
+
+  // Input-size backstop on the real follow-up path (mechanism a): the client transport appends to `.in`
+  // with only a write-scoped token, bypassing the action's TextSchema gate. An over-length incoming turn
+  // must be refused HERE - before any persist - so the oversized payload never reaches Postgres or Bedrock.
+  it("refuses an over-length incoming turn with 'too_long' and persists NOTHING", async () => {
+    const { store, appended } = fakeStore([user("q1"), assistant("a1")]);
+    const oversized = "x".repeat(MAX_INPUT_CHARS + 1);
+    const outcome = await persistIncomingUserTurns(store, "c1", [user("q1"), assistant("a1"), user(oversized)]);
+    expect(outcome).toBe("too_long");
+    expect(appended).toEqual([]);
+  });
+
+  it("persists a turn exactly at the length bound (the bound is inclusive) and returns null", async () => {
+    const { store, appended } = fakeStore([user("q1"), assistant("a1")]);
+    const atBound = "y".repeat(MAX_INPUT_CHARS);
+    const outcome = await persistIncomingUserTurns(store, "c1", [user("q1"), assistant("a1"), user(atBound)]);
+    expect(outcome).toBeNull();
+    expect(appended).toEqual([{ role: "user", content: atBound, parts: null }]);
   });
 });
