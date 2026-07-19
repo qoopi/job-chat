@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Gitignored Trigger.dev local build artifacts + dev state (never our code to lint).
+    ".trigger/**",
+    // Gitignored, vendored design mirror (kept verbatim; not our code to lint).
+    ".claude/design-spec/**",
   ]),
 ]);
 

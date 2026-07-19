@@ -8,11 +8,14 @@ export default defineConfig({
   outputDir: "./tests/test-results",
   webServer: {
     // next dev daemonizes in Next 16 (parent exits -> Playwright thinks it failed), so e2e runs
-    // against the production server. For a fast local loop: run `bunx next dev --port 3111`
-    // yourself - reuseExistingServer picks it up and skips the build.
+    // against the production server. For a fast local loop: run `JOBCHAT_E2E=1 bunx next dev --port
+    // 3111` yourself - reuseExistingServer picks it up and skips the build.
+    // JOBCHAT_E2E swaps the Bedrock-backed transport/actions for a scripted mock + fixtures, so the
+    // suite drives the whole chat loop with no Trigger.dev / ClickHouse / Bedrock.
     command: "bunx next build && bunx next start --port 3111",
     url: "http://localhost:3111",
+    env: { JOBCHAT_E2E: "1" },
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
   },
 });

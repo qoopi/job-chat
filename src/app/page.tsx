@@ -1,65 +1,107 @@
-import Image from "next/image";
+import Link from "next/link";
+import { LandingComposer } from "@/components/landing/LandingComposer";
+import { GITHUB_URL, HACKATHON_URL, SEARCHNAPPLY_URL } from "@/lib/links";
+import { isE2E } from "@/lib/e2e";
 
-export default function Home() {
+// Landing (mock 4b) - product in one shell-colored screen. The ask box + chips (LandingComposer) submit
+// the first message and hand off to the chat with the stream already attached (AC-3). AC-19: credit
+// links live here - the hackathon credit in the header, GitHub + searchnapply in the footer.
+export default function Landing() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "var(--shell-bg)",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      {/* header: wordmark + hackathon credit (partner colors) + inert Sign in */}
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "24px 40px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+          <div className="sb-brand" style={{ padding: 0 }}>
+            jobchat.dev
+          </div>
           <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+            href={HACKATHON_URL}
             target="_blank"
-            rel="noopener noreferrer"
+            rel="noreferrer"
+            style={{ fontSize: "var(--fs-xs)", color: "var(--shell-fg-dim)" }}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
+            built for the <span style={{ color: "var(--clickhouse)", fontWeight: 600 }}>ClickHouse</span>{" "}
+            &times; <span style={{ color: "var(--triggerdev)", fontWeight: 600 }}>Trigger.dev</span> hackathon
           </a>
         </div>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <button className="btn btn-shell btn-sm" type="button" disabled title="Coming soon">
+            Sign in
+          </button>
+          <span style={{ fontSize: "var(--fs-2xs)", color: "var(--shell-fg-dim)" }}>soon</span>
+        </span>
+      </header>
+
+      {/* hero */}
+      <main
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 22,
+          padding: 24,
+          textAlign: "center",
+        }}
+      >
+        <h1
+          style={{
+            margin: 0,
+            fontSize: 44,
+            fontWeight: 600,
+            letterSpacing: "-0.02em",
+            color: "var(--shell-strong)",
+            lineHeight: 1.15,
+          }}
+        >
+          The jobs market, answered.
+        </h1>
+        <p style={{ margin: 0, fontSize: 16, color: "var(--shell-fg-dim)", maxWidth: 520 }}>
+          Ask a question, get a verdict with a chart — from 3,483 live postings. Add your resume
+          and it finds the roles that fit you.
+        </p>
+        <LandingComposer e2e={isE2E()} />
       </main>
+
+      {/* footer credits: GitHub + searchnapply */}
+      <footer
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          gap: 8,
+          padding: "20px 40px",
+          fontSize: "var(--fs-xs)",
+          color: "var(--shell-fg-dim)",
+        }}
+      >
+        <Link href={GITHUB_URL} target="_blank" rel="noreferrer" style={{ color: "var(--shell-fg)" }}>
+          GitHub
+        </Link>
+        <span>·</span>
+        <span>
+          Data by{" "}
+          <a href={SEARCHNAPPLY_URL} target="_blank" rel="noreferrer" style={{ color: "var(--shell-fg)" }}>
+            searchnapply.com
+          </a>
+        </span>
+      </footer>
     </div>
   );
 }

@@ -1,33 +1,32 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
+import { cookies } from "next/headers";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Inter is the product typeface (Geist is a design-token alternative only). Self-hosted by next/font
+// so there is no external fetch and no flash of fallback text; exposed as --font-inter, which
+// globals.css wires into --font-sans.
+const inter = Inter({
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-inter",
 });
 
 export const metadata: Metadata = {
-  title: "Job.Chat",
-  description: "Ask the job market anything - charts, not paragraphs.",
+  title: "jobchat.dev - the jobs market, answered",
+  description: "Ask a question, get a verdict with a chart - from live job postings.",
 };
 
-export default function RootLayout({
+/** Theme is read from the cookie server-side and stamped on <html> before paint (no FOUC). */
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const theme = (await cookies()).get("theme")?.value === "dark" ? "Dark" : "Light";
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="en" data-theme={theme} data-font="Inter" className={inter.variable}>
+      <body>{children}</body>
     </html>
   );
 }
