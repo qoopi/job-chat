@@ -1,7 +1,12 @@
 import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import postgres, { type Sql } from "postgres";
 import { createStore, type Store } from "@shared/store";
-import { createSessionService, type MintToken, type StartSession } from "../../trigger/session";
+import {
+  createSessionService,
+  type MintToken,
+  type SendToInbox,
+  type StartSession,
+} from "../../trigger/session";
 
 // Strand 2 guards + landing handoff, integration against real Postgres. The session service is the
 // injectable core the "use server" actions wrap: it bounds untrusted input, confirms the caller owns
@@ -26,6 +31,9 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
   }
   function okMintToken(): MintToken {
     return vi.fn(async (conversationId: string) => `pat_${conversationId}`);
+  }
+  function okSendToInbox(): SendToInbox {
+    return vi.fn(async () => {});
   }
 
   async function purge(user: string) {
@@ -59,6 +67,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       guards: { guestCap: 10, dailyBudget: HUGE },
       startSession,
       mintToken: okMintToken(),
+      sendToInbox: okSendToInbox(),
       now: () => new Date(),
     });
 
@@ -77,6 +86,112 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     ]);
   });
 
+  // 004 round 2 P0: the preloaded agent run boots with empty messages and waits on the session inbox
+  // (`.in`) BEFORE it ever calls run(); `createStartSessionAction` never appends there, so pre-fix the
+  // user turn reached Postgres but never Bedrock. The landing handoff must DELIVER the user turn to the
+  // inbox after triggering - and the delivered envelope must be the exact submit-message shape the SDK's
+  // `.in` drain surfaces as the user's message (replaySessionInTail keeps kind:"message" +
+  // payload.trigger:"submit-message" + payload.message, and reads text from the message's text parts).
+  it("startConversation delivers the user turn to the session inbox after persist + trigger (P0)", async () => {
+    const userId = freshGuestId();
+    await store.getOrCreateUser(userId);
+    const startSession = okStartSession();
+    const sendToInbox = okSendToInbox();
+    const svc = createSessionService({
+      store,
+      guards: { guestCap: 10, dailyBudget: HUGE },
+      startSession,
+      mintToken: okMintToken(),
+      sendToInbox,
+      now: () => new Date(),
+    });
+
+    const question = "Which companies are hiring the most right now?";
+    const res = await svc.startConversation(userId, question);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    // Delivered exactly once, addressed to THIS conversation, carrying the user's text as the
+    // persisted message id.
+    expect(sendToInbox).toHaveBeenCalledTimes(1);
+    const [chatId, chunk] = (sendToInbox as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(chatId).toBe(res.conversationId);
+    expect(chunk).toMatchObject({
+      kind: "message",
+      payload: {
+        trigger: "submit-message",
+        chatId: res.conversationId,
+        message: {
+          id: res.messageId,
+          role: "user",
+          parts: [{ type: "text", text: question }],
+        },
+      },
+    });
+
+    // Ordering guard: the user message is persisted (counted) BEFORE the inbox is written, so the
+    // agent's guard backstop counts this turn, and the inbox write happens AFTER the run is triggered.
+    const startOrder = (startSession as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    const inboxOrder = (sendToInbox as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(inboxOrder).toBeGreaterThan(startOrder);
+    const reloaded = await store.getConversation(res.conversationId);
+    expect(reloaded!.messages.filter((m) => m.role === "user")).toHaveLength(1);
+  });
+
+  // The same inbox delivery must fire on the follow-up path (an already-live session): without it a
+  // second question redirects nowhere and the resumed run idles on an empty inbox.
+  it("sendMessage delivers the follow-up turn to the session inbox (P0)", async () => {
+    const owner = freshGuestId();
+    await store.getOrCreateUser(owner);
+    const conv = await store.createConversation(owner, "owner's thread");
+    const startSession = okStartSession();
+    const sendToInbox = okSendToInbox();
+    const svc = createSessionService({
+      store,
+      guards: { guestCap: 10, dailyBudget: HUGE },
+      startSession,
+      mintToken: okMintToken(),
+      sendToInbox,
+      now: () => new Date(),
+    });
+
+    const res = await svc.sendMessage(conv.id, "and how about salaries?", owner);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(sendToInbox).toHaveBeenCalledTimes(1);
+    const [chatId, chunk] = (sendToInbox as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(chatId).toBe(conv.id);
+    expect(chunk).toMatchObject({
+      kind: "message",
+      payload: {
+        trigger: "submit-message",
+        message: { id: res.messageId, role: "user", parts: [{ type: "text", text: "and how about salaries?" }] },
+      },
+    });
+  });
+
+  // A refused turn (over cap) must never reach the inbox - the guard short-circuits before trigger.
+  it("does NOT deliver to the inbox when the turn is refused (guest_cap)", async () => {
+    const userId = freshGuestId();
+    await store.getOrCreateUser(userId);
+    const conv = await store.createConversation(userId, "cap check");
+    const cap = 3;
+    for (let i = 0; i < cap; i++) await store.appendMessage(conv.id, "user", `msg ${i}`, null);
+    const sendToInbox = okSendToInbox();
+    const svc = createSessionService({
+      store,
+      guards: { guestCap: cap, dailyBudget: HUGE },
+      startSession: okStartSession(),
+      mintToken: okMintToken(),
+      sendToInbox,
+      now: () => new Date(),
+    });
+
+    const res = await svc.sendMessage(conv.id, "one too many", userId);
+    expect(res).toEqual({ ok: false, reason: "guest_cap" });
+    expect(sendToInbox).not.toHaveBeenCalled();
+  });
+
   // must-fix B: unbounded input is refused at the boundary before any store write or trigger.
   it("startConversation refuses over-long input (invalid_input) before any persist or trigger", async () => {
     const userId = freshGuestId();
@@ -87,6 +202,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       guards: { guestCap: 10, dailyBudget: HUGE },
       startSession,
       mintToken: okMintToken(),
+      sendToInbox: okSendToInbox(),
       now: () => new Date(),
     });
 
@@ -111,6 +227,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       guards: { guestCap: cap, dailyBudget: HUGE },
       startSession,
       mintToken: okMintToken(),
+      sendToInbox: okSendToInbox(),
       now: () => new Date(),
     });
 
@@ -138,6 +255,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       guards: { guestCap: 10, dailyBudget: HUGE },
       startSession,
       mintToken: okMintToken(),
+      sendToInbox: okSendToInbox(),
       now: () => new Date(),
     });
 
@@ -159,6 +277,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       guards: { guestCap: 10, dailyBudget: HUGE },
       startSession,
       mintToken: okMintToken(),
+      sendToInbox: okSendToInbox(),
       now: () => new Date(),
     });
 
@@ -179,6 +298,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       guards: { guestCap: 10, dailyBudget: 0 }, // 0 = exhausted: refuse all
       startSession,
       mintToken: okMintToken(),
+      sendToInbox: okSendToInbox(),
       now: () => new Date(),
     });
 
@@ -209,6 +329,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       guards: { guestCap: 10, dailyBudget: budget }, // exhausted by noisyGuest alone
       startSession,
       mintToken: okMintToken(),
+      sendToInbox: okSendToInbox(),
       now: () => new Date(),
     });
 
@@ -224,6 +345,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       guards: { guestCap: 10, dailyBudget: HUGE },
       startSession: okStartSession(),
       mintToken: okMintToken(),
+      sendToInbox: okSendToInbox(),
       now: () => new Date(),
     });
     expect(await svc.sendMessage(crypto.randomUUID(), "hi", guestId)).toEqual({ ok: false, reason: "not_found" });
@@ -242,6 +364,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       guards: { guestCap: 10, dailyBudget: HUGE },
       startSession: okStartSession(),
       mintToken,
+      sendToInbox: okSendToInbox(),
       now: () => new Date(),
     });
 

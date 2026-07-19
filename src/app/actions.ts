@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import postgres, { type Sql } from "postgres";
-import { auth } from "@trigger.dev/sdk";
+import { auth, sessions } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore } from "@shared/store";
 import { getGuardConfig } from "@shared/env";
@@ -13,6 +13,7 @@ import {
   createSessionService,
   type MintResult,
   type MintToken,
+  type SendToInbox,
   type SessionResult,
   type StartSession,
 } from "../../trigger/session";
@@ -44,12 +45,19 @@ const startSession: StartSession = async ({ chatId }) => {
 const mintToken: MintToken = (conversationId) =>
   auth.createPublicToken({ scopes: chatTokenScopes(conversationId), expirationTime: "1h" });
 
+// Deliver the user turn to the durable session inbox after the run is triggered. This is the only
+// server-side writer of `.in`; the preloaded agent run waits here for its first message (the browser
+// transport never sends one in our server-mediated flow). The session-scoped secret-key client
+// addresses the session by its externalId (= our conversation id).
+const sendToInbox: SendToInbox = (chatId, chunk) => sessions.open(chatId).in.send(chunk);
+
 function service() {
   return createSessionService({
     store: createStore(sql()),
     guards: getGuardConfig(),
     startSession,
     mintToken,
+    sendToInbox,
     now: () => new Date(),
   });
 }

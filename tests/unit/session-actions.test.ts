@@ -3,7 +3,9 @@ import type { Store } from "@shared/store";
 import {
   chatTokenScopes,
   createSessionService,
+  userTurnChunk,
   type MintToken,
+  type SendToInbox,
   type StartSession,
 } from "../../trigger/session";
 
@@ -32,6 +34,34 @@ describe("chatTokenScopes", () => {
   });
 });
 
+describe("userTurnChunk (the session-inbox wire contract, 004 round 2 P0)", () => {
+  // The exact envelope the SDK's `.in` drain (replaySessionInTail) surfaces as a user message: it
+  // keeps records whose `kind` is "message" and whose `payload.trigger` is "submit-message" with a
+  // `payload.message`, then extracts text from the message's `text` parts. A drift in any of these
+  // fields means the preloaded agent run never sees the turn (the root cause this round fixes).
+  it("builds the submit-message envelope the agent's inbox drain accepts", () => {
+    const chunk = userTurnChunk("conv-1", "msg-1", "Which companies are hiring the most?");
+    expect(chunk).toEqual({
+      kind: "message",
+      payload: {
+        trigger: "submit-message",
+        chatId: "conv-1",
+        message: {
+          id: "msg-1",
+          role: "user",
+          parts: [{ type: "text", text: "Which companies are hiring the most?" }],
+        },
+      },
+    });
+    // Mirror the SDK's extraction (ai.js extractLastUserMessageText): the text is recoverable.
+    const text = chunk.payload.message.parts
+      .filter((p) => p.type === "text")
+      .map((p) => p.text)
+      .join("\n");
+    expect(text).toBe("Which companies are hiring the most?");
+  });
+});
+
 describe("session core input bounds (must-fix B)", () => {
   // A store whose every method throws: proves invalid input is refused BEFORE any store access.
   function explodingStore(): Store {
@@ -51,14 +81,17 @@ describe("session core input bounds (must-fix B)", () => {
   function svc() {
     const startSession = vi.fn<StartSession>();
     const mintToken = vi.fn<MintToken>();
+    const sendToInbox = vi.fn<SendToInbox>();
     return {
       startSession,
       mintToken,
+      sendToInbox,
       service: createSessionService({
         store: explodingStore(),
         guards: { guestCap: 10, dailyBudget: 200 },
         startSession,
         mintToken,
+        sendToInbox,
         now: () => new Date(),
       }),
     };

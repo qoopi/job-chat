@@ -19,11 +19,19 @@ export type StartSession = (args: {
 /** Mints a fresh session-scoped public token for the transport (see `chatTokenScopes`). */
 export type MintToken = (conversationId: string) => Promise<string>;
 
+/**
+ * Posts one record to a conversation's durable session inbox (`.in`) - the SDK seam the agent run
+ * consumes user turns from. Injected (the real impl is `sessions.open(chatId).in.send(chunk)` in the
+ * "use server" adapter) so the core stays pure and testable without the Trigger runtime.
+ */
+export type SendToInbox = (chatId: string, chunk: unknown) => Promise<void>;
+
 export interface SessionDeps {
   store: Store;
   guards: GuardConfig;
   startSession: StartSession;
   mintToken: MintToken;
+  sendToInbox: SendToInbox;
   now: () => Date;
 }
 
@@ -56,6 +64,25 @@ export function chatTokenScopes(conversationId: string) {
   return { read: { sessions: conversationId }, write: { sessions: conversationId } } as const;
 }
 
+/**
+ * The `ChatInputChunk` envelope a user turn takes on the session inbox (`.in`). This is the exact
+ * shape the SDK's inbox drain surfaces as a user message: `replaySessionInTail` keeps only records
+ * whose `kind` is "message" and whose `payload.trigger` is "submit-message" carrying a
+ * `payload.message`, and `extractLastUserMessageText` reads the text from the message's `text` parts.
+ * It mirrors what the browser transport's `sendRaw` posts, so the preloaded agent run - which waits on
+ * `.in` before it ever calls `run()` - consumes the turn server-side instead of idling until timeout.
+ */
+export function userTurnChunk(chatId: string, messageId: string, text: string) {
+  return {
+    kind: "message",
+    payload: {
+      trigger: "submit-message",
+      chatId,
+      message: { id: messageId, role: "user", parts: [{ type: "text", text }] },
+    },
+  } as const;
+}
+
 export interface SessionService {
   /** Landing handoff (AC-3): create conversation + user message #1, trigger the run, return the id. */
   startConversation(userId: string, question: string): Promise<SessionResult>;
@@ -66,13 +93,25 @@ export interface SessionService {
 }
 
 export function createSessionService(deps: SessionDeps): SessionService {
-  const { store, guards, startSession, mintToken, now } = deps;
+  const { store, guards, startSession, mintToken, sendToInbox, now } = deps;
 
-  async function trigger(conversationId: string, message: string): Promise<{ publicAccessToken: string; runId: string }> {
+  // Start (or resume) the durable session, THEN deliver the user turn to its inbox. The order matters:
+  // `startSession` fires a PRELOAD run that boots with empty messages and blocks on `.in` before it ever
+  // reaches the agent's `run()` (SDK ai.js: the preload wait sits ahead of the turn loop). Nothing else
+  // in a server-mediated flow ever writes `.in` - the browser only reconnects/resumes, it never
+  // `sendMessage`s - so without this append the message reaches Postgres but never Bedrock. The user
+  // turn is already persisted (and thus counted) by the caller before we get here, so the agent's guard
+  // backstop counts this turn.
+  async function trigger(
+    conversationId: string,
+    messageId: string,
+    text: string,
+  ): Promise<{ publicAccessToken: string; runId: string }> {
     const { publicAccessToken, runId } = await startSession({
       chatId: conversationId,
-      clientData: { message },
+      clientData: { message: text },
     });
+    await sendToInbox(conversationId, userTurnChunk(conversationId, messageId, text));
     return { publicAccessToken, runId };
   }
 
@@ -85,7 +124,7 @@ export function createSessionService(deps: SessionDeps): SessionService {
 
       const conversation = await store.createConversation(userId, question);
       const message = await store.appendMessage(conversation.id, "user", question, null);
-      const { publicAccessToken, runId } = await trigger(conversation.id, question);
+      const { publicAccessToken, runId } = await trigger(conversation.id, message.id, question);
       return { ok: true, conversationId: conversation.id, messageId: message.id, publicAccessToken, runId };
     },
 
@@ -102,7 +141,7 @@ export function createSessionService(deps: SessionDeps): SessionService {
       if (refusal) return { ok: false, reason: refusal };
 
       const message = await store.appendMessage(conversationId, "user", text, null);
-      const { publicAccessToken, runId } = await trigger(conversationId, text);
+      const { publicAccessToken, runId } = await trigger(conversationId, message.id, text);
       return { ok: true, conversationId, messageId: message.id, publicAccessToken, runId };
     },
 
