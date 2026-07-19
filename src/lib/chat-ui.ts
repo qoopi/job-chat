@@ -88,11 +88,52 @@ export function reconcileMessagesById(messages: UIMessage[]): UIMessage[] {
 
 /** The concatenated text of a message's text parts (a plain answer or the one-line verdict prose). */
 export function messageText(message: Pick<UIMessage, "parts">): string {
-  return message.parts
+  const texts = message.parts
     .filter((p): p is { type: "text"; text: string } => p.type === "text" && typeof (p as { text?: unknown }).text === "string")
-    .map((p) => p.text)
-    .join("")
-    .trim();
+    .map((p) => p.text);
+  // Preserve the boundary between adjacent text parts. The stream and the store both split prose into
+  // separate text parts (a data part or a step boundary ends one and starts the next); a plain `join("")`
+  // glued the last word of one part to the first of the next ("...market.The market..."). Insert a single
+  // space only where neither side already carries boundary whitespace, so existing spacing is never doubled.
+  let out = "";
+  for (const t of texts) {
+    if (out.length > 0 && !/\s$/.test(out) && !/^\s/.test(t)) out += " ";
+    out += t;
+  }
+  return out.trim();
+}
+
+export interface ProseSpan {
+  text: string;
+  bold: boolean;
+}
+
+/**
+ * Split assistant prose into bold / plain spans for the ai bubble. The agent's answers arrive as light
+ * markdown; render `**bold**` as a real bold span and strip the remaining inline markers (`code`,
+ * *emph*, ATX headings) to plain text - no markdown library, the surface is one bubble of short prose.
+ * User text is never passed through here (their question renders verbatim). Pure, so it is unit-tested.
+ */
+export function proseSpans(text: string): ProseSpan[] {
+  const spans: ProseSpan[] = [];
+  const bold = /\*\*(.+?)\*\*/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = bold.exec(text)) !== null) {
+    if (m.index > last) spans.push({ text: stripInlineMarkers(text.slice(last, m.index)), bold: false });
+    spans.push({ text: stripInlineMarkers(m[1]), bold: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) spans.push({ text: stripInlineMarkers(text.slice(last)), bold: false });
+  return spans.filter((s) => s.text.length > 0);
+}
+
+function stripInlineMarkers(s: string): string {
+  return s
+    .replace(/`([^`]*)`/g, "$1") // inline `code` -> plain
+    .replace(/^\s*#{1,6}\s+/gm, "") // ATX heading markers -> plain
+    .replace(/\*([^*]+)\*/g, "$1") // leftover *emph* -> plain
+    .replace(/\*\*/g, ""); // any unmatched bold marker
 }
 
 // A resumed store message (AC-13). Structural, not the full `Store.Message` (which carries a Date and

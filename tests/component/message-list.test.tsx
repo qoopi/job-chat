@@ -99,6 +99,19 @@ describe("MessageList", () => {
     expect(freshChip.textContent).toBe("Only remote roles");
   });
 
+  test("live-walk #4a: an assistant text turn renders **bold** as <strong> with no literal asterisks", () => {
+    const messages: UIMessage[] = [
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "**3,315 new postings** over 90 days" }] },
+    ];
+    const { container } = render(
+      <MessageList messages={messages} status="ready" usedFollowups={noSet} onFollowup={noop} onRetry={noop} />,
+    );
+    const bubble = container.querySelector(".bubble.ai");
+    expect(bubble?.querySelector("strong")?.textContent).toBe("3,315 new postings");
+    expect(bubble?.textContent).toBe("3,315 new postings over 90 days");
+    expect(bubble?.textContent).not.toContain("*");
+  });
+
   test("AC-8: a loading part renders the skeleton card, not a filled insight", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "data-insight", id: "a1-c0", data: { id: "a1-c0", kind: "chart", chartType: "bars", status: "loading" } }] },

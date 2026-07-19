@@ -1,12 +1,12 @@
 "use client";
 
-import { memo } from "react";
+import { Fragment, memo } from "react";
 import type { UIMessage } from "ai";
 import { Bubble } from "./Bubble";
 import { InsightCard } from "@/components/insight/InsightCard";
 import { InsightCardSkeleton } from "@/components/insight/InsightCardSkeleton";
 import { ErrorCard, RefusalNotice } from "@/components/insight/ErrorCard";
-import { classifyCardData, isStreaming, messageText } from "@/lib/chat-ui";
+import { classifyCardData, isStreaming, messageText, proseSpans } from "@/lib/chat-ui";
 
 // Renders the live thread from `useChat` messages (AC-3/4/8/9/10/15 UI). Presentation only: given the
 // message list + streaming status + the one-shot chip set, it maps each message's parts to the 005
@@ -44,7 +44,12 @@ const AssistantMessage = memo(function AssistantMessage({
   return (
     <>
       {text ? (
-        <Bubble role="ai">{text}</Bubble>
+        <Bubble role="ai">
+          {/* Light markdown from the agent: render **bold** as bold, strip the rest to plain (#4a). */}
+          {proseSpans(text).map((s, i) =>
+            s.bold ? <strong key={i}>{s.text}</strong> : <Fragment key={i}>{s.text}</Fragment>,
+          )}
+        </Bubble>
       ) : null}
       {cards.map(({ id, data }) => {
         const cls = classifyCardData(data);

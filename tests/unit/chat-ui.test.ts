@@ -5,6 +5,7 @@ import {
   classifyCardData,
   isStreaming,
   messageText,
+  proseSpans,
   reconcileMessagesById,
   storeToUiMessages,
   type StoredMessage,
@@ -78,6 +79,55 @@ describe("messageText", () => {
         ] as never,
       }),
     ).toBe("Postings are up 12% this quarter.");
+  });
+
+  it("preserves the sentence boundary between adjacent text parts (live-walk #4b)", () => {
+    // The operator saw two prose parts glued: "...across the market.The market has seen...".
+    expect(
+      messageText({
+        parts: [
+          { type: "text", text: "Hiring cooled across the market." },
+          { type: "text", text: "The market has seen a 12% drop." },
+        ] as never,
+      }),
+    ).toBe("Hiring cooled across the market. The market has seen a 12% drop.");
+  });
+
+  it("does not double a space already present at a part boundary", () => {
+    expect(
+      messageText({
+        parts: [
+          { type: "text", text: "Hello " },
+          { type: "text", text: "world" },
+        ] as never,
+      }),
+    ).toBe("Hello world");
+  });
+});
+
+describe("proseSpans (ai bubble prose, live-walk #4a)", () => {
+  it("renders **bold** as a bold span with the asterisks removed (operator example)", () => {
+    expect(proseSpans("**3,315 new postings over the last 90 days**")).toEqual([
+      { text: "3,315 new postings over the last 90 days", bold: true },
+    ]);
+  });
+
+  it("splits mixed bold and plain text, keeping order and surrounding spaces", () => {
+    expect(proseSpans("There are **214** open roles")).toEqual([
+      { text: "There are ", bold: false },
+      { text: "214", bold: true },
+      { text: " open roles", bold: false },
+    ]);
+  });
+
+  it("strips other inline markdown to plain text (no literal markers)", () => {
+    expect(proseSpans("A `code` and *emph* note")).toEqual([{ text: "A code and emph note", bold: false }]);
+  });
+
+  it("returns plain text untouched when there is no markdown", () => {
+    expect(proseSpans("Amazon leads hiring with 214 open roles.")).toEqual([
+      { text: "Amazon leads hiring with 214 open roles.", bold: false },
+    ]);
   });
 });
 
