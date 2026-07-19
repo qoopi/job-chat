@@ -102,6 +102,48 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
     await writer.close();
   });
 
+  // Security: chStr() is the only thing standing between a free-text param and a raw-interpolated
+  // ClickHouse string literal (the deliberate deviation from query_params - see the module header
+  // and the task's Completion Report). Unit tests check the escaped text; this proves it holds
+  // against ClickHouse's REAL parser, not just a string match - each payload must stay inert (no
+  // rows match, since none of the fixture companies are garbage) and must not error out (a broken
+  // escaper produces invalid SQL, which ClickHouse rejects).
+  it("keeps injection-style free-text params inert against the real ClickHouse parser (no break-out)", async () => {
+    const payloads = [
+      "O'Brien", // single quote
+      "back\\slash", // literal backslash
+      "x' OR '1'='1", // classic quote break-out / filter-bypass attempt
+      "line1\nline2", // embedded newline
+      `'; DROP TABLE ${TABLE}; --`, // statement-injection attempt (targets the disposable test table)
+    ];
+    for (const company of payloads) {
+      const res = await analytics.runQuery("latest_postings", { company });
+      // None of the fixture companies (Google/Meta/Stripe/Amazon) match any payload above - a
+      // non-empty result would mean the filter stopped being "company ILIKE '%<payload>%'" and
+      // became something else (a break-out).
+      expect(res.rows).toEqual([]);
+    }
+    // The disposable fixture table must still be intact - a successful DROP-TABLE break-out would
+    // have destroyed it (and every later assertion/afterAll in this suite would then fail too).
+    const stillThere = await writer.query({
+      query: `SELECT count() AS c FROM ${TABLE}`,
+      format: "JSONEachRow",
+    });
+    const [{ c }] = await stillThere.json<{ c: number }>();
+    expect(Number(c)).toBe(10);
+  });
+
+  // `company`/`role` are wrapped as `%...%` before escaping, so a trailing backslash there always
+  // has a literal `%` between it and the closing quote chStr appends - never the adjacency the
+  // classic "backslash eats the closing quote" break-out needs. `city` is escaped bare
+  // (`city = ${chStr(p.city)}`), so a trailing backslash sits immediately before that quote: the one
+  // position where an unescaped backslash would swallow it and desynchronize the rest of the query.
+  // Proven against the real parser, same as above - not just the generated SQL text.
+  it("keeps a trailing backslash inert where it sits directly against the closing quote (city)", async () => {
+    const res = await analytics.runQuery("salary_distribution", { city: "trail\\" });
+    expect(res.rows).toEqual([]); // no fixture city is garbage, so a real filter matches nothing
+  });
+
   for (const q of LAUNCH_QUESTIONS) {
     it(`${q.id}: runs ${q.tool}, returns the executed SQL, and matches the fixture (AC-6, AC-11)`, async () => {
       executed.length = 0;

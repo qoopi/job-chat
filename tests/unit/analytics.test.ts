@@ -34,6 +34,35 @@ describe("buildTemplateSql", () => {
     expect(sql).toContain("company ILIKE '%O\\'Brien%'");
   });
 
+  // A param with no quote at all does not exercise the backslash-escaping step (chStr's first
+  // regex), so it cannot catch that step being dropped - "O'Brien" round-trips identically whether
+  // or not backslashes are escaped, since it contains none. These three cases fill that gap: a raw
+  // backslash, a backslash immediately before the closing quote (the classic "eats the quote"
+  // break-out), and a combined quote+backslash break-out attempt.
+  it("escapes a literal backslash in a free-text param (not silently dropped or left bare)", () => {
+    const { sql } = buildTemplateSql("latest_postings", { company: "back\\slash" }, "postings");
+    // one input backslash -> one escaped ('\\') backslash in the CH literal.
+    expect(sql).toContain("company ILIKE '%back\\\\slash%'");
+  });
+
+  it("escapes a trailing backslash so it cannot swallow the closing quote", () => {
+    // `company`/`role` are wrapped as `%...%` before escaping, so a trailing backslash there always
+    // has a literal `%` between it and the closing quote - not the adjacency this bug needs. `city`
+    // is escaped bare (`city = ${chStr(p.city)}`), so a trailing backslash sits immediately before
+    // the quote chStr appends: the exact position where an unescaped backslash would swallow it.
+    const { sql } = buildTemplateSql("salary_distribution", { city: "trail\\" }, "postings");
+    expect(sql).toContain("city = 'trail\\\\'");
+  });
+
+  it("neutralizes a quote+backslash break-out attempt as a single escaped literal", () => {
+    const { sql } = buildTemplateSql(
+      "latest_postings",
+      { company: "x' OR '1'='1" },
+      "postings",
+    );
+    expect(sql).toContain("company ILIKE '%x\\' OR \\'1\\'=\\'1%'");
+  });
+
   it("rejects invalid params via Zod at the boundary", () => {
     expect(() => buildTemplateSql("salary_compare", { cities: ["SF"] }, "postings")).toThrow(); // needs 2
     expect(() => buildTemplateSql("postings_trend", { days: 0 }, "postings")).toThrow(); // positive

@@ -82,4 +82,27 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
 
     await purge(freshGuest);
   });
+
+  // The `since=new Date(0)` case above can't distinguish "filters correctly" from "ignores the
+  // filter" - every message is after the epoch either way. Backdate rows directly (the store's API
+  // has no way to set created_at) to prove the boundary is inclusive (>=, per the interface doc)
+  // and that an out-of-window message is genuinely excluded, not just outnumbered.
+  it("messageCounts excludes a message before sinceUtcMidnight and includes one exactly at it", async () => {
+    const freshGuest = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(freshGuest);
+    const conv = await store.createConversation(freshGuest, "Boundary check");
+
+    const boundary = new Date("2026-07-18T00:00:00.000Z");
+    const before = new Date(boundary.getTime() - 1000); // 1s before the boundary: must be excluded
+
+    await sql`INSERT INTO messages (conversation_id, role, content, created_at)
+              VALUES (${conv.id}, 'user', 'before boundary', ${before})`;
+    await sql`INSERT INTO messages (conversation_id, role, content, created_at)
+              VALUES (${conv.id}, 'user', 'at boundary', ${boundary})`;
+
+    const scoped = await store.messageCounts({ userId: freshGuest, sinceUtcMidnight: boundary });
+    expect(scoped).toBe(1); // only the at-boundary row; the before-boundary row is excluded
+
+    await purge(freshGuest);
+  });
 });
