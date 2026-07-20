@@ -37,7 +37,7 @@ afterEach(cleanup);
 
 describe("MessageList", () => {
   test("renders a user turn as a right-aligned bubble", () => {
-    render(<MessageList messages={[userMsg("Top companies?")]} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} />);
+    render(<MessageList messages={[userMsg("Top companies?")]} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />);
     expect(screen.getByText("Top companies?").closest(".msg")?.classList.contains("user")).toBe(true);
   });
 
@@ -45,7 +45,7 @@ describe("MessageList", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "data-insight", id: "a1-c0", data: insight }] },
     ];
-    const { container } = render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} />);
+    const { container } = render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />);
     // the verdict number is bolded in its own <b>, so the sentence spans nodes - read it off .verdict
     expect(container.querySelector(".verdict")?.textContent).toBe("Amazon leads hiring with 214 open roles.");
     expect(btn("Only remote roles").disabled).toBe(false);
@@ -63,6 +63,7 @@ describe("MessageList", () => {
         usedFollowups={new Set(["card-1::Only remote roles"])}
         onFollowup={onFollowup}
         onRetry={noop}
+        onOpenLcp={noop}
       />,
     );
     expect(btn("Only remote roles ✓").disabled).toBe(true);
@@ -77,7 +78,7 @@ describe("MessageList", () => {
       { id: "a1", role: "assistant", parts: [{ type: "data-insight", id: "a1-c0", data: insight }] },
     ];
     const { container, rerender } = render(
-      <MessageList messages={messages} pending={false} usedFollowups={used} onFollowup={noop} onRetry={noop} />,
+      <MessageList messages={messages} pending={false} usedFollowups={used} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
     );
     expect(btn("Only remote roles ✓").disabled).toBe(true);
 
@@ -88,7 +89,7 @@ describe("MessageList", () => {
       { id: "u2", role: "user", parts: [{ type: "text", text: "Only remote roles" }] },
       { id: "a2", role: "assistant", parts: [{ type: "data-insight", id: "a2-c0", data: secondInsight }] },
     ];
-    rerender(<MessageList messages={messages2} pending={false} usedFollowups={used} onFollowup={noop} onRetry={noop} />);
+    rerender(<MessageList messages={messages2} pending={false} usedFollowups={used} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />);
 
     const cards = container.querySelectorAll(".insight");
     expect(cards.length).toBe(2);
@@ -105,7 +106,7 @@ describe("MessageList", () => {
       { id: "a1", role: "assistant", parts: [{ type: "text", text: "**3,315 new postings** over 90 days" }] },
     ];
     const { container } = render(
-      <MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} />,
+      <MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
     );
     const bubble = container.querySelector(".bubble.ai");
     expect(bubble?.querySelector("strong")?.textContent).toBe("3,315 new postings");
@@ -117,7 +118,7 @@ describe("MessageList", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "data-insight", id: "a1-c0", data: { id: "a1-c0", kind: "chart", chartType: "bars", status: "loading" } }] },
     ];
-    const { container } = render(<MessageList messages={messages} pending={true} usedFollowups={noSet} onFollowup={noop} onRetry={noop} />);
+    const { container } = render(<MessageList messages={messages} pending={true} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />);
     // the animated indicator stands in for the loading part - never the old skeleton card body/tabs
     expect(container.querySelector(".answering")).toBeTruthy();
     expect(container.querySelector(".answering-dot")).toBeTruthy();
@@ -128,14 +129,14 @@ describe("MessageList", () => {
 
   test("AC-8: a trailing answering indicator shows while the last turn is a lone user message", () => {
     const { container, rerender } = render(
-      <MessageList messages={[userMsg("Top companies?")]} pending={true} usedFollowups={noSet} onFollowup={noop} onRetry={noop} />,
+      <MessageList messages={[userMsg("Top companies?")]} pending={true} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
     );
     const indicator = container.querySelector(".msg.ai .answering");
     expect(indicator).toBeTruthy();
     expect((indicator as HTMLElement).getAttribute("role")).toBe("status"); // announced to assistive tech
 
     // once the turn settles the trailing indicator is gone
-    rerender(<MessageList messages={[userMsg("Top companies?")]} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} />);
+    rerender(<MessageList messages={[userMsg("Top companies?")]} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />);
     expect(container.querySelector(".answering")).toBeNull();
   });
 
@@ -144,7 +145,7 @@ describe("MessageList", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "data-error", id: "a1-e", data: { kind: "system" } }] },
     ];
-    render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={onRetry} />);
+    render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={onRetry} onOpenLcp={noop} />);
     expect(screen.getByText("Something went wrong on my side - try again")).toBeTruthy();
     fireEvent.click(btn("Retry"));
     expect(onRetry).toHaveBeenCalledOnce();
@@ -154,7 +155,7 @@ describe("MessageList", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "data-refusal", id: "a1-r", data: { reason: "guest_cap" } }] },
     ];
-    const { container } = render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} />);
+    const { container } = render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />);
     expect(screen.getByText(/reached the guest message limit/i)).toBeTruthy();
     expect(container.querySelector(".notice")).toBeTruthy();
     expect(container.querySelector(".err-card")).toBeNull();

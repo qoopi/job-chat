@@ -27,6 +27,37 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
+ * The `data-*` parts of a message, each with a STABLE id: the part's own id, or `${message.id}-p${i}`.
+ * MessageList keys its cards on this id and the LCP target references it (AC-8), so both must derive it
+ * the same way - one home here keeps them from drifting.
+ */
+export function dataParts(message: UIMessage): { id: string; data: unknown }[] {
+  return message.parts
+    .filter((p) => typeof p.type === "string" && p.type.startsWith("data-"))
+    .map((p, i) => ({ id: (p as { id?: string }).id ?? `${message.id}-p${i}`, data: (p as { data?: unknown }).data }));
+}
+
+/** The open LCP is identified by which message's which card it shows (epic-pinned; not the payload). */
+export interface LcpTarget {
+  messageId: string;
+  partId: string;
+}
+
+/**
+ * Resolve an LCP target back to its insight from the current messages (AC-8). The panel body is stored
+ * by identity, not value, so it re-resolves from the immutable persisted payload - a resumed
+ * conversation renders the same LCP. Null when the message/part is gone or is not an insight.
+ */
+export function resolveInsightTarget(messages: UIMessage[], target: LcpTarget): DataInsight | null {
+  const message = messages.find((m) => m.id === target.messageId);
+  if (!message) return null;
+  const part = dataParts(message).find((p) => p.id === target.partId);
+  if (!part) return null;
+  const cls = classifyCardData(part.data);
+  return cls.kind === "insight" ? cls.insight : null;
+}
+
+/**
  * Classify a card payload (from a live `data-insight`/`data-error`/`data-refusal` part OR a resumed
  * store payload) into a render decision. The loading skeleton is detected first (its `status:"loading"`
  * fails the strict insight schema); then a valid insight; then the error / refusal markers. Anything

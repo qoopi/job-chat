@@ -20,7 +20,7 @@ function BrandCredit() {
   );
 }
 
-export function Sidebar({ activeTitle }: { activeTitle?: string }) {
+export function Sidebar({ activeTitle, onNewChat }: { activeTitle?: string; onNewChat?: () => void }) {
   const [collapsed, setCollapsed] = useState(false);
 
   if (collapsed) {
@@ -35,9 +35,15 @@ export function Sidebar({ activeTitle }: { activeTitle?: string }) {
         >
           <ChevronLeftIcon />
         </button>
-        <div className="sb-icon" style={{ background: "var(--accent)", color: "#fff" }}>
+        <button
+          className="sb-icon"
+          type="button"
+          onClick={() => onNewChat?.()}
+          aria-label="New chat"
+          style={{ background: "var(--accent)", color: "#fff", border: 0 }}
+        >
           <PlusIcon size={15} />
-        </div>
+        </button>
         <div className="sb-icon" style={{ marginTop: "auto" }}>
           <div className="avatar" style={{ width: 28, height: 28 }}>
             ?
@@ -73,7 +79,7 @@ export function Sidebar({ activeTitle }: { activeTitle?: string }) {
         </button>
       </div>
 
-      <button className="btn btn-primary btn-block" type="button">
+      <button className="btn btn-primary btn-block" type="button" onClick={() => onNewChat?.()}>
         <PlusIcon />
         New chat
       </button>

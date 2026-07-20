@@ -6,19 +6,13 @@ import { Bubble } from "./Bubble";
 import { AnsweringIndicator } from "./AnsweringIndicator";
 import { InsightCard } from "@/components/insight/InsightCard";
 import { ErrorCard, RefusalNotice } from "@/components/insight/ErrorCard";
-import { classifyCardData, messageText, proseSpans } from "@/lib/chat-ui";
+import { classifyCardData, dataParts, messageText, proseSpans } from "@/lib/chat-ui";
 
 // Renders the live thread from `useChat` messages (AC-3/4/8/9/10/15 UI). Presentation only: given the
 // message list + streaming status + the one-shot chip set, it maps each message's parts to the 005
 // components (bubbles, insight cards, the streaming skeleton, error / refusal cards) - the same markup
 // the 005 static Thread produced, so the existing card/tab/table e2e locators still match. Behavior
 // (send, retry, chip) is delegated up via callbacks. `usedFollowups` is keyed `${cardId}::${chip}`.
-
-function dataParts(message: UIMessage): { id: string; data: unknown }[] {
-  return message.parts
-    .filter((p) => typeof p.type === "string" && p.type.startsWith("data-"))
-    .map((p, i) => ({ id: (p as { id?: string }).id ?? `${message.id}-p${i}`, data: (p as { data?: unknown }).data }));
-}
 
 // Memoized so a settled turn does NOT re-render while a later turn streams: `useChat` fires a
 // messages-changed callback per data-* delta, MessageList re-maps the whole thread, and each prior
@@ -32,11 +26,13 @@ const AssistantMessage = memo(function AssistantMessage({
   usedFollowups,
   onFollowup,
   onRetry,
+  onOpenLcp,
 }: {
   message: UIMessage;
   usedFollowups: Set<string>;
   onFollowup: (cardId: string, text: string) => void;
   onRetry: () => void;
+  onOpenLcp: (messageId: string, partId: string) => void;
 }) {
   const text = messageText(message);
   const cards = dataParts(message);
@@ -61,6 +57,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 insight={cls.insight}
                 usedFollowups={used}
                 onFollowup={(text) => onFollowup(cls.insight.id, text)}
+                onOpenTable={() => onOpenLcp(message.id, id)}
               />
             </div>
           );
@@ -96,6 +93,7 @@ export function MessageList({
   usedFollowups,
   onFollowup,
   onRetry,
+  onOpenLcp,
 }: {
   messages: UIMessage[];
   /** A turn is in flight and has yet to produce content - streaming OR the pre-stream run-wake gap. */
@@ -103,6 +101,8 @@ export function MessageList({
   usedFollowups: Set<string>;
   onFollowup: (cardId: string, text: string) => void;
   onRetry: () => void;
+  /** AC-8: open a table card's full body in the LCP, keyed by its message + part id. */
+  onOpenLcp: (messageId: string, partId: string) => void;
 }) {
   const last = messages[messages.length - 1];
   // AC-8 (006 ruling): the answering indicator stands in for the pending answer while the turn is in
@@ -128,6 +128,7 @@ export function MessageList({
             usedFollowups={usedFollowups}
             onFollowup={onFollowup}
             onRetry={onRetry}
+            onOpenLcp={onOpenLcp}
           />
         ),
       )}

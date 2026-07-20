@@ -52,7 +52,7 @@ afterEach(() => {
 test("Should_NotReRenderSettledInsightCard_When_LaterTurnStreams", () => {
   const first: UIMessage[] = [userTurn, settled];
   const { rerender } = render(
-    <MessageList messages={first} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} />,
+    <MessageList messages={first} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
   );
   expect(probe.byId.get("settled-card")).toBe(1);
 
@@ -70,7 +70,7 @@ test("Should_NotReRenderSettledInsightCard_When_LaterTurnStreams", () => {
     streaming,
   ];
   rerender(
-    <MessageList messages={second} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} />,
+    <MessageList messages={second} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
   );
 
   // The settled card did NOT re-render (memo bailed); only the freshly streamed card rendered.

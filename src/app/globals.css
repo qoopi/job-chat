@@ -204,11 +204,15 @@ a:hover {
 .main {
   flex: 1;
   display: flex;
+  gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-3) var(--sp-3) 0;
   min-width: 0;
 }
 .canvas {
-  flex: 1;
+  /* Fills the main alone; when the LCP opens (.docked) flex-grow animates to 0 so the chat docks to a
+     360px right rail over 240ms (interaction-spec section 1). flex-basis is the docked rail width. */
+  flex: 1 1 360px;
+  transition: flex-grow 240ms ease-out;
   background: var(--canvas-bg);
   border-radius: var(--r-lg);
   display: flex;
@@ -216,11 +220,61 @@ a:hover {
   min-width: 0;
   overflow: hidden;
 }
+.canvas.docked {
+  flex-grow: 0;
+}
 .thread-scroll {
   flex: 1;
   overflow: auto;
   display: flex;
   flex-direction: column;
+}
+
+/* ---------- Left Chat Part (LCP): table content type only (interaction-spec section 1) ---------- */
+.lcp {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas-bg);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.lcp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  height: 48px;
+  flex-shrink: 0;
+  padding: 0 var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+.lcp-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lcp-body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--sp-4) var(--sp-5);
+}
+.x-btn {
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.x-btn:hover {
+  color: var(--text);
 }
 
 /* ---------- sidebar ---------- */

@@ -7,8 +7,10 @@ import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
 import { Composer, type ComposerState } from "./Composer";
 import { MessageList } from "./MessageList";
+import { LcpPanel } from "./LcpPanel";
 import { useJobChatTransport } from "@/lib/chat-transport";
-import { isStreaming, reconcileMessagesById } from "@/lib/chat-ui";
+import { isStreaming, reconcileMessagesById, resolveInsightTarget, type LcpTarget } from "@/lib/chat-ui";
+import { isAuthDialogOpen } from "@/lib/layers";
 import { mintChatToken, sendMessage as sendMessageAction } from "@/app/actions";
 
 // The live chat surface (mock 2a): it swaps 005's static fixture for `useChat` message parts fed by the
@@ -59,6 +61,13 @@ export function ChatClient({
   // (stream end, Stop-abort, refusal, invalid, or a no-op reconnect), never leaving it stuck.
   const [awaiting, setAwaiting] = useState(false);
   const started = useRef(false);
+
+  // AC-8/AC-9: the open Left Chat Part, held by identity (`{ messageId, partId }`) so its body
+  // re-resolves from the immutable message payload - a resumed conversation renders the same LCP. One
+  // at a time: opening from another card just replaces the target.
+  const [lcpTarget, setLcpTarget] = useState<LcpTarget | null>(null);
+  const openLcp = useCallback((messageId: string, partId: string) => setLcpTarget({ messageId, partId }), []);
+  const closeLcp = useCallback(() => setLcpTarget(null), []);
 
   const send = useCallback(
     async (raw: string) => {
@@ -184,6 +193,23 @@ export function ChatClient({
   // `React.memo(AssistantMessage)` still bails on settled turns. See reconcileMessagesById.
   const view = useMemo(() => reconcileMessagesById(messages), [messages]);
 
+  // The open LCP's body, re-resolved from the current (immutable) messages. Truthiness also gates the
+  // dock: if a target can't resolve (it can't in practice - payloads persist), nothing docks or renders.
+  const lcpInsight = useMemo(() => (lcpTarget ? resolveInsightTarget(view, lcpTarget) : null), [view, lcpTarget]);
+
+  // AC-9 close-on-Esc, single keydown listener honoring the layer priority (interaction-spec): the auth
+  // dialog, when 013 ships it, sits above the LCP and takes Esc first (isAuthDialogOpen seam). Until
+  // then the LCP is always topmost, so Esc closes it. Bound once; the functional setState reads current.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (isAuthDialogOpen()) return; // a layer above the LCP consumes Esc first
+      setLcpTarget((t) => (t ? null : t));
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // `pending` = streaming OR the pre-stream run-wake gap. Drives BOTH the composer streaming state and
   // the MessageList answering indicator off one flag, so the indicator + Stop stay in lockstep.
   const pending = isStreaming(status) || awaiting;
@@ -191,9 +217,11 @@ export function ChatClient({
 
   return (
     <div className="app" style={{ height: "100vh" }}>
-      <Sidebar activeTitle={title} />
+      <Sidebar activeTitle={title} onNewChat={closeLcp} />
       <main className="main">
-        <div className="canvas">
+        {/* AC-8: the LCP takes the middle of the canvas while the chat docks to the 360px right rail. */}
+        {lcpInsight ? <LcpPanel insight={lcpInsight} onClose={closeLcp} /> : null}
+        <div className={lcpInsight ? "canvas docked" : "canvas"}>
           <TitleBar title={title} />
           <div className="thread-scroll">
             <MessageList
@@ -202,6 +230,7 @@ export function ChatClient({
               usedFollowups={used}
               onFollowup={onFollowup}
               onRetry={onRetry}
+              onOpenLcp={openLcp}
             />
           </div>
           <Composer
