@@ -8,10 +8,13 @@ const opts = { toolCallId: "call-1", messages: [] } as unknown as Parameters<
 >[1];
 
 describe("buildCatalogTools", () => {
-  it("exposes the 6 catalog tools plus the unanswerable escape hatch", () => {
+  it("exposes the 6 catalog tools plus the composed query_postings, and NO report_unanswerable (retired)", () => {
     const tools = buildCatalogTools({ analytics: {} as Analytics, emit: () => {} });
     for (const name of CATALOG_TOOL_NAMES) expect(tools).toHaveProperty(name);
-    expect(tools).toHaveProperty("report_unanswerable");
+    expect(tools).toHaveProperty("query_postings");
+    // 2026-07-21 vision refinement: report_unanswerable is retired from the scope path - the agent
+    // answers anything then steers, so there is no scope escape-hatch tool to over-fire an error card.
+    expect(tools).not.toHaveProperty("report_unanswerable");
   });
 
   it("emits a loading skeleton then the filled insight, and hands the model a compact view", async () => {
@@ -70,15 +73,6 @@ describe("buildCatalogTools", () => {
 
     expect(emitted.some((p) => p.type === "data-error" && p.data.kind === "system")).toBe(true);
     expect((out as { error: string }).error).toBeTruthy();
-  });
-
-  // AC-10: the unanswerable path is a distinct kind for the UI's distinct copy.
-  it("report_unanswerable emits an unanswerable error part", async () => {
-    const emitted: EmitPart[] = [];
-    const tools = buildCatalogTools({ analytics: {} as Analytics, emit: (p) => emitted.push(p) });
-    await tools.report_unanswerable.execute!({ reason: "outside the postings data" }, opts);
-
-    expect(emitted.some((p) => p.type === "data-error" && p.data.kind === "unanswerable")).toBe(true);
   });
 });
 

@@ -25,8 +25,9 @@ import {
 // (the ONLY path to ClickHouse). On call a tool emits the loading skeleton, runs the parameterized
 // query, emits the filled data-insight part (same id -> the UI reconciles in place), and hands the
 // model a compact view. A failure is caught and taxonomized as a `system` error part (AC-10) rather
-// than thrown, so the agent keeps control. `report_unanswerable` is the escape hatch for questions
-// the postings data cannot answer.
+// than thrown, so the agent keeps control. There is NO scope escape-hatch tool: the 2026-07-21 vision
+// refinement retired report_unanswerable - the agent answers anything in plain prose then steers back
+// to jobs (prompt behavior), so the red error card is reserved for genuine SYSTEM failures.
 
 export const CATALOG_TOOL_NAMES = [
   "salary_distribution",
@@ -159,16 +160,5 @@ export function buildCatalogTools(deps: CatalogDeps): ToolSet {
   const tools: ToolSet = {};
   for (const name of CATALOG_TOOL_NAMES) tools[name] = catalogTool(name, deps);
   tools.query_postings = composedTool(deps);
-
-  tools.report_unanswerable = tool({
-    description:
-      "Call this when the question cannot be answered from the job-postings data (out of scope, no matching signal). Do NOT guess.",
-    inputSchema: z.object({ reason: z.string().optional() }),
-    execute: async (_params: unknown, { toolCallId }) => {
-      deps.emit(errorPart(toolCallId, "unanswerable"));
-      return { acknowledged: true };
-    },
-  });
-
   return tools;
 }

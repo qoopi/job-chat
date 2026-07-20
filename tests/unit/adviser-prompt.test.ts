@@ -66,13 +66,18 @@ describe("adviser-v2 system prompt", () => {
     expect(ADVISER_V2.toLowerCase()).toMatch(/two sentences|2 sentences/);
   });
 
-  it("carries over honesty, the unanswerable escape hatch, city aliases, and no tool-mechanics narration", () => {
+  it("carries over honesty, city aliases, and no tool-mechanics narration", () => {
     expect(ADVISER_V2.toLowerCase()).toMatch(/never (make up|invent)|do not (make up|invent)/);
-    expect(ADVISER_V2).toContain("report_unanswerable");
     expect(ADVISER_V2).toContain("San Francisco");
     expect(ADVISER_V2).toMatch(/\bSF\b/);
     expect(ADVISER_V2.toLowerCase()).toMatch(/never (narrate|describe|mention).*(tool|retry|query|call)/);
     expect(ADVISER_V2.toLowerCase()).toMatch(/no matching|no postings matched|nothing matched|empty/);
+  });
+
+  // 2026-07-21 vision refinement: report_unanswerable is retired from the scope path entirely. The
+  // prompt no longer routes anything to it - a silent re-add of the instruction is a regression.
+  it("no longer references report_unanswerable (retired from the scope path)", () => {
+    expect(ADVISER_V2).not.toContain("report_unanswerable");
   });
 
   it("teaches composition with query_postings and at least two worked examples (AC-1)", () => {
@@ -108,14 +113,42 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toMatch(/never call a second data tool|no second data tool/);
   });
 
-  // 010-polish round (U1-U3 out-of-scope miss): clearly out-of-domain questions (weather, sports, stock)
-  // MUST route to report_unanswerable, not a prose-only refusal - so the escape hatch actually fires.
-  it("routes clearly out-of-scope questions (weather/sports/stock) to report_unanswerable, not prose", () => {
+  // 2026-07-21 vision refinement (answer-anything-then-steer): the agent answers ANY question, then
+  // politely steers back to jobs. These pins hold the taxonomy + guardrails the prompt now encodes.
+  it("encodes the answer-anything-then-steer vision", () => {
     const p = ADVISER_V2.toLowerCase();
-    expect(p).toContain("report_unanswerable");
+    expect(p).toMatch(/answer any/); // "You can answer ANY question"
+    expect(p).toContain("steer");
+  });
+
+  it("answers meta/identity transparently, naming the real stack (Claude / Bedrock / ClickHouse / Trigger.dev)", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toContain("claude");
+    expect(p).toContain("bedrock");
+    expect(p).toContain("clickhouse");
+    expect(p).toContain("trigger.dev");
+  });
+
+  it("is honest about live data it lacks (weather/stocks/sports) and never fabricates a live number", () => {
+    const p = ADVISER_V2.toLowerCase();
     expect(p).toContain("weather");
-    expect(p).toMatch(/sports|stock/);
-    expect(p).toMatch(/must call report_unanswerable|report_unanswerable[^.]*required|do not refuse in prose/);
+    expect(p).toMatch(/stock/);
+    expect(p).toMatch(/score|sports/);
+    expect(p).toMatch(/do not fetch|don't fetch|cannot fetch|fetch that live/);
+    expect(p).toMatch(/never (invent|fabricate|make up).*(live|number|fact)/);
+  });
+
+  it("answers general knowledge it can, then steers home", () => {
+    expect(ADVISER_V2.toLowerCase()).toMatch(/general knowledge|general-knowledge/);
+  });
+
+  it("guardrails: always steer to jobs, and stay out of medical/legal/financial professional advice (career IS in scope)", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toMatch(/always .*steer|always end by steering/);
+    expect(p).toContain("medical");
+    expect(p).toContain("legal");
+    expect(p).toContain("financial");
+    expect(p).toContain("career");
   });
 });
 
