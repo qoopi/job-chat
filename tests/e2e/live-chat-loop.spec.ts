@@ -4,22 +4,23 @@ import { armScript, insightScript, partialThenHangScript, errorScript, refusalSc
 
 // The live chat loop, driven by the E2E mock transport (scripted UIMessageChunks - no Trigger.dev /
 // Bedrock). Each test arms a script, sends, and asserts the client behavior the interaction-spec pins:
-// streaming skeleton, insight card, stop, retry, and the polite limit notice.
+// the answering indicator (006 ruling), insight card, stop, retry, and the polite limit notice.
 
 const freshChat = () => `/chat/${randomUUID()}`;
 const composer = "Ask a follow-up";
 
 test("AC-3 Should_StreamAnswerOnArrival_When_LandingQuestionSubmitted", async ({ page }) => {
-  await armScript(page, insightScript(3000)); // slow fill so the skeleton is observable on arrival
+  await armScript(page, insightScript(3000)); // slow fill so the answering indicator is observable on arrival
   await page.goto("/");
 
   await page.getByRole("textbox", { name: "What are you looking for" }).fill("Top companies hiring right now");
   await page.getByRole("button", { name: "Send" }).click();
 
-  // handoff: navigated into a chat, message #1 shown, answer already streaming (skeleton) on arrival
+  // handoff: navigated into a chat, message #1 shown, the answering indicator up on arrival (006 ruling:
+  // an animated waiting indicator, never a hollow skeleton card, until real content streams)
   await expect(page).toHaveURL(/\/chat\/[0-9a-f-]+/);
   await expect(page.locator(".bubble.user")).toHaveText("Top companies hiring right now");
-  await expect(page.locator(".insight .skeleton").first()).toBeVisible();
+  await expect(page.locator(".answering").first()).toBeVisible();
 });
 
 test("AC-4/AC-6 Should_RenderInsightCard_When_DataAnswerStreams", async ({ page }) => {
@@ -42,7 +43,7 @@ test("AC-4/AC-6 Should_RenderInsightCard_When_DataAnswerStreams", async ({ page 
   await expect(card.locator(".codeblock")).toContainText("FROM postings FINAL");
 });
 
-test("AC-8 Should_ShowSkeletonAndDisableComposer_While_Streaming", async ({ page }) => {
+test("AC-8 Should_ShowAnsweringIndicatorAndDisableComposer_While_Streaming", async ({ page }) => {
   await armScript(page, insightScript(3000));
   await page.goto(freshChat());
 
@@ -50,12 +51,15 @@ test("AC-8 Should_ShowSkeletonAndDisableComposer_While_Streaming", async ({ page
   await box.fill("Top companies?");
   await box.press("Enter");
 
-  await expect(page.locator(".insight .skeleton").first()).toBeVisible();
+  // 006 ruling: streaming shows the animated answering indicator (not a hollow skeleton card) + a
+  // disabled composer + the Stop control.
+  await expect(page.locator(".answering").first()).toBeVisible();
   await expect(page.getByRole("textbox", { name: composer })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
 
-  // then it fills in place (skeleton -> insight, same id)
+  // the card mounts only when its data-insight part is complete (indicator -> full card, no hollow card)
   await expect(page.locator(".verdict")).toContainText("Amazon leads hiring with", { timeout: 8000 });
+  await expect(page.locator(".answering")).toHaveCount(0); // indicator gone once real content lands
 });
 
 test("AC-9 Should_KeepPartialAnswer_When_Stopped", async ({ page }) => {

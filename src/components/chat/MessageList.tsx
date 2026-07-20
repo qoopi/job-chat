@@ -3,10 +3,10 @@
 import { Fragment, memo } from "react";
 import type { UIMessage } from "ai";
 import { Bubble } from "./Bubble";
+import { AnsweringIndicator } from "./AnsweringIndicator";
 import { InsightCard } from "@/components/insight/InsightCard";
-import { InsightCardSkeleton } from "@/components/insight/InsightCardSkeleton";
 import { ErrorCard, RefusalNotice } from "@/components/insight/ErrorCard";
-import { classifyCardData, isStreaming, messageText, proseSpans } from "@/lib/chat-ui";
+import { classifyCardData, messageText, proseSpans } from "@/lib/chat-ui";
 
 // Renders the live thread from `useChat` messages (AC-3/4/8/9/10/15 UI). Presentation only: given the
 // message list + streaming status + the one-shot chip set, it maps each message's parts to the 005
@@ -66,11 +66,9 @@ const AssistantMessage = memo(function AssistantMessage({
           );
         }
         if (cls.kind === "skeleton") {
-          return (
-            <div key={id} className="msg ai">
-              <InsightCardSkeleton />
-            </div>
-          );
+          // Charts only when ready (006 ruling): a still-loading data-insight part shows the answering
+          // indicator, never a hollow card. The full InsightCard mounts only once the part is complete.
+          return <AnsweringIndicator key={id} />;
         }
         if (cls.kind === "error") {
           return (
@@ -94,24 +92,27 @@ const AssistantMessage = memo(function AssistantMessage({
 
 export function MessageList({
   messages,
-  status,
+  pending,
   usedFollowups,
   onFollowup,
   onRetry,
 }: {
   messages: UIMessage[];
-  status: string;
+  /** A turn is in flight and has yet to produce content - streaming OR the pre-stream run-wake gap. */
+  pending: boolean;
   usedFollowups: Set<string>;
   onFollowup: (cardId: string, text: string) => void;
   onRetry: () => void;
 }) {
   const last = messages[messages.length - 1];
-  // AC-8: a skeleton card stands in for the pending answer while the turn is in flight and has yet to
-  // produce anything renderable - either the assistant message does not exist yet (last is the lone
-  // user turn) or it exists but is still empty (between the stream's `start` and its first part). Once
-  // a text or card part lands, that renders instead and the skeleton drops.
+  // AC-8 (006 ruling): the answering indicator stands in for the pending answer while the turn is in
+  // flight and has yet to produce anything renderable - either the assistant message does not exist yet
+  // (last is the lone user turn) or it exists but is still empty (between the stream's `start` and its
+  // first part). `pending` also covers the pre-stream run-wake gap (arrival mint / follow-up action)
+  // before the SDK moves status off "ready". Once a text or card part lands, that renders and the
+  // indicator drops.
   const lastEmptyAssistant = last?.role === "assistant" && !messageText(last) && dataParts(last).length === 0;
-  const showTrailingSkeleton = isStreaming(status) && (!last || last.role === "user" || lastEmptyAssistant);
+  const showTrailingIndicator = pending && (!last || last.role === "user" || lastEmptyAssistant);
 
   return (
     <div className="thread">
@@ -130,11 +131,7 @@ export function MessageList({
           />
         ),
       )}
-      {showTrailingSkeleton ? (
-        <div className="msg ai">
-          <InsightCardSkeleton />
-        </div>
-      ) : null}
+      {showTrailingIndicator ? <AnsweringIndicator /> : null}
     </div>
   );
 }
