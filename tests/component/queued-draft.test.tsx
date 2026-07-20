@@ -155,3 +155,40 @@ test("Should_KeepDialogOpenWithError_When_CompleteSignInReturnsNotOk", async () 
   expect(screen.getByRole("dialog")).toBeTruthy();
   expect(composer().value).toBe("Median DE salary in SF?");
 });
+
+// Review (final-review 013): the queued auto-send is ARMED at the cap moment but disarmed only on auth
+// SUCCESS. A guest who hits the cap, then CANCELS the dialog (rather than signing in), left the queue
+// armed - so a much-later, unrelated sidebar sign-in auto-fired the stale blocked question with no
+// intent. Dismissing the dialog must disarm the queued auto-send (the draft itself stays visible in the
+// composer for the user to edit/retry); only a sign-in that follows directly from the cap prompt should
+// auto-continue.
+test("Should_NotAutoSendStaleDraft_When_DialogCanceledThenSignInLater", async () => {
+  sendMessageMock.mockResolvedValueOnce({ ok: false, reason: "guest_cap" }); // the cap-hit (the only send expected)
+  signInEmailMock.mockResolvedValue({ error: null });
+
+  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  const box = composer();
+  fireEvent.change(box, { target: { value: "Median DE salary in SF?" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+
+  // guest cap -> the dialog opens with the blocked draft queued for auto-send
+  await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" });
+
+  // the guest CANCELS instead of signing in - this must disarm the queued auto-send...
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(composer().value).toBe("Median DE salary in SF?"); // ...but the draft stays visible in the composer
+
+  // much later, an unrelated sidebar sign-in (no fresh cap-hit re-arms the queue)
+  fireEvent.click(screen.getAllByRole("button", { name: "Sign in" })[0]);
+  await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" });
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "a@b.com" } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw123456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+  // sign-in succeeds and the dialog closes (onAuthSuccess's synchronous body, incl. any auto-send, has
+  // run by the time the dialog is gone) - the stale blocked draft must NOT have auto-sent.
+  await waitFor(() => expect(completeSignInMock).toHaveBeenCalled());
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(sendMessageMock).toHaveBeenCalledTimes(1); // only the original cap-hit; no stale auto-send
+});

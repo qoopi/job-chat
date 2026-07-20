@@ -80,6 +80,14 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
     if (q) void submit(q, { fromAuth: true });
   }
 
+  // AC-11: dismissing the dialog (cancel / Esc / backdrop) DISARMS the queued auto-continuation - a
+  // visitor who cancels the cap prompt must not have a later, unrelated header sign-in auto-fire the
+  // stale blocked question. The draft stays in the box (setDraft already ran); only the queue is cleared.
+  function onAuthDismiss() {
+    setQueued(null);
+    closeAuthDialog();
+  }
+
   const inputDisabled = busy || dialogOpen;
 
   return (
@@ -130,7 +138,7 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
           </button>
         ))}
       </div>
-      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} onSuccess={onAuthSuccess} /> : null}
+      {dialogOpen ? <AuthDialog onClose={onAuthDismiss} onSuccess={onAuthSuccess} /> : null}
     </>
   );
 }

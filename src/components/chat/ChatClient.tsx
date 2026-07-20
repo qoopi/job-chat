@@ -238,6 +238,15 @@ export function ChatClient({
     }
   }, [send]);
 
+  // AC-11: dismissing the dialog (cancel / Esc / backdrop) DISARMS the queued auto-send. The queue is
+  // armed at the cap moment for a sign-in that follows directly from the cap prompt; a guest who cancels
+  // instead must not have a much-later, unrelated sidebar sign-in auto-fire the stale blocked question.
+  // The draft itself stays in the composer (setDraft already ran) - only the armed auto-send is cleared.
+  const onAuthDismiss = useCallback(() => {
+    queuedDraftRef.current = null;
+    closeAuthDialog();
+  }, []);
+
   // Sign out: drop the Better Auth session and return the sidebar to its guest state.
   const onSignOut = useCallback(async () => {
     try {
@@ -366,7 +375,7 @@ export function ChatClient({
         </div>
       ) : null}
       {/* Topmost layer (interaction-spec "Priority of layers": auth dialog > LCP > thread). */}
-      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} onSuccess={(name) => void onAuthSuccess(name)} /> : null}
+      {dialogOpen ? <AuthDialog onClose={onAuthDismiss} onSuccess={(name) => void onAuthSuccess(name)} /> : null}
     </div>
   );
 }
