@@ -8,7 +8,7 @@ import { createAnalytics, type Analytics } from "@shared/analytics";
 import { createStore, type Store } from "@shared/store";
 import { getAgentLimits, getGuardConfig } from "@shared/env";
 import { AGENT_ID } from "./agent-id";
-import { ADVISER_V1 } from "./prompts/adviser-v1";
+import { ADVISER_V2 } from "./prompts/adviser-v2";
 import { buildCatalogTools, type EmitPart } from "./tools";
 import { persistAssistantTurn } from "./parts";
 import { createChatRun, type StreamModelArgs } from "./run";
@@ -75,7 +75,7 @@ const chatRun = createChatRun({
   guards: getGuardConfig(),
   emit,
   now: () => new Date(),
-  system: ADVISER_V1,
+  system: ADVISER_V2,
   streamModel,
 });
 
