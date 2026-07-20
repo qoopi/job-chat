@@ -599,6 +599,10 @@ a:hover {
   border: 1px solid var(--border);
   color: var(--text);
 }
+/* AC-17: a bubble that wraps past one line drops the pill radius for the gentler --r-lg. */
+.bubble.wrapped {
+  border-radius: var(--r-lg);
+}
 
 /* ---------- insight card ---------- */
 .insight {
