@@ -2,8 +2,9 @@
 
 Job.Chat is a chat agent over live job-market data, built for the ClickHouse x Trigger.dev Virtual
 Summer Hackathon 2026 ("Beyond the Wall of Text"). Every data question gets one insight card
-(verdict + chart/table + Show query), not a paragraph. P1 status: functionally complete locally
-(chat loop, charts, resume, guards); not yet deployed.
+(verdict + chart/table + Show query), not a paragraph. Live at jobchat.dev since 2026-07-19 (chat
+loop, charts, resume, guards); this branch's composable analytics + auth are functionally complete
+locally, pending deploy gates.
 
 ## Architecture
 
