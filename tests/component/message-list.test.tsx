@@ -102,6 +102,27 @@ describe("MessageList", () => {
     expect(freshChip.textContent).toBe("Only remote roles");
   });
 
+  // 018 strand 2: a SUCCESS turn (an insight card) suppresses the model's accompanying prose too - the
+  // card is the single answer surface, so a fabricated framing sentence is never shown beside it.
+  test("an insight-card turn shows only the card, not the accompanying model prose", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "Apple and Netflix are also hiring heavily right now." },
+          { type: "data-insight", id: "a1-c0", data: insight },
+        ],
+      },
+    ];
+    const { container } = render(
+      <MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
+    );
+    expect(container.querySelector(".insight")).toBeTruthy(); // the card is the single surface
+    expect(container.querySelector(".bubble.ai")).toBeNull(); // the model prose bubble is suppressed
+    expect(container.textContent).not.toContain("Apple and Netflix");
+  });
+
   test("live-walk #4a: an assistant text turn renders **bold** as <strong> with no literal asterisks", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "text", text: "**3,315 new postings** over 90 days" }] },

@@ -179,14 +179,27 @@ describe("emptyPart clears a tool's skeleton on a 0-row result (empty = plain mo
   });
 });
 
-describe("toModelOutput is compact - the model sees the verdict, not the raw rows", () => {
-  it("returns the verdict, sample size, and row count only", () => {
-    const r = result([{ company: "Google", count: 4 }], 10);
+describe("toModelOutput is compact - the model sees the verdict + labels, not the raw rows", () => {
+  it("returns the verdict, sample size, row count, and entity labels only", () => {
+    const r = result([{ company: "Google", count: 4 }, { company: "YouTube", count: 2 }], 10);
     const insight = buildInsight({ id: "m4", tool: "top_companies", params: {}, result: r });
     const out = toModelOutput(insight);
     expect(out.verdict).toBe(insight.verdict);
     expect(out.sampleN).toBe(10);
     expect(out).not.toHaveProperty("series");
+    // 018 strand 2: the row LABELS (entities) ground the model's chip/follow-up reasoning.
+    expect(out.labels).toEqual(["Google", "YouTube"]);
+  });
+
+  it("coalesces a null/empty entity label to 'unspecified' (never a bare null)", () => {
+    const r = result([{ city: null, count: 5 }, { city: "", count: 3 }], 8);
+    const insight = buildComposedInsight({
+      id: "m4b",
+      params: { measures: ["count"], dimensions: ["city"] },
+      chartType: "bars",
+      result: r,
+    });
+    expect(toModelOutput(insight).labels).toEqual(["unspecified", "unspecified"]);
   });
 });
 
@@ -227,7 +240,10 @@ describe("refusalPart carries the guard reason for the UI to render like an acti
 });
 
 describe("extractAssistantPersistence pulls the persisted content + card payload (AC-13)", () => {
-  it("joins text parts and keeps the single data-insight payload", () => {
+  // 018 strand 2: a turn that emits a data card persists the code-derived VERDICT as its content, NOT
+  // the model's accompanying prose (which could name entities/numbers with no DB rows behind them). The
+  // card is the single answer surface; the honest verdict keeps the rebuilt history accurate + alternating.
+  it("persists the code-derived verdict (not the model's prose) and keeps the data-insight payload", () => {
     const insight = buildInsight({
       id: "i1",
       tool: "top_companies",
@@ -237,12 +253,13 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
     const message = {
       role: "assistant",
       parts: [
-        { type: "text", text: "Here is what I found." },
+        { type: "text", text: "Apple, Amazon, and Meta are also hiring aggressively right now." },
         { type: "data-insight", id: "i1", data: insight },
       ],
     };
     const { content, parts } = extractAssistantPersistence(message);
-    expect(content).toBe("Here is what I found.");
+    expect(content).toBe(insight.verdict); // the fabricated prose is dropped
+    expect(content).not.toContain("Apple");
     expect(parts).toEqual(insight);
   });
 

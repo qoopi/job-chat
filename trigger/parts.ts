@@ -394,12 +394,28 @@ export function emptyModelOutput(tool: string): { empty: true; tool: string; not
   };
 }
 
-/** A compact view for the model - the verdict + counts, never the full rows (keeps context small). */
+/** The entity labels of a result: the first string column's values (companies/cities/titles/levels),
+ *  capped so the model view stays lean. Grounds the model's tool-loop reasoning (chips, follow-ups) in
+ *  the entities it actually got back - the prompt forbids naming any entity absent from this list. */
+const MODEL_LABEL_CAP = 12;
+function rowLabels(rows: DataPoint[]): string[] {
+  const first = rows[0];
+  if (!first) return [];
+  // The label column is the first non-numeric column (a measure is always a number); detect it by "not
+  // a number" rather than "is a string" so a null/empty first label still resolves to its column.
+  const key = Object.keys(first).find((k) => typeof first[k] !== "number");
+  if (!key) return [];
+  return rows.slice(0, MODEL_LABEL_CAP).map((r) => labelText(r[key]));
+}
+
+/** A compact view for the model - the verdict + counts + row LABELS (never the full rows), so its
+ *  tool-loop reasoning is grounded in the real entities without bloating context (018 strand 2). */
 export function toModelOutput(insight: DataInsight): {
   verdict: string;
   visual: ChartType | "table";
   sampleN: number;
   shown: number;
+  labels: string[];
 } {
   const rows = insight.kind === "chart" ? insight.series : insight.rows;
   return {
@@ -407,6 +423,7 @@ export function toModelOutput(insight: DataInsight): {
     visual: insight.kind === "chart" ? insight.chartType : "table",
     sampleN: insight.meta.sampleN,
     shown: rows.length,
+    labels: rowLabels(rows),
   };
 }
 
@@ -464,13 +481,6 @@ function isPersistablePayload(data: unknown): boolean {
   return false;
 }
 
-/** An error-card payload (the taxonomized `data-error` marker). AC-25's single-surface rule keys on this. */
-function isErrorMarker(data: unknown): boolean {
-  if (typeof data !== "object" || data === null) return false;
-  const kind = (data as Record<string, unknown>).kind;
-  return kind === "system" || kind === "unanswerable";
-}
-
 /**
  * Extract the persisted assistant content + card payload from a completed turn's response message.
  * Text parts are joined; the card parts (`data-insight`, `data-error`, `data-refusal`) are de-duped
@@ -500,10 +510,20 @@ export function extractAssistantPersistence(message: MessageLike): {
   }
   const payloads = [...byId.values()].filter(isPersistablePayload);
   const payload = payloads.length === 0 ? null : payloads.length === 1 ? payloads[0] : payloads;
-  // AC-25 single refusal surface: a turn that ends in an error card carries the user-facing message in
-  // that card, so its accompanying model prose (the "something went wrong" narration) is dropped - the
-  // turn persists (and resumes) as exactly one surface. The render layer applies the same rule live.
-  const finalContent = payloads.some(isErrorMarker) ? "" : content;
+  // 018 strand 2 (extends AC-25's single-surface rule to SUCCESS cards): when a turn emits a data card,
+  // the CARD is the answer - the model's accompanying prose is dropped so a fabricated sentence (a
+  // company/number with zero DB rows behind it) is never persisted or fed back into the next turn's
+  // history. The turn instead persists the code-derived VERDICT (honest, from the real tool result),
+  // which keeps the resumed thread and the rebuilt model history accurate and role-alternating. An
+  // error/refusal card persists no prose (its own copy is the surface); a card-less turn keeps the
+  // model's plain prose. The render layer applies the matching suppression live.
+  const verdicts = payloads
+    .map((p) => {
+      const parsed = DataInsightSchema.safeParse(p);
+      return parsed.success ? parsed.data.verdict : null;
+    })
+    .filter((v): v is string => v !== null);
+  const finalContent = verdicts.length > 0 ? verdicts.join(" ") : payloads.length > 0 ? "" : content;
   return { content: finalContent, parts: payload };
 }
 

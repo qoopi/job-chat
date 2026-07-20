@@ -119,6 +119,20 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toMatch(/never call a second data tool|no second data tool/);
   });
 
+  // 018 strand 2: when a tool succeeds the card is the WHOLE answer - the model adds no prose (the
+  // fabrication surface, where the model narrated companies with zero DB rows, is closed).
+  it("forbids prose framing when a tool renders a card (the card is the answer)", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toMatch(/add no prose|no prose/);
+    expect(p).toMatch(/card.*(is|are).*(the )?(complete )?answer/);
+  });
+
+  // 018 strand 2: the model may never name an entity or number absent from the tool result it received.
+  it("forbids naming any entity or number absent from the tool result", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toMatch(/not present in the tool result|absent from (that|the) result|row labels/);
+  });
+
   // 2026-07-21 vision refinement (answer-anything-then-steer): the agent answers ANY question, then
   // politely steers back to jobs. These pins hold the taxonomy + guardrails the prompt now encodes.
   it("encodes the answer-anything-then-steer vision", () => {
