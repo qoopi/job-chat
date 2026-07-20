@@ -58,3 +58,7 @@ next-env.d.ts
 /.design-sync/
 /.claude/tasks/
 /.claude/design-spec/
+
+# OAuth / Google credential downloads - never commit
+client_secret*.json
+*.apps.googleusercontent.com.json
