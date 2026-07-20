@@ -142,6 +142,14 @@ export function ChatClient({
     [signedIn, setMessages],
   );
 
+  // A send that could not go through (invalid input / not_found / a thrown round trip): show the retry
+  // toast and restore the text as the draft so it is never lost. Shared by the fresh-chat and follow-up
+  // send paths (DRY). A cap/budget refusal takes `showRefusal` instead (it also arms the auth flow).
+  const failSend = useCallback((text: string) => {
+    setFailed(text);
+    setDraft(text);
+  }, []);
+
   const send = useCallback(
     async (raw: string, opts?: { fromAuth?: boolean }) => {
       const text = raw.trim();
@@ -168,12 +176,10 @@ export function ChatClient({
           if (r.reason === "guest_cap" || r.reason === "daily_budget") {
             showRefusal(r.reason, text, opts?.fromAuth);
           } else {
-            setFailed(text); // invalid_input -> send-failure toast
-            setDraft(text);
+            failSend(text); // invalid_input -> send-failure toast, draft preserved
           }
         } catch {
-          setFailed(text);
-          setDraft(text);
+          failSend(text);
         } finally {
           if (freshChatRef.current) setAwaiting(false); // only when we did NOT navigate away
         }
@@ -211,8 +217,7 @@ export function ChatClient({
               showRefusal(r.reason, text, opts?.fromAuth);
               return;
             }
-            setFailed(text); // invalid_input / not_found -> send-failure toast
-            setDraft(text); // draft preserved (interaction-spec section 4)
+            failSend(text); // invalid_input / not_found -> toast + preserved draft (interaction-spec section 4)
             return;
           }
           // Hydrate the transport with the action's scoped token, then DELIVER + WATCH the turn via the
@@ -239,14 +244,13 @@ export function ChatClient({
           await sendMessage({ text, messageId: userMessageId });
         } catch {
           rollbackEcho(); // AC-22: a failed send returns to the composer (toast + draft), not a stuck bubble
-          setFailed(text);
-          setDraft(text);
+          failSend(text);
         }
       } finally {
         setAwaiting(false); // fallback clear for paths that never stream (refusal / invalid / abort)
       }
     },
-    [e2e, conversationId, router, sendMessage, setMessages, transport, showRefusal],
+    [e2e, conversationId, router, sendMessage, setMessages, transport, showRefusal, failSend],
   );
 
   // AC-3 arrival attach: the landing action already created the conversation and triggered its run, but
