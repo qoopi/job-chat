@@ -133,6 +133,16 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toMatch(/not present in the tool result|absent from (that|the) result|row labels/);
   });
 
+  // 018 strand 4: a follow-up inheritance rule (carry the prior turn's filters, change only the named one)
+  // and a multi-city example so "in LA or NYC" resolves via the cities IN-list.
+  it("encodes the follow-up inheritance rule and multi-city guidance", () => {
+    expect(ADVISER_V2).toContain("FOLLOW-UP INHERITANCE");
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toMatch(/carry the prior|carry .*forward|inherit/);
+    expect(p).toMatch(/la or nyc|los angeles.*new york/);
+    expect(p).toContain("cities");
+  });
+
   // 2026-07-21 vision refinement (answer-anything-then-steer): the agent answers ANY question, then
   // politely steers back to jobs. These pins hold the taxonomy + guardrails the prompt now encodes.
   it("encodes the answer-anything-then-steer vision", () => {

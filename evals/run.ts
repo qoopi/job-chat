@@ -15,6 +15,7 @@ import {
 import { getAgentLimits } from "@shared/env";
 import { createChatRun, type StreamModelArgs } from "../trigger/run";
 import { buildCatalogTools, CATALOG_TOOL_NAMES, type EmitPart } from "../trigger/tools";
+import { persistAssistantTurn } from "../trigger/parts";
 import { ADVISER_V1 } from "../trigger/prompts/adviser-v1";
 import { ADVISER_V2 } from "../trigger/prompts/adviser-v2";
 import { FIXTURE_INGESTED_AT } from "../tests/fixtures/postings.fixture";
@@ -199,62 +200,82 @@ export interface Observed {
   error?: string;
 }
 
-/** Drive one question through createChatRun with the real model, capturing tool calls, text, and parts. */
+/**
+ * Drive a case through createChatRun with the real model, capturing tool calls, text, and parts. A case
+ * with `context` runs those prior user turns first (persisting each answer so the scored follow-up
+ * inherits their filters via the rebuilt history, 018 strand 4); only the LAST turn is scored.
+ */
 async function runCase(model: EvalModel, system: string, evalCase: EvalCase): Promise<Observed> {
   const store = createMemoryStore();
   const guestId = `eval-${crypto.randomUUID()}`;
   await store.getOrCreateUser(guestId);
-  const conv = await store.createConversation(guestId, evalCase.question);
-  await store.appendMessage(conv.id, "user", evalCase.question, null); // mirror startConversation (turn 1)
-
-  const emitted: EmitPart[] = [];
-  const emit = (part: EmitPart) => emitted.push(part);
-  const tools = buildCatalogTools({ analytics: fakeAnalytics(), emit });
+  const turns = [...(evalCase.context ?? []), evalCase.question];
+  const conv = await store.createConversation(guestId, turns[0]);
+  await store.appendMessage(conv.id, "user", turns[0], null); // mirror startConversation (turn 1)
   const limits = getAgentLimits();
+  const cumulative: { role: "user"; content: string }[] = [];
 
-  const chatRun = createChatRun({
-    withStore: (fn) => fn(store),
-    // Generous caps: the eval is not testing the guard, so no case is ever refused before the model.
-    guards: { guestCap: Number.MAX_SAFE_INTEGER, dailyBudget: Number.MAX_SAFE_INTEGER },
-    emit,
-    now: () => new Date(),
-    system,
-    // The model seam, mirroring trigger/chat.ts minus the Trigger-runtime plumbing (chat.toStreamTextOptions
-    // is unavailable outside a run): real Bedrock, the rebuilt history, the case's tools, the step ceiling.
-    streamModel: ({ system: sys, messages, tools: turnTools, signal }: StreamModelArgs) =>
-      streamText({
-        model,
-        system: sys,
-        messages,
-        tools: turnTools,
-        abortSignal: signal,
-        stopWhen: stepCountIs(limits.maxSteps),
-      }),
-  });
-
-  try {
-    const result = await chatRun({
-      chatId: conv.id,
-      messages: [{ role: "user", content: evalCase.question }],
-      tools,
-      signal: new AbortController().signal,
+  const buildRun = (emit: (part: EmitPart) => void) =>
+    createChatRun({
+      withStore: (fn) => fn(store),
+      // Generous caps: the eval is not testing the guard, so no case is ever refused before the model.
+      guards: { guestCap: Number.MAX_SAFE_INTEGER, dailyBudget: Number.MAX_SAFE_INTEGER },
+      emit,
+      now: () => new Date(),
+      system,
+      // The model seam, mirroring trigger/chat.ts minus the Trigger-runtime plumbing.
+      streamModel: ({ system: sys, messages, tools: turnTools, signal }: StreamModelArgs) =>
+        streamText({
+          model,
+          system: sys,
+          messages,
+          tools: turnTools,
+          abortSignal: signal,
+          stopWhen: stepCountIs(limits.maxSteps),
+        }),
     });
-    if (!result) {
-      return { toolCalls: [], text: "", hasInsight: false, error: "run refused before the model (unexpected)" };
+
+  let observed: Observed = { toolCalls: [], text: "", hasInsight: false };
+  for (let t = 0; t < turns.length; t++) {
+    cumulative.push({ role: "user", content: turns[t] });
+    const emitted: EmitPart[] = [];
+    const emit = (part: EmitPart) => emitted.push(part);
+    const tools = buildCatalogTools({ analytics: fakeAnalytics(), emit });
+    try {
+      const result = await buildRun(emit)({
+        chatId: conv.id,
+        messages: cumulative.map((m) => ({ ...m })),
+        tools,
+        signal: new AbortController().signal,
+      });
+      if (!result) {
+        observed = { toolCalls: [], text: "", hasInsight: false, error: "run refused before the model (unexpected)" };
+        break;
+      }
+      await result.consumeStream(); // drive tool execution + finish
+      const steps = await result.steps;
+      const toolCalls = steps
+        .flatMap((s) => s.toolCalls)
+        .map((tc) => ({ name: tc.toolName, input: (tc.input ?? {}) as Record<string, unknown> }));
+      const text = (await result.text).trim();
+      const hasInsight = emitted.some(
+        (p) => p.type === "data-insight" && DataInsightSchema.safeParse((p as { data: unknown }).data).success,
+      );
+      observed = { toolCalls, text, hasInsight };
+      // Persist the assistant turn (mirror onTurnComplete) so a later turn's rebuilt history carries it.
+      const responseMessage = {
+        parts: [
+          { type: "text", text },
+          ...emitted.map((p) => ({ type: p.type, id: p.id, data: (p as { data: unknown }).data })),
+        ],
+      };
+      await persistAssistantTurn(store, { conversationId: conv.id, responseMessage });
+    } catch (err) {
+      observed = { toolCalls: [], text: "", hasInsight: false, error: (err as Error).message };
+      break;
     }
-    await result.consumeStream(); // drive tool execution + finish
-    const steps = await result.steps;
-    const toolCalls = steps
-      .flatMap((s) => s.toolCalls)
-      .map((tc) => ({ name: tc.toolName, input: (tc.input ?? {}) as Record<string, unknown> }));
-    const text = (await result.text).trim();
-    const hasInsight = emitted.some(
-      (p) => p.type === "data-insight" && DataInsightSchema.safeParse((p as { data: unknown }).data).success,
-    );
-    return { toolCalls, text, hasInsight };
-  } catch (err) {
-    return { toolCalls: [], text: "", hasInsight: false, error: (err as Error).message };
   }
+  return observed;
 }
 
 // ---- scoring (pure, deterministic) --------------------------------------------------------------

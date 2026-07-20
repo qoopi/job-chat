@@ -56,6 +56,7 @@ export interface ComposedShape {
   role?: string;
   company?: string;
   city?: string;
+  cities?: string[];
   region?: string;
   country?: string;
   experience_level?: string;
@@ -236,13 +237,14 @@ function verdictForComposed(params: ComposedShape, rows: Record<string, unknown>
 // log (2026-07-20): role > company > city > region > country > experience_level > employment_type >
 // location_kind > days.
 const WIDEN_PRECEDENCE = [
-  "role", "company", "city", "region", "country",
+  "role", "company", "city", "cities", "region", "country",
   "experience_level", "employment_type", "location_kind", "days",
 ] as const;
 const WIDEN_PHRASE: Record<string, string> = {
   role: "across all roles",
   company: "across all companies",
   city: "across all cities",
+  cities: "across all cities",
   region: "across all regions",
   country: "worldwide",
   experience_level: "across all experience levels",
@@ -263,7 +265,7 @@ const DIM_LABEL: Record<string, string> = {
 };
 // Which dimension each equality filter pins (so a pivot never lands on an already-fixed value).
 const FILTER_PINS_DIM: Record<string, string> = {
-  role: "title", company: "company", city: "city", region: "region", country: "country",
+  role: "title", company: "company", city: "city", cities: "city", region: "region", country: "country",
   experience_level: "experience_level", employment_type: "employment_type", location_kind: "location_kind",
 };
 

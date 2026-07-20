@@ -408,6 +408,23 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     expect(sql).toContain("GROUP BY toString(location_kind)");
   });
 
+  // 018 strand 4: a multi-city filter ("openings in LA or NYC") is a chStr-escaped IN-list on city.
+  it("builds a cities IN-list filter, each value escaped", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], cities: ["Los Angeles", "New York"] },
+      "postings",
+    );
+    expect(sql).toContain("city IN ('Los Angeles', 'New York')");
+  });
+
+  it("escapes a quote break-out inside the cities IN-list", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], cities: ["x' OR '1'='1"] },
+      "postings",
+    );
+    expect(sql).toContain("city IN ('x\\' OR \\'1\\'=\\'1')");
+  });
+
   it("a location_kind equality filter is accepted for the three enum values", () => {
     const { sql } = buildComposedSql({ measures: ["count"], location_kind: "remote" }, "postings");
     expect(sql).toContain("location_kind = 'remote'");

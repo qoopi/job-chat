@@ -54,8 +54,10 @@ describe("eval harness (offline smoke)", () => {
     expect(plainScored.formatPass).toBe(true);
   });
 
-  it("pins the eval set to 30 cases with 12 chart-bearing (the AC-4 sample)", () => {
-    expect(EVAL_SET).toHaveLength(30);
+  it("pins the eval set to 34 cases with 12 chart-bearing (the AC-4 sample)", () => {
+    // 018 strand 4: +4 follow-up/fragmentation/currency cases, kept non-chart-bearing so the AC-4 chart
+    // sample stays at 12 (the risky new cases exercise tool/mode/params, not the chart gate).
+    expect(EVAL_SET).toHaveLength(34);
     expect(CHART_BEARING).toHaveLength(12);
     // Every chart-bearing case is a query_postings case (the only path with a RAW agent pick, AC-4).
     expect(CHART_BEARING.every((c) => c.expect.tool === "query_postings")).toBe(true);

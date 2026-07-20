@@ -335,6 +335,10 @@ export const ComposedQueryParams = z
     role: z.string().min(1).optional(),
     company: z.string().min(1).optional(),
     city: z.string().min(1).optional(),
+    // A multi-city filter for "openings in LA or NYC" (one number over both). Each value is
+    // chStr-escaped into an IN-list; kept alongside single `city` for compat (018 strand 4). Bounded so
+    // the interpolated list stays small.
+    cities: z.array(z.string().min(1)).min(1).max(20).optional(),
     region: z.string().min(1).optional(),
     country: z.string().min(1).optional(),
     experience_level: z.string().min(1).optional(),
@@ -425,6 +429,7 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   if (p.role) filters.push(roleFilter(p.role));
   if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
   if (p.city) filters.push(`city = ${chStr(p.city)}`);
+  if (p.cities) filters.push(`city IN (${p.cities.map((c) => chStr(c)).join(", ")})`);
   if (p.region) filters.push(`region = ${chStr(p.region)}`);
   if (p.country) filters.push(`country = ${chStr(p.country)}`);
   if (p.experience_level) filters.push(`experience_level = ${chStr(p.experience_level)}`);

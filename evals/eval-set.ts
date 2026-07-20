@@ -34,6 +34,9 @@ export interface EvalExpect {
 export interface EvalCase {
   id: string;
   question: string;
+  /** Prior user turns to run (unscored) BEFORE `question`, establishing the history a follow-up inherits
+   *  from (018 strand 4). The runner drives each in order, persisting the answer, then scores `question`. */
+  context?: string[];
   expect: EvalExpect;
 }
 
@@ -174,6 +177,55 @@ const COMPOSED_CASES: EvalCase[] = [
   },
 ];
 
+// 018 strand 4/5 (+5): contextual follow-ups (a two-turn inheritance case + a multi-city case), a
+// fragmentation case (title grouping), a salary/currency case, and a market-wide scope case. Kept
+// non-chart-bearing (no `chartType`) so they exercise tool/mode/params without touching the AC-4 chart
+// gate; the verdict/currency/scope correctness is proven in the offline unit + integration suites.
+const FOLLOWUP_CASES: EvalCase[] = [
+  {
+    // Inheritance: "those" = the companies from the prior turn; the follow-up must carry the company
+    // grouping forward and ADD only the city, resolving SF -> San Francisco.
+    id: "C13",
+    question: "How many of those are in SF?",
+    context: ["Which companies are hiring the most?"],
+    expect: {
+      mode: "data",
+      tool: "query_postings",
+      params: { measures: ["count"], city: "San Francisco" },
+    },
+  },
+  {
+    // Multi-city: one number over both cities via the cities IN-list.
+    id: "C14",
+    question: "How many job openings are there in LA or NYC?",
+    expect: {
+      mode: "data",
+      tool: "query_postings",
+      params: { cities: ["Los Angeles", "New York"] },
+    },
+  },
+  {
+    // Fragmentation: a title grouping (the verdict says "no single role dominates" - proven in unit tests).
+    id: "C15",
+    question: "Is there one job title that dominates hiring, or is it spread across many?",
+    expect: {
+      mode: "data",
+      tool: "query_postings",
+      params: { measures: ["count"], dimensions: ["title"] },
+    },
+  },
+  {
+    // Salary/currency: a composed salary aggregate (the dominant-currency filter is unit/integration-tested).
+    id: "C16",
+    question: "What is the median salary by employment type?",
+    expect: {
+      mode: "data",
+      tool: "query_postings",
+      params: { measures: ["median_salary"], dimensions: ["employment_type"] },
+    },
+  },
+];
+
 // P2-intent (find-me-a-job / what-fits-me): applying, matching, and personal fit are out of scope, so the
 // adviser holds the clarify-path tone in plain mode - no tool, no card. Drawn from the 009 fixture (DRY).
 const P2_CASES: EvalCase[] = P2_INTENT_PROMPTS.slice(0, 4).map((question, i) => ({
@@ -208,6 +260,7 @@ const OFF_DOMAIN_CASES: EvalCase[] = [
 export const EVAL_SET: EvalCase[] = [
   ...LAUNCH_CASES,
   ...COMPOSED_CASES,
+  ...FOLLOWUP_CASES,
   ...P2_CASES,
   ...CONVERSATIONAL_CASES,
   ...OFF_DOMAIN_CASES,

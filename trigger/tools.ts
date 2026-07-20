@@ -108,8 +108,8 @@ const COMPOSED_DESCRIPTION =
   "Compose a custom aggregate over the postings when none of the six fixed tools fit. Pick 1-2 measures " +
   "(count, median_salary, p25_salary, p75_salary), group by up to two dimensions (company, city, region, " +
   "country, experience_level, employment_type, location_kind, title) and/or one time bucket (day/week/month), " +
-  "filter (role, company, city, region, country, experience_level, employment_type, location_kind, days, " +
-  "min_salary, max_salary), and choose a chartType. Use for questions like 'top companies in the US', " +
+  "filter (role, company, city, cities [a list, for 'in LA or NYC'], region, country, experience_level, " +
+  "employment_type, location_kind, days, min_salary, max_salary), and choose a chartType. Use for questions like 'top companies in the US', " +
   "'median salary by experience level in Berlin', or 'which roles are hiring most'.";
 
 // The composed tool input: the shared strict composed schema (008) plus the agent's chartType pick.
