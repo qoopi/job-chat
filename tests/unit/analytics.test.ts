@@ -30,6 +30,16 @@ describe("buildTemplateSql", () => {
     expect(sql).not.toContain("now()");
   });
 
+  // 018 strand 1: a window wider than the LIMIT must keep TODAY and drop the oldest, so the trend orders
+  // day DESC + LIMIT (newest slice) and flags reverse for chronological display - never `ORDER BY day`
+  // ASC, which would keep the oldest 400 days and drop the most recent.
+  it("orders postings_trend newest-first (+ reverse) so the LIMIT drops the oldest days, not today", () => {
+    const built = buildTemplateSql("postings_trend", { days: 3650 }, "postings");
+    expect(built.sql).toContain("ORDER BY day DESC");
+    expect(built.sql).not.toMatch(/ORDER BY day\s*\n/);
+    expect(built.reverse).toBe(true);
+  });
+
   it("escapes a single quote in a free-text param (no SQL-literal break-out)", () => {
     const { sql } = buildTemplateSql("latest_postings", { company: "O'Brien" }, "postings");
     expect(sql).toContain("company ILIKE '%O\\'Brien%'");
@@ -271,12 +281,15 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     expect(sql).toContain("GROUP BY company");
   });
 
-  // A time bucket is a GROUP BY expression aliased `bucket` for stable Recharts keys, ordered chronologically.
-  it("a time bucket groups + orders by the bucket expression, aliased bucket", () => {
-    const { sql } = buildComposedSql({ measures: ["count"], bucket: "week" }, "postings");
-    expect(sql).toContain("toStartOfWeek(published_at) AS bucket");
-    expect(sql).toContain("GROUP BY toStartOfWeek(published_at)");
-    expect(sql).toContain("ORDER BY toStartOfWeek(published_at) ASC");
+  // A time bucket is a GROUP BY expression aliased `bucket` for stable Recharts keys. A pure trend is
+  // ordered NEWEST-first (bucket DESC) + LIMIT so a series longer than the cap keeps recent buckets and
+  // drops the oldest; the reverse flag flips the rows back to chronological for display (018 strand 1).
+  it("a pure time-bucket trend orders bucket DESC (+ reverse) so the newest buckets survive the LIMIT", () => {
+    const built = buildComposedSql({ measures: ["count"], bucket: "week" }, "postings");
+    expect(built.sql).toContain("toStartOfWeek(published_at) AS bucket");
+    expect(built.sql).toContain("GROUP BY toStartOfWeek(published_at)");
+    expect(built.sql).toContain("ORDER BY toStartOfWeek(published_at) DESC");
+    expect(built.reverse).toBe(true);
   });
 
   // Two dimensions together: GROUP BY carries both, in the array order; the deterministic ORDER BY is
@@ -343,6 +356,14 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
 
   // location_kind (Enum8) is toString'd so it serializes/orders by name, and grouped by the raw
   // expression so the `location_kind` alias never shadows the column.
+  // 018 strand 1: a bucketed CROSS-TAB (a dimension alongside the bucket) is a table, not a trend, so it
+  // keeps chronological ASC order and is NOT reversed - only a pure trend flips to newest-first.
+  it("a dimension + bucket keeps ASC order and does not set reverse (only a pure trend does)", () => {
+    const built = buildComposedSql({ measures: ["count"], dimensions: ["company"], bucket: "week" }, "postings");
+    expect(built.sql).toContain("ORDER BY toStartOfWeek(published_at) ASC, company ASC");
+    expect(built.reverse).toBeFalsy();
+  });
+
   it("a location_kind dimension is toString'd and grouped by the raw expression", () => {
     const { sql } = buildComposedSql({ measures: ["count"], dimensions: ["location_kind"] }, "postings");
     expect(sql).toContain("toString(location_kind) AS location_kind");
@@ -414,6 +435,29 @@ describe("executeBuilt fires the rows and meta queries concurrently (perf)", () 
 
     releaseRows();
     await done;
+  });
+
+  // 018 strand 1: a reverse-flagged (newest-first) trend slice is flipped back to chronological order
+  // for the display axis. The rows query returns day DESC; the result must come back day ASC.
+  it("reverses a newest-first trend slice so the display axis runs oldest -> newest", async () => {
+    const descRows = [
+      { day: "2026-07-20", count: 9 },
+      { day: "2026-07-19", count: 5 },
+      { day: "2026-07-18", count: 2 },
+    ];
+    const client = {
+      query: (opts: { query: string }) =>
+        Promise.resolve({
+          json: async () =>
+            opts.query.includes("sampleN")
+              ? [{ sampleN: 16, freshestAt: "2026-07-20 00:00:00" }]
+              : descRows,
+        }),
+    } as unknown as ClickHouseClient;
+
+    const analytics = createAnalytics({ client, table: "postings_test" });
+    const res = await analytics.runComposedQuery({ measures: ["count"], bucket: "day" });
+    expect(res.rows.map((r) => r.day)).toEqual(["2026-07-18", "2026-07-19", "2026-07-20"]);
   });
 
   it("rejects with the failing query's error and leaves no unhandled rejection", async () => {

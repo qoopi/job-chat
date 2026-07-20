@@ -119,6 +119,11 @@ export interface BuiltQuery {
   sql: string; // the main rows query (revealed by Show query)
   where: string; // the shared WHERE clause, reused for the sampleN/freshestAt meta query
   openSet: boolean; // whether the open-set predicate was applied (current-state read) - carried to meta
+  // A chronological trend selects the NEWEST slice via `ORDER BY <time> DESC LIMIT n` so a window
+  // wider than the LIMIT keeps today and drops the oldest (never the reverse). The rows come back
+  // newest-first; executeBuilt reverses them so the display axis stays oldest -> newest. Absent = the
+  // query's own order is the display order.
+  reverse?: boolean;
 }
 
 /**
@@ -187,11 +192,13 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         `FROM ${table} FINAL`,
         where,
         "GROUP BY day",
-        "ORDER BY day",
+        // Newest-first + LIMIT so a window wider than the cap keeps the recent days and drops the
+        // oldest (ORDER BY day ASC LIMIT would drop TODAY); executeBuilt reverses for chronological display.
+        "ORDER BY day DESC",
         `LIMIT ${LIMITS.postings_trend}`,
       ]);
       // Trend keeps full history (closed postings are legitimate history) - no open-set predicate.
-      return { sql, where, openSet: false };
+      return { sql, where, openSet: false, reverse: true };
     }
     case "top_companies": {
       const p = TopCompaniesParams.parse(rawParams);
@@ -416,7 +423,14 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   const sortExpr = p.measures.includes(sort.by as ComposedMeasure)
     ? sort.by
     : dims.find((d) => d.alias === sort.by)!.group;
-  const orderParts = [`${sortExpr} ${sort.dir.toUpperCase()}`];
+  // A pure chronological trend (a time bucket, no other dimension, default bucket-ASC sort) must keep
+  // the NEWEST buckets when the series is longer than the LIMIT: order bucket DESC + LIMIT here, then
+  // reverse the rows for display (executeBuilt). A bucketed cross-tab (a dimension alongside the bucket)
+  // is a table, not a trend, so it keeps its existing order.
+  const chronologicalTrend =
+    p.bucket !== undefined && p.dimensions.length === 0 && sort.by === "bucket" && sort.dir === "asc";
+  const primaryDir = chronologicalTrend ? "DESC" : sort.dir.toUpperCase();
+  const orderParts = [`${sortExpr} ${primaryDir}`];
   for (const d of dims) {
     if (d.alias === sort.by) continue;
     orderParts.push(`${d.group} ASC`);
@@ -432,7 +446,7 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
     `ORDER BY ${orderParts.join(", ")}`,
     `LIMIT ${p.limit}`,
   ]);
-  return { sql, where, openSet };
+  return { sql, where, openSet, reverse: chronologicalTrend };
 }
 
 export interface QueryResult {
@@ -475,7 +489,7 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     // Promise.all attaches a rejection handler to BOTH promises up front, so if one query fails the
     // sibling's rejection is still handled (no unhandled rejection) and the error surface matches the
     // old sequential path: the whole call rejects with whichever query failed first.
-    const [rows, metaRow] = await Promise.all([
+    const [fetched, metaRow] = await Promise.all([
       client
         .query({ query: built.sql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })
         .then((rs) => rs.json<Record<string, unknown>>()),
@@ -484,6 +498,10 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
         .then((rs) => rs.json<{ sampleN: number; freshestAt: string }>())
         .then((metaRows) => metaRows[0]),
     ]);
+
+    // A newest-first trend slice is reversed back to chronological order for the display axis (the
+    // fetched array is freshly built by json(), so the in-place reverse is safe).
+    const rows = built.reverse ? fetched.reverse() : fetched;
 
     return {
       sql: built.sql,

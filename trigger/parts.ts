@@ -90,6 +90,13 @@ function num(value: unknown): number {
   return Math.round(Number(value));
 }
 
+/** The label copy for a group value used in verdicts/series - null or the empty string (searchnapply
+ *  defaults absent city/level to null/"") reads as "unspecified", never a bare "null" leading a claim. */
+export const LABEL_FALLBACK = "unspecified";
+function labelText(value: unknown): string {
+  return value === null || value === undefined || value === "" ? LABEL_FALLBACK : String(value);
+}
+
 /** The code-derived verdict sentence - always carries the real headline number (honesty, AC-4). */
 function verdictFor(tool: TemplateName, rows: Record<string, unknown>[], params: unknown, sampleN: number): string {
   if (rows.length === 0) {
@@ -106,18 +113,19 @@ function verdictFor(tool: TemplateName, rows: Record<string, unknown>[], params:
         ? `The median salary in ${String(top.city)} is ${num(top.median)}.`
         : `${String(top.city)} pays more, with a median of ${num(top.median)}.`;
     case "postings_trend": {
-      const total = rows.reduce((sum, r) => sum + num(r.count), 0);
+      // sampleN (count over the same window) is the ONE denominator - never rows.reduce, which a LIMIT
+      // could truncate below the true total. It equals the source line's number by construction.
       const days = (params as { days?: number })?.days;
       return days
-        ? `${total} new postings in the last ${days} days.`
-        : `${total} new postings in this window.`;
+        ? `${sampleN} new postings in the last ${days} days.`
+        : `${sampleN} new postings in this window.`;
     }
     case "top_companies":
       return `${String(top.company)} is hiring the most, with ${num(top.count)} openings.`;
-    case "share_split": {
-      const total = rows.reduce((sum, r) => sum + num(r.count), 0);
-      return `${String(top.label)} is the largest group at ${num(top.count)} of ${total}.`;
-    }
+    case "share_split":
+      // The share base is sampleN (the whole), not the sum of the shown slices (a LIMIT could truncate
+      // them) - so the verdict's "of N" always matches the source line.
+      return `${String(top.label)} is the largest group at ${num(top.count)} of ${sampleN}.`;
     case "latest_postings":
       return `${rows.length} matching roles; the latest is ${String(top.title)}.`;
     default: {
@@ -147,7 +155,7 @@ const COMPOSED_MEASURE_LABEL: Record<string, string> = {
  * aggregate, the verdict leads with the total (count) or the observed range (salary) - so no false
  * superlative is ever claimed.
  */
-function verdictForComposed(params: ComposedShape, rows: Record<string, unknown>[]): string {
+function verdictForComposed(params: ComposedShape, rows: Record<string, unknown>[], sampleN: number): string {
   const measure = params.measures[0];
   const top = rows[0];
   const dimKey = params.dimensions?.[0];
@@ -157,26 +165,28 @@ function verdictForComposed(params: ComposedShape, rows: Record<string, unknown>
   const ranked = params.dimensions?.length === 1 && !params.bucket;
 
   if (measure === "count") {
-    const total = rows.reduce((sum, r) => sum + num(r.count), 0);
+    // sampleN (the whole) is the ONLY denominator - never rows.reduce, which the top-N LIMIT truncates
+    // (e.g. 20 shown titles of 3,257 postings), so "of N" would disagree with the source line.
     if (ranked) {
       const counts = rows.map((r) => num(r.count));
       const topCount = num(top.count);
       // Verify from the rows which extreme rows[0] holds - a custom `sort:{dir:"asc"}` makes it the min.
-      if (counts.every((c) => c <= topCount)) return `${String(top[dimKey!])} leads with ${topCount} of ${total} postings.`;
-      if (counts.every((c) => c >= topCount)) return `${String(top[dimKey!])} has the fewest, with ${topCount} of ${total} postings.`;
+      if (counts.every((c) => c <= topCount)) return `${labelText(top[dimKey!])} leads with ${topCount} of ${sampleN} postings.`;
+      if (counts.every((c) => c >= topCount)) return `${labelText(top[dimKey!])} has the fewest, with ${topCount} of ${sampleN} postings.`;
     }
-    return `${total} postings in total.`;
+    return `${sampleN} postings in total.`;
   }
 
   const label = COMPOSED_MEASURE_LABEL[measure] ?? measure;
   const values = rows.map((r) => num(r[measure]));
   if (ranked) {
     const topVal = num(top[measure]);
-    if (values.every((v) => v <= topVal)) return `${String(top[dimKey!])} has the highest ${label} at ${topVal}.`;
-    if (values.every((v) => v >= topVal)) return `${String(top[dimKey!])} has the lowest ${label} at ${topVal}.`;
+    if (values.every((v) => v <= topVal)) return `${labelText(top[dimKey!])} has the highest ${label} at ${topVal}.`;
+    if (values.every((v) => v >= topVal)) return `${labelText(top[dimKey!])} has the lowest ${label} at ${topVal}.`;
   }
   if (dimKey === undefined && !params.bucket) return `The ${label} is ${num(top[measure])}.`;
-  return `The ${label} ranges from ${Math.min(...values)} to ${Math.max(...values)}.`;
+  // The min/max are over the shown (sorted + LIMITed) slice, so say so - never imply a full-corpus range.
+  return `The ${label} ranges from ${Math.min(...values)} to ${Math.max(...values)} across the ${rows.length} shown.`;
 }
 
 // The "widen" chip drops the most-selective active filter. Precedence RECORDED in the epic decision
@@ -326,7 +336,7 @@ export function buildComposedInsight({
   return assembleInsight(
     id,
     chartType,
-    verdictForComposed(params, result.rows),
+    verdictForComposed(params, result.rows, result.meta.sampleN),
     composedFollowups(params),
     result,
   );

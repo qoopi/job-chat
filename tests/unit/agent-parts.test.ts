@@ -633,6 +633,70 @@ describe("buildComposedInsight builds a strict-valid insight for the seventh too
   });
 });
 
+// 018 strand 1: sampleN (the whole) is the ONE denominator every verdict shows, never the sum of the
+// shown rows - a top-N LIMIT truncates that sum below the true total, and the source line shows sampleN,
+// so the two would disagree. These pin the verdict "of N" to sampleN when the shown rows sum LESS.
+describe("Strand 1: sampleN is the sole denominator (verdict matches the source line)", () => {
+  const truncated = (
+    rows: Record<string, unknown>[],
+    sampleN: number,
+  ): QueryResult => ({ sql: "SELECT 1", rows, meta: { sampleN, freshestAt: "2026-07-18 06:00:00", openSet: true } });
+
+  it("composed count-ranked names the leader over sampleN, not the sum of the shown top-N", () => {
+    // 20 titles shown summing to 300, but 3,257 postings total (many titles below the LIMIT).
+    const insight = buildComposedInsight({
+      id: "d1",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      result: truncated([{ company: "Google", count: 200 }, { company: "Meta", count: 100 }], 3257),
+    });
+    expect(insight.verdict).toContain("of 3257");
+    expect(insight.verdict).not.toContain("of 300");
+  });
+
+  it("composed non-ranked count totals sampleN, not the shown sum", () => {
+    const insight = buildComposedInsight({
+      id: "d2",
+      params: { measures: ["count"], dimensions: ["company", "city"] },
+      chartType: "table",
+      result: truncated([{ company: "Google", city: "NYC", count: 50 }], 3488),
+    });
+    expect(insight.verdict).toContain("3488 postings in total");
+  });
+
+  it("template share_split uses sampleN as the share base, not the sum of the shown slices", () => {
+    const insight = buildInsight({
+      id: "d3",
+      tool: "share_split",
+      params: { dimension: "experience" },
+      result: truncated([{ label: "Senior", count: 40 }, { label: "Junior", count: 30 }], 3488),
+    });
+    // "of 3488", never "of 70" (the shown slices) - matches the source line's sampleN.
+    expect(insight.verdict).toContain("of 3488");
+    expect(insight.verdict).not.toContain("of 70");
+  });
+
+  it("template postings_trend totals sampleN, not the sum of the shown (LIMITed) day buckets", () => {
+    const insight = buildInsight({
+      id: "d4",
+      tool: "postings_trend",
+      params: { days: 3650 },
+      result: { sql: "SELECT 1", rows: [{ day: "2026-07-20", count: 9 }], meta: { sampleN: 3315, freshestAt: "2026-07-18 06:00:00" } },
+    });
+    expect(insight.verdict).toContain("3315 new postings");
+  });
+
+  it("composed range names it as the span across the shown rows, not an implied full-corpus range", () => {
+    const insight = buildComposedInsight({
+      id: "d5",
+      params: { measures: ["median_salary"], bucket: "month" },
+      chartType: "trend",
+      result: truncated([{ bucket: "2026-05-01", median_salary: 150000 }, { bucket: "2026-06-01", median_salary: 170000 }], 900),
+    });
+    expect(insight.verdict).toContain("across the 2 shown");
+  });
+});
+
 describe("composedFollowups derives two deterministic chips from the params (no LLM)", () => {
   it("widens by dropping the most-selective filter and pivots to an unused dimension", () => {
     const chips = composedFollowups({ measures: ["count"], dimensions: ["company"], country: "United States" });
