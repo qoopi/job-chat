@@ -3,15 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
+import type { Conversation } from "@shared/store";
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
 import { Composer, type ComposerState } from "./Composer";
 import { MessageList } from "./MessageList";
 import { LcpPanel } from "./LcpPanel";
+import { AuthDialog } from "@/components/auth/AuthDialog";
+import { authClient } from "@/lib/auth-client";
 import { useJobChatTransport } from "@/lib/chat-transport";
 import { isStreaming, reconcileMessagesById, resolveInsightTarget, type LcpTarget } from "@/lib/chat-ui";
 import { isAuthDialogOpen } from "@/lib/layers";
-import { mintChatToken, sendMessage as sendMessageAction } from "@/app/actions";
+import { closeAuthDialog, openAuthDialog, useAuthDialogOpen } from "@/lib/auth-dialog";
+import { listMyConversations, mintChatToken, sendMessage as sendMessageAction } from "@/app/actions";
 
 // The live chat surface (mock 2a): it swaps 005's static fixture for `useChat` message parts fed by the
 // Trigger transport, and wires every interaction the interaction-spec calls for - composer send / stop
@@ -25,10 +29,6 @@ import { mintChatToken, sendMessage as sendMessageAction } from "@/app/actions";
 //  - E2E: the mock transport streams a scripted answer, so `useChat.sendMessage` drives the whole turn
 //    with no Trigger/Bedrock. The rendering, reconciliation, and controls under test are the same.
 
-function makeUserMessage(text: string): UIMessage {
-  return { id: crypto.randomUUID(), role: "user", parts: [{ type: "text", text }] };
-}
-
 export function ChatClient({
   conversationId,
   title,
@@ -36,6 +36,9 @@ export function ChatClient({
   pendingQuestion,
   autoStream = false,
   e2e = false,
+  signedIn: signedInInitial = false,
+  accountName,
+  conversations: conversationsInitial = [],
 }: {
   conversationId: string;
   title?: string;
@@ -43,6 +46,11 @@ export function ChatClient({
   pendingQuestion?: string;
   autoStream?: boolean;
   e2e?: boolean;
+  /** AC-12/AC-13: SSR-resolved sign-in state + the account's history (empty for a guest). Client state
+   *  takes over after an in-page sign-in / sign-out (no full-page refresh needed). */
+  signedIn?: boolean;
+  accountName?: string;
+  conversations?: Pick<Conversation, "id" | "title" | "created_at">[];
 }) {
   const transport = useJobChatTransport({ e2e });
   const { messages, sendMessage, stop, status, regenerate, setMessages, resumeStream } = useChat({
@@ -54,6 +62,14 @@ export function ChatClient({
   const [draft, setDraft] = useState("");
   const [used, setUsed] = useState<Set<string>>(new Set());
   const [failed, setFailed] = useState<string | null>(null);
+  // Auth is client-driven after mount: `signedIn`/`conversations` seed from the SSR resolve, then an
+  // in-page sign-in / sign-out flips them (the sidebar updates without a full-page refresh). `dialogOpen`
+  // comes from the shared open-store (interaction-spec s6; one dialog at a time). `queuedDraft` is the
+  // blocked message held across the dialog for AC-11 auto-send.
+  const [signedIn, setSignedIn] = useState(signedInInitial);
+  const [conversations, setConversations] = useState(conversationsInitial);
+  const [queuedDraft, setQueuedDraft] = useState<string | null>(null);
+  const dialogOpen = useAuthDialogOpen();
   // Instant "answering" feedback (006 ruling): set the moment a turn is sent or the arrival attach
   // begins, so the indicator + streaming composer appear AT ONCE and bridge the run-wake gap before the
   // SDK moves `status` off "ready". `pending` is `isStreaming(status) || awaiting`, so once the stream is
@@ -70,7 +86,7 @@ export function ChatClient({
   const closeLcp = useCallback(() => setLcpTarget(null), []);
 
   const send = useCallback(
-    async (raw: string) => {
+    async (raw: string, opts?: { fromAuth?: boolean }) => {
       const text = raw.trim();
       if (!text) return;
       setFailed(null);
@@ -95,9 +111,16 @@ export function ChatClient({
               // MessageList path renders it (decision 19 / 004 handoff), not a bespoke banner.
               setMessages((prev) => [
                 ...prev,
-                makeUserMessage(text),
                 { id: crypto.randomUUID(), role: "assistant", parts: [{ type: "data-refusal", data: { reason: r.reason } }] } as UIMessage,
               ]);
+              setDraft(text); // AC-11: the blocked draft stays in the composer (survives dialog / cancel)
+              // AC-10/AC-11: a GUEST hitting the cap presents the dialog and queues the draft for
+              // auto-send on sign-in. A signed-in cap (or the post-sign-in re-send) just shows the notice
+              // and keeps the draft - there is no sign-in remedy.
+              if (r.reason === "guest_cap" && !signedIn && !opts?.fromAuth) {
+                setQueuedDraft(text);
+                openAuthDialog();
+              }
               return;
             }
             setFailed(text); // invalid_input / not_found -> send-failure toast
@@ -133,7 +156,7 @@ export function ChatClient({
         setAwaiting(false); // fallback clear for paths that never stream (refusal / invalid / abort)
       }
     },
-    [e2e, conversationId, sendMessage, setMessages, transport],
+    [e2e, conversationId, sendMessage, setMessages, transport, signedIn],
   );
 
   // AC-3 arrival attach: the landing action already created the conversation and triggered its run, but
@@ -186,6 +209,37 @@ export function ChatClient({
   // be a fresh ref every ChatClient render and defeat the memo (regenerate is stable across renders).
   const onRetry = useCallback(() => void regenerate(), [regenerate]);
 
+  // AC-11: the sign-in dialog succeeded (adoption + guest-cookie clear already ran inside it). Close the
+  // dialog, flip to signed-in, auto-send the queued blocked draft through the NORMAL guarded path
+  // (fromAuth, so a still-refusing signed-in cap shows the notice and keeps the draft rather than
+  // re-opening the dialog), and refresh the sidebar history now that we are an account.
+  const onAuthSuccess = useCallback(async () => {
+    closeAuthDialog();
+    setSignedIn(true);
+    const q = queuedDraft;
+    setQueuedDraft(null);
+    if (q) {
+      setDraft("");
+      await send(q, { fromAuth: true });
+    }
+    try {
+      setConversations(await listMyConversations());
+    } catch {
+      /* keep the prior list on a transient list failure */
+    }
+  }, [queuedDraft, send]);
+
+  // Sign out: drop the Better Auth session and return the sidebar to its guest state.
+  const onSignOut = useCallback(async () => {
+    try {
+      await authClient.signOut();
+    } catch {
+      /* a failed sign-out leaves the session in place - no data loss */
+    }
+    setSignedIn(false);
+    setConversations([]);
+  }, []);
+
   // Reconcile by id at the merge seam: a hydrated conversation that reconnects to a live run re-receives
   // its already-present assistant tail from the SDK's session replay, which the AI SDK appends under the
   // same id. Fold those duplicates (replace in place, order preserved) so each turn renders exactly once
@@ -206,9 +260,10 @@ export function ChatClient({
     [targetMessage, lcpTarget],
   );
 
-  // AC-9 close-on-Esc, single keydown listener honoring the layer priority (interaction-spec): the auth
-  // dialog, when 013 ships it, sits above the LCP and takes Esc first (isAuthDialogOpen seam). Until
-  // then the LCP is always topmost, so Esc closes it. Bound once; the functional setState reads current.
+  // AC-9 close-on-Esc, honoring the layer priority (interaction-spec): the open auth dialog sits above
+  // the LCP and takes Esc first. This handler yields while `isAuthDialogOpen()` is true (the dialog's own
+  // listener - registered after this one when it mounts, so it runs second - closes the dialog and leaves
+  // the LCP); otherwise Esc closes the LCP. Bound once; the functional setState reads current.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
@@ -220,13 +275,24 @@ export function ChatClient({
   }, []);
 
   // `pending` = streaming OR the pre-stream run-wake gap. Drives BOTH the composer streaming state and
-  // the MessageList answering indicator off one flag, so the indicator + Stop stay in lockstep.
+  // the MessageList answering indicator off one flag, so the indicator + Stop stay in lockstep. The auth
+  // dialog dims the composer (interaction-spec section 4 - and this is the brief input disable against
+  // an Enter-repeat at the cap moment: the dialog auto-opens, so the composer is inert while it is up).
   const pending = isStreaming(status) || awaiting;
-  const composerState: ComposerState = pending ? "streaming" : "default";
+  const composerState: ComposerState = dialogOpen ? "disabled" : pending ? "streaming" : "default";
 
   return (
     <div className="app" style={{ height: "100vh" }}>
-      <Sidebar activeTitle={title} onNewChat={closeLcp} />
+      <Sidebar
+        signedIn={signedIn}
+        accountName={accountName}
+        conversations={conversations}
+        activeId={conversationId}
+        activeTitle={title}
+        onNewChat={closeLcp}
+        onSignIn={openAuthDialog}
+        onSignOut={() => void onSignOut()}
+      />
       <main className="main">
         {/* AC-8: the LCP takes the middle of the canvas while the chat docks to the 360px right rail. */}
         {lcpInsight ? <LcpPanel insight={lcpInsight} onClose={closeLcp} /> : null}
@@ -240,6 +306,7 @@ export function ChatClient({
               onFollowup={onFollowup}
               onRetry={onRetry}
               onOpenLcp={openLcp}
+              onSignIn={signedIn ? undefined : openAuthDialog}
             />
           </div>
           <Composer
@@ -288,6 +355,8 @@ export function ChatClient({
           </button>
         </div>
       ) : null}
+      {/* Topmost layer (interaction-spec "Priority of layers": auth dialog > LCP > thread). */}
+      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} onSuccess={() => void onAuthSuccess()} /> : null}
     </div>
   );
 }

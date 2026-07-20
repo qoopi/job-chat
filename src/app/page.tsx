@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LandingComposer } from "@/components/landing/LandingComposer";
+import { LandingSignIn } from "@/components/landing/LandingSignIn";
 import { GITHUB_URL, HACKATHON_URL, SEARCHNAPPLY_URL } from "@/lib/links";
 import { isE2E } from "@/lib/e2e";
 
@@ -40,12 +41,7 @@ export default function Landing() {
             &times; <span style={{ color: "var(--triggerdev)", fontWeight: 600 }}>Trigger.dev</span> hackathon
           </a>
         </div>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <button className="btn btn-shell btn-sm" type="button" disabled title="Coming soon">
-            Sign in
-          </button>
-          <span style={{ fontSize: "var(--fs-2xs)", color: "var(--shell-fg-dim)" }}>soon</span>
-        </span>
+        <LandingSignIn />
       </header>
 
       {/* hero */}

@@ -38,11 +38,13 @@ vi.mock("@/app/actions", () => ({
 }));
 
 import { ChatClient } from "@/components/chat/ChatClient";
+import { closeAuthDialog } from "@/lib/auth-dialog";
 
 const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
 
 afterEach(() => {
   cleanup();
+  closeAuthDialog(); // a guest cap refusal auto-opens the shared auth dialog (module singleton) - reset it
   sendMessageMock.mockReset();
   mintChatTokenMock.mockReset();
   setSessionMock.mockClear();
