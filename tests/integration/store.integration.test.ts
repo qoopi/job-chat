@@ -76,13 +76,85 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     expect(await store.getConversation("123")).toBeNull();
   });
 
-  // The lightweight owner lookup backing authorization + the agent guard: one row, no history.
-  it("getConversationOwner returns the owner id, or null for missing/malformed ids", async () => {
+  // The lightweight owner lookup backing authorization + the agent guard: one row (conversations JOIN
+  // users), no history. Widened (012) to carry the owner's auth_user_id so the run() backstop can pick
+  // the cap by identity kind (null = guest cap, set = signed-in cap).
+  it("getConversationOwner returns { user_id, auth_user_id }, or null for missing/malformed ids", async () => {
     await store.getOrCreateUser(guestId);
     const conv = await store.createConversation(guestId, "Who owns this?");
-    expect(await store.getConversationOwner(conv.id)).toEqual({ user_id: guestId });
+    expect(await store.getConversationOwner(conv.id)).toEqual({ user_id: guestId, auth_user_id: null });
     expect(await store.getConversationOwner(crypto.randomUUID())).toBeNull(); // unknown
     expect(await store.getConversationOwner("not-a-uuid")).toBeNull(); // malformed, not a DB error
+  });
+
+  // findUserByAuthId is the account lookup on every signed-in request (backed by the auth_user_id
+  // UNIQUE btree index); null when no users row is linked to that Better Auth id yet.
+  it("findUserByAuthId returns the linked users row, or null when unmapped (012)", async () => {
+    const authId = `auth-${crypto.randomUUID()}`;
+    const u = `test-guest-${crypto.randomUUID()}`;
+    expect(await store.findUserByAuthId(authId)).toBeNull();
+    await store.getOrCreateUser(u);
+    await store.linkAuthUser(u, authId);
+    const found = await store.findUserByAuthId(authId);
+    expect(found?.user_id).toBe(u);
+    expect(found?.auth_user_id).toBe(authId);
+    await purge(u);
+  });
+
+  // linkAuthUser stamps the guest's row on first sign-in (conversations follow for free), so the
+  // widened owner lookup then reports the account identity.
+  it("linkAuthUser stamps auth_user_id on the users row (012)", async () => {
+    const authId = `auth-${crypto.randomUUID()}`;
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    const conv = await store.createConversation(u, "mine");
+    await store.linkAuthUser(u, authId);
+    expect(await store.getConversationOwner(conv.id)).toEqual({ user_id: u, auth_user_id: authId });
+    await purge(u);
+  });
+
+  // AC-11 (store slice): sign-in on a device holding guest conversations adopts them onto the account's
+  // canonical row - a single UPDATE of conversations.user_id, no message copying. Idempotent (re-run =
+  // no-op, since no conversation is left under the guest id).
+  it("adoptGuest re-points the guest's conversations to the canonical row; idempotent (AC-11)", async () => {
+    const canonical = `test-guest-${crypto.randomUUID()}`;
+    const guest = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(canonical);
+    await store.getOrCreateUser(guest);
+    const c1 = await store.createConversation(guest, "guest q1");
+    const c2 = await store.createConversation(guest, "guest q2");
+    await store.appendMessage(c1.id, "user", "guest q1", null); // messages stay put (no copying)
+
+    await store.adoptGuest(canonical, guest);
+    expect((await store.getConversationOwner(c1.id))?.user_id).toBe(canonical);
+    expect((await store.getConversationOwner(c2.id))?.user_id).toBe(canonical);
+    // The messages still hang off c1 (conversation moved, not the messages).
+    expect((await store.getConversation(c1.id))?.messages).toHaveLength(1);
+
+    // Idempotent: a second run moves nothing and leaves the canonical ownership intact.
+    await store.adoptGuest(canonical, guest);
+    expect((await store.getConversationOwner(c1.id))?.user_id).toBe(canonical);
+
+    await purge(canonical);
+    await purge(guest);
+  });
+
+  // AC-12 (store slice): the sidebar history is newest-first. created_at is pinned to distinct values so
+  // the ordering assertion is deterministic (not a clock-race between same-millisecond inserts).
+  it("listConversations returns the user's conversations newest-first (AC-12)", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    const a = await store.createConversation(u, "oldest");
+    const b = await store.createConversation(u, "middle");
+    const c = await store.createConversation(u, "newest");
+    await sql`UPDATE conversations SET created_at = ${new Date("2026-07-01T00:00:00Z")} WHERE id = ${a.id}`;
+    await sql`UPDATE conversations SET created_at = ${new Date("2026-07-02T00:00:00Z")} WHERE id = ${b.id}`;
+    await sql`UPDATE conversations SET created_at = ${new Date("2026-07-03T00:00:00Z")} WHERE id = ${c.id}`;
+
+    const list = await store.listConversations(u);
+    expect(list.map((x) => x.title)).toEqual(["newest", "middle", "oldest"]);
+    expect(list.map((x) => x.id)).toEqual([c.id, b.id, a.id]);
+    await purge(u);
   });
 
   it("messageCounts scopes to a user (cap) and aggregates globally (daily budget)", async () => {

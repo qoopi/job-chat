@@ -6,13 +6,16 @@ import { getAgentLimits, getGuardConfig } from "@shared/env";
 // and they fall back to the conservative defaults from the epic when the vars are unset.
 
 describe("getGuardConfig", () => {
-  it("defaults to guest cap 10 and daily budget 200 when unset", () => {
-    expect(getGuardConfig({})).toEqual({ guestCap: 10, dailyBudget: 200 });
+  it("defaults to guest cap 10, signed-in cap 30, and daily budget 200 when unset", () => {
+    expect(getGuardConfig({})).toEqual({ guestCap: 10, signedInCap: 30, dailyBudget: 200 });
   });
 
   it("reads and coerces overrides from the (string) environment", () => {
-    expect(getGuardConfig({ GUEST_MESSAGE_CAP: "3", DAILY_MESSAGE_BUDGET: "50" })).toEqual({
+    expect(
+      getGuardConfig({ GUEST_MESSAGE_CAP: "3", SIGNED_IN_MESSAGE_CAP: "25", DAILY_MESSAGE_BUDGET: "50" }),
+    ).toEqual({
       guestCap: 3,
+      signedInCap: 25,
       dailyBudget: 50,
     });
   });

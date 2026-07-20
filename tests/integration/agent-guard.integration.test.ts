@@ -100,6 +100,43 @@ describe.skipIf(!hasCreds)("agent guard backstop against real Postgres", () => {
     expect(refusal).toBeNull();
   });
 
+  // AC-13 (guard slice): the run() backstop picks the cap by the OWNER's identity kind, read from the
+  // widened owner lookup - a signed-in owner (auth_user_id set) gets the higher SIGNED_IN cap, a guest
+  // owner (auth_user_id null) the lower guest cap. The global daily budget is unchanged.
+  it("applies the signed-in cap for an account owner and the guest cap for a guest owner (AC-13)", async () => {
+    const guestCap = 10;
+    const guards = { guestCap, signedInCap: 30, dailyBudget: HUGE };
+
+    // An ACCOUNT owner (auth_user_id stamped) sitting exactly at the guest cap: still under the
+    // signed-in cap, so the backstop lets the (cap+1)-th turn through.
+    const account = freshGuestId();
+    await store.getOrCreateUser(account);
+    await store.linkAuthUser(account, `auth-${crypto.randomUUID()}`);
+    const accountConv = await store.createConversation(account, "account thread");
+    for (let i = 0; i < guestCap; i++) await store.appendMessage(accountConv.id, "user", `a ${i}`, null);
+    expect(await checkConversationGuards({ store, guards, now }, accountConv.id)).toBeNull();
+
+    // A GUEST owner (auth_user_id null) at the same count is refused: the guest cap bites.
+    const guest = freshGuestId();
+    await store.getOrCreateUser(guest);
+    const guestConv = await store.createConversation(guest, "guest thread");
+    for (let i = 0; i < guestCap; i++) await store.appendMessage(guestConv.id, "user", `g ${i}`, null);
+    expect(await checkConversationGuards({ store, guards, now }, guestConv.id)).toBe("guest_cap");
+  });
+
+  // The action layer threads Identity.kind directly (turn 1 has no conversation row to read the owner
+  // from): "account" selects the signed-in cap, "guest" the guest cap.
+  it("checkMessageGuards selects the cap by caller kind (AC-13 action layer)", async () => {
+    const guestCap = 10;
+    const guards = { guestCap, signedInCap: 30, dailyBudget: HUGE };
+    const userId = freshGuestId();
+    await store.getOrCreateUser(userId);
+    const conv = await store.createConversation(userId, "kind check");
+    for (let i = 0; i < guestCap; i++) await store.appendMessage(conv.id, "user", `m ${i}`, null);
+    expect(await checkMessageGuards({ store, guards, now }, userId, "account")).toBeNull(); // under 30
+    expect(await checkMessageGuards({ store, guards, now }, userId, "guest")).toBe("guest_cap"); // at 10
+  });
+
   // The shared count powering both layers: budget (global) checked before cap (scoped), one round trip.
   it("checkMessageGuards prioritizes the global budget over the per-guest cap", async () => {
     const userId = freshGuestId();

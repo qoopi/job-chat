@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
-import { checkMessageGuards, MAX_INPUT_CHARS } from "./guard";
+import { checkMessageGuards, MAX_INPUT_CHARS, type CallerKind } from "./guard";
 
 // The session core: the guard + landing-handoff logic the "use server" actions wrap. Injectable
 // (store, guards, startSession, mintToken, now) so it is testable against a real store without the
@@ -102,18 +102,53 @@ export function userTurnChunk(chatId: string, messageId: string, text: string) {
 }
 
 export interface SessionService {
-  /** Landing handoff (AC-3): create conversation + user message #1, trigger the run, return the id. */
-  startConversation(userId: string, question: string): Promise<SessionResult>;
+  /**
+   * Landing handoff (AC-3): create conversation + user message #1, trigger the run, return the id. The
+   * cap is picked by the caller's Identity `kind` (turn 1 has no conversation row for the backstop to
+   * read); defaults to the guest cap.
+   */
+  startConversation(userId: string, question: string, kind?: CallerKind): Promise<SessionResult>;
   /**
    * Follow-up send GATE (mechanism a): bound input, confirm the caller owns the conversation, apply the
-   * cap/budget early refusal, and mint the scoped token. It does NOT persist or trigger - the client
-   * transport's `sendMessages` delivers the turn to `.in` (triggering the run) and subscribes with wait
-   * (the only SDK path that streams a freshly-triggered follow-up live), and the agent's `run()` persists
-   * the user turn before the backstop counts it.
+   * cap/budget early refusal (cap by Identity `kind`), and mint the scoped token. It does NOT persist or
+   * trigger - the client transport's `sendMessages` delivers the turn to `.in` (triggering the run) and
+   * subscribes with wait (the only SDK path that streams a freshly-triggered follow-up live), and the
+   * agent's `run()` persists the user turn before the backstop counts it.
    */
-  sendMessage(conversationId: string, text: string, callerGuestId: string): Promise<SendResult>;
+  sendMessage(conversationId: string, text: string, callerUserId: string, kind?: CallerKind): Promise<SendResult>;
   /** Mint a session-scoped token, but only for the caller's own conversation (defense in depth). */
-  mintChatToken(conversationId: string, callerGuestId: string): Promise<MintResult>;
+  mintChatToken(conversationId: string, callerUserId: string): Promise<MintResult>;
+}
+
+/** The caller's resolved chat identity: a stable `userId` (the chat identity key) + its `kind`. */
+export type Identity = { userId: string; kind: CallerKind };
+
+/**
+ * Resolve the caller's chat Identity, reconciling a fresh Better Auth sign-in with any guest cookie
+ * (adoption). Runs server-side in the action path (never client-side) and is idempotent:
+ * - auth id already on a users row (returning account): that row is canonical; a DIFFERENT guest
+ *   cookie's conversations are adopted onto it (new-device sign-in).
+ * - auth id on no row yet (first sign-in this browser): stamp it onto the caller's users row (the guest
+ *   row if present, else a fresh one) so the guest's conversations become the account's for free.
+ * - no auth id: the guest cookie is the identity (its users row was upserted on the landing path).
+ */
+export async function resolveIdentity(
+  store: Store,
+  args: { authUserId?: string; guestId?: string },
+): Promise<Identity> {
+  const { authUserId, guestId } = args;
+  if (authUserId) {
+    const existing = await store.findUserByAuthId(authUserId);
+    if (existing) {
+      if (guestId && guestId !== existing.user_id) await store.adoptGuest(existing.user_id, guestId);
+      return { userId: existing.user_id, kind: "account" };
+    }
+    const row = await store.getOrCreateUser(guestId ?? crypto.randomUUID());
+    await store.linkAuthUser(row.user_id, authUserId);
+    return { userId: row.user_id, kind: "account" };
+  }
+  const userId = guestId ?? (await store.getOrCreateUser(crypto.randomUUID())).user_id;
+  return { userId, kind: "guest" };
 }
 
 export function createSessionService(deps: SessionDeps): SessionService {
@@ -141,10 +176,10 @@ export function createSessionService(deps: SessionDeps): SessionService {
   }
 
   return {
-    async startConversation(userId, question) {
+    async startConversation(userId, question, kind = "guest") {
       if (!TextSchema.safeParse(question).success) return { ok: false, reason: "invalid_input" };
 
-      const refusal = await checkMessageGuards({ store, guards, now }, userId);
+      const refusal = await checkMessageGuards({ store, guards, now }, userId, kind);
       if (refusal) return { ok: false, reason: refusal };
 
       const conversation = await store.createConversation(userId, question);
@@ -153,16 +188,16 @@ export function createSessionService(deps: SessionDeps): SessionService {
       return { ok: true, conversationId: conversation.id, messageId: message.id, publicAccessToken, runId };
     },
 
-    async sendMessage(conversationId, text, callerGuestId) {
+    async sendMessage(conversationId, text, callerUserId, kind = "guest") {
       if (!ConversationIdSchema.safeParse(conversationId).success) return { ok: false, reason: "not_found" };
       if (!TextSchema.safeParse(text).success) return { ok: false, reason: "invalid_input" };
 
       // Ownership: bind caller -> conversation via a lightweight owner lookup (no full history). A
-      // conversation the caller does not own reads as not_found (never leak another guest's thread).
+      // conversation the caller does not own reads as not_found (never leak another user's thread).
       const owner = await store.getConversationOwner(conversationId);
-      if (!owner || owner.user_id !== callerGuestId) return { ok: false, reason: "not_found" };
+      if (!owner || owner.user_id !== callerUserId) return { ok: false, reason: "not_found" };
 
-      const refusal = await checkMessageGuards({ store, guards, now }, callerGuestId);
+      const refusal = await checkMessageGuards({ store, guards, now }, callerUserId, kind);
       if (refusal) return { ok: false, reason: refusal };
 
       // Mechanism (a): do NOT persist or trigger here. The client transport's `sendMessages` delivers
@@ -175,10 +210,10 @@ export function createSessionService(deps: SessionDeps): SessionService {
       return { ok: true, publicAccessToken: await mintToken(conversationId) };
     },
 
-    async mintChatToken(conversationId, callerGuestId) {
+    async mintChatToken(conversationId, callerUserId) {
       if (!ConversationIdSchema.safeParse(conversationId).success) return { ok: false, reason: "not_found" };
       const owner = await store.getConversationOwner(conversationId);
-      if (!owner || owner.user_id !== callerGuestId) return { ok: false, reason: "not_found" };
+      if (!owner || owner.user_id !== callerUserId) return { ok: false, reason: "not_found" };
       return { ok: true, token: await mintToken(conversationId) };
     },
   };

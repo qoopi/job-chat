@@ -21,10 +21,13 @@ const BedrockEnvSchema = z.object({
   AWS_SECRET_ACCESS_KEY: z.string().min(1),
 });
 
-// The session guards (guest cap + global daily budget). Env-tunable, conservative defaults until prod
-// traffic is understood (epic AC-15/AC-20). Coerced because process.env values are strings.
+// The session guards (guest cap, signed-in cap, global daily budget). Env-tunable, conservative
+// defaults until prod traffic is understood (epic AC-13/AC-15/AC-20). Coerced because process.env
+// values are strings. SIGNED_IN_MESSAGE_CAP is the higher per-user cap for accounts; auth never runs
+// in the agent, but the run() backstop's cap check does, so mirror it in Trigger too.
 const GuardsEnvSchema = z.object({
   GUEST_MESSAGE_CAP: z.coerce.number().int().positive().default(10),
+  SIGNED_IN_MESSAGE_CAP: z.coerce.number().int().positive().default(30),
   DAILY_MESSAGE_BUDGET: z.coerce.number().int().positive().default(200),
 });
 
@@ -70,6 +73,12 @@ export function resetEnvCache(): void {
 
 export interface GuardConfig {
   guestCap: number;
+  /**
+   * The higher per-user cap for signed-in accounts (AC-13). Optional here only so terse test guard
+   * literals that exercise the guest path stay uncluttered; `getGuardConfig` ALWAYS sets it in
+   * production. When unset, cap selection falls back to `guestCap` (fail-safe - the lower cap).
+   */
+  signedInCap?: number;
   dailyBudget: number;
 }
 
@@ -81,7 +90,11 @@ export function getGuardConfig(
   source: Record<string, string | undefined> = process.env,
 ): GuardConfig {
   const env = GuardsEnvSchema.parse(source);
-  return { guestCap: env.GUEST_MESSAGE_CAP, dailyBudget: env.DAILY_MESSAGE_BUDGET };
+  return {
+    guestCap: env.GUEST_MESSAGE_CAP,
+    signedInCap: env.SIGNED_IN_MESSAGE_CAP,
+    dailyBudget: env.DAILY_MESSAGE_BUDGET,
+  };
 }
 
 export interface AgentLimits {

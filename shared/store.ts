@@ -20,6 +20,7 @@ export type Json = unknown;
 export interface User {
   user_id: string;
   created_at: Date;
+  auth_user_id: string | null; // Better Auth's user id once signed in (adoption stamps it); null for guests
 }
 
 export interface Conversation {
@@ -51,11 +52,25 @@ export interface Store {
     conversationId: string,
   ): Promise<{ conversation: Conversation; messages: Message[] } | null>;
   /**
-   * The conversation's owner id, or `null` for an unknown/malformed id. A lightweight
-   * authorization + guard lookup - one indexed row, no message history (contrast `getConversation`,
-   * which loads the full, unbounded thread).
+   * The conversation's owner (user_id + the owner's auth_user_id), or `null` for an unknown/malformed
+   * id. A lightweight authorization + guard lookup - conversations JOIN users, both PK/UNIQUE-indexed,
+   * no message history (contrast `getConversation`, which loads the full, unbounded thread). The
+   * auth_user_id (null = guest, set = signed-in) lets the run() backstop pick the cap by identity kind.
    */
-  getConversationOwner(conversationId: string): Promise<{ user_id: string } | null>;
+  getConversationOwner(
+    conversationId: string,
+  ): Promise<{ user_id: string; auth_user_id: string | null } | null>;
+  /** The users row linked to a Better Auth id, or `null` when unmapped. One indexed lookup. */
+  findUserByAuthId(authUserId: string): Promise<User | null>;
+  /** Stamp a Better Auth id onto a users row (first sign-in; conversations follow for free). */
+  linkAuthUser(userId: string, authUserId: string): Promise<void>;
+  /**
+   * Adopt a guest's conversations into the canonical (account) row on sign-in: one UPDATE of
+   * conversations.user_id, no message copying. Idempotent (a re-run moves nothing).
+   */
+  adoptGuest(canonicalUserId: string, guestUserId: string): Promise<void>;
+  /** A user's conversations, newest first (the signed-in sidebar history, AC-12). */
+  listConversations(userId: string): Promise<Pick<Conversation, "id" | "title" | "created_at">[]>;
   /** Count user-turn messages since `sinceUtcMidnight`. No `userId` => global (the daily budget). */
   messageCounts(args: { userId?: string; sinceUtcMidnight: Date }): Promise<number>;
 }
@@ -82,7 +97,7 @@ export function createStore(sql: Sql): Store {
       const rows = await sql<User[]>`
         INSERT INTO users (user_id) VALUES (${guestId})
         ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-        RETURNING user_id, created_at`;
+        RETURNING user_id, created_at, auth_user_id`;
       return rows[0];
     },
 
@@ -119,12 +134,39 @@ export function createStore(sql: Sql): Store {
     },
 
     async getConversationOwner(conversationId) {
-      // Same "null = not found" contract as getConversation (malformed id reads as not found), but
-      // one row and no message join - the authorization + guard path never needs the history.
+      // Same "null = not found" contract as getConversation (malformed id reads as not found). One
+      // JOIN of two indexed rows (conversations PK + users PK) - the auth_user_id rides along so the
+      // guard picks the cap by kind - and still no message history.
       if (!UUID_RE.test(conversationId)) return null;
-      const rows = await sql<{ user_id: string }[]>`
-        SELECT user_id FROM conversations WHERE id = ${conversationId}`;
-      return rows.length === 0 ? null : { user_id: rows[0].user_id };
+      const rows = await sql<{ user_id: string; auth_user_id: string | null }[]>`
+        SELECT cv.user_id, u.auth_user_id
+        FROM conversations cv JOIN users u ON u.user_id = cv.user_id
+        WHERE cv.id = ${conversationId}`;
+      return rows.length === 0 ? null : { user_id: rows[0].user_id, auth_user_id: rows[0].auth_user_id };
+    },
+
+    async findUserByAuthId(authUserId) {
+      const rows = await sql<User[]>`
+        SELECT user_id, created_at, auth_user_id FROM users WHERE auth_user_id = ${authUserId}`;
+      return rows.length === 0 ? null : rows[0];
+    },
+
+    async linkAuthUser(userId, authUserId) {
+      await sql`UPDATE users SET auth_user_id = ${authUserId} WHERE user_id = ${userId}`;
+    },
+
+    async adoptGuest(canonicalUserId, guestUserId) {
+      // Re-point the guest's conversations to the canonical row (messages ride along via
+      // conversation_id - none are copied). Idempotent: a re-run matches zero rows.
+      await sql`UPDATE conversations SET user_id = ${canonicalUserId} WHERE user_id = ${guestUserId}`;
+    },
+
+    async listConversations(userId) {
+      const rows = await sql<Pick<Conversation, "id" | "title" | "created_at">[]>`
+        SELECT id, title, created_at FROM conversations
+        WHERE user_id = ${userId}
+        ORDER BY created_at DESC, id DESC`;
+      return [...rows];
     },
 
     async messageCounts({ userId, sinceUtcMidnight }) {

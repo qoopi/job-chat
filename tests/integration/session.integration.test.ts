@@ -3,6 +3,7 @@ import postgres, { type Sql } from "postgres";
 import { createStore, type Store } from "@shared/store";
 import {
   createSessionService,
+  resolveIdentity,
   type MintToken,
   type SendToInbox,
   type StartSession,
@@ -374,5 +375,80 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(await svc.mintChatToken(conv.id, owner)).toEqual({ ok: true, token: `pat_${conv.id}` });
     expect(await svc.mintChatToken(conv.id, attacker)).toEqual({ ok: false, reason: "not_found" });
     expect(mintToken).toHaveBeenCalledTimes(1); // never minted for the attacker
+  });
+
+  // AC-14 (account variant): ownership is by resolved userId, kind-agnostic. An account owner's
+  // conversation is not_found to a DIFFERENT account (both refusal layers - sendMessage + mintChatToken)
+  // and gates through for the owning account itself.
+  it("refuses a not-owner ACCOUNT caller with not_found on both layers; owner gates through (AC-14)", async () => {
+    const owner = freshGuestId();
+    await store.getOrCreateUser(owner);
+    await store.linkAuthUser(owner, `auth-${crypto.randomUUID()}`); // owner is a signed-in account
+    const conv = await store.createConversation(owner, "owner's account thread");
+    const attacker = freshGuestId();
+    await store.getOrCreateUser(attacker);
+    await store.linkAuthUser(attacker, `auth-${crypto.randomUUID()}`); // a DIFFERENT account
+    const svc = createSessionService({
+      store,
+      guards: { guestCap: 10, dailyBudget: HUGE },
+      startSession: okStartSession(),
+      mintToken: okMintToken(),
+      sendToInbox: okSendToInbox(),
+      now: () => new Date(),
+    });
+
+    expect(await svc.sendMessage(conv.id, "injected", attacker, "account")).toEqual({ ok: false, reason: "not_found" });
+    expect(await svc.mintChatToken(conv.id, attacker)).toEqual({ ok: false, reason: "not_found" });
+    expect(await svc.sendMessage(conv.id, "a real follow-up", owner, "account")).toEqual({
+      ok: true,
+      publicAccessToken: `pat_${conv.id}`,
+    });
+  });
+
+  // The sign-in reconciliation that resolves every request's chat identity (adoption). Runs against the
+  // real store: the three branches the epic pins - stamp (first sign-in), no-op (returning same device),
+  // adopt (returning new device).
+  describe("resolveIdentity", () => {
+    it("returns a guest identity from the cookie when there is no auth session", async () => {
+      const g = freshGuestId();
+      await store.getOrCreateUser(g);
+      expect(await resolveIdentity(store, { guestId: g })).toEqual({ userId: g, kind: "guest" });
+    });
+
+    it("stamps the guest's row on first sign-in - conversations follow for free (AC-11)", async () => {
+      const g = freshGuestId();
+      await store.getOrCreateUser(g);
+      const conv = await store.createConversation(g, "guest thread");
+      const authId = `auth-${crypto.randomUUID()}`;
+
+      expect(await resolveIdentity(store, { authUserId: authId, guestId: g })).toEqual({ userId: g, kind: "account" });
+      // The guest row IS the account row now; its conversation is unmoved but reads as signed-in-owned.
+      expect((await store.findUserByAuthId(authId))?.user_id).toBe(g);
+      expect(await store.getConversationOwner(conv.id)).toEqual({ user_id: g, auth_user_id: authId });
+    });
+
+    it("is idempotent on a returning same-device request (no re-adopt)", async () => {
+      const g = freshGuestId();
+      await store.getOrCreateUser(g);
+      const authId = `auth-${crypto.randomUUID()}`;
+      await resolveIdentity(store, { authUserId: authId, guestId: g }); // first sign-in stamps
+      expect(await resolveIdentity(store, { authUserId: authId, guestId: g })).toEqual({ userId: g, kind: "account" });
+    });
+
+    it("adopts a new device's guest conversations onto the returning account (AC-11)", async () => {
+      const canonical = freshGuestId(); // the account, signed in earlier on another device
+      await store.getOrCreateUser(canonical);
+      const authId = `auth-${crypto.randomUUID()}`;
+      await store.linkAuthUser(canonical, authId);
+      const g = freshGuestId(); // this device's fresh guest, with its own conversation
+      await store.getOrCreateUser(g);
+      const conv = await store.createConversation(g, "new device thread");
+
+      expect(await resolveIdentity(store, { authUserId: authId, guestId: g })).toEqual({
+        userId: canonical,
+        kind: "account",
+      });
+      expect((await store.getConversationOwner(conv.id))?.user_id).toBe(canonical); // adopted
+    });
   });
 });

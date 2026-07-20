@@ -1,16 +1,18 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import postgres, { type Sql } from "postgres";
 import { auth, sessions } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore } from "@shared/store";
 import { getGuardConfig } from "@shared/env";
 import { isE2E } from "@/lib/e2e";
+import { auth as authServer } from "@/lib/auth";
 import { AGENT_ID } from "../../trigger/agent-id";
 import {
   chatTokenScopes,
   createSessionService,
+  resolveIdentity,
   type MintResult,
   type MintToken,
   type SendResult,
@@ -74,6 +76,21 @@ async function guestIdFromCookie(): Promise<string | undefined> {
   return (await cookies()).get(GUEST_COOKIE)?.value;
 }
 
+/**
+ * The signed-in Better Auth user id, or undefined for a guest. Auth is lazy and additive: a read
+ * failure (misconfig / no session) degrades to guest - it must never break the guest-open chat. E2E
+ * runs without auth (no Postgres), so short-circuit it.
+ */
+async function currentAuthUserId(): Promise<string | undefined> {
+  if (isE2E()) return undefined;
+  try {
+    const session = await authServer.api.getSession({ headers: await headers() });
+    return session?.user?.id;
+  } catch {
+    return undefined;
+  }
+}
+
 /** AC-12: first visit mints an httpOnly cookie guest id with a users row; returns the guest id. */
 export async function ensureGuest(): Promise<string> {
   const jar = await cookies();
@@ -98,7 +115,9 @@ export async function ensureGuest(): Promise<string> {
 /** AC-3 landing handoff: create the conversation + user message #1 and trigger the run. */
 export async function startConversation(question: string): Promise<SessionResult> {
   const guestId = await ensureGuest();
-  return service().startConversation(guestId, question);
+  const authUserId = await currentAuthUserId();
+  const identity = await resolveIdentity(createStore(sql()), { authUserId, guestId });
+  return service().startConversation(identity.userId, question, identity.kind);
 }
 
 /**
@@ -110,8 +129,10 @@ export async function startConversation(question: string): Promise<SessionResult
  */
 export async function sendMessage(conversationId: string, text: string): Promise<SendResult> {
   const guestId = await guestIdFromCookie();
-  if (!guestId) return { ok: false, reason: "not_found" };
-  return service().sendMessage(conversationId, text, guestId);
+  const authUserId = await currentAuthUserId();
+  if (!guestId && !authUserId) return { ok: false, reason: "not_found" };
+  const identity = await resolveIdentity(createStore(sql()), { authUserId, guestId });
+  return service().sendMessage(conversationId, text, identity.userId, identity.kind);
 }
 
 /**
@@ -120,6 +141,8 @@ export async function sendMessage(conversationId: string, text: string): Promise
  */
 export async function mintChatToken(conversationId: string): Promise<MintResult> {
   const guestId = await guestIdFromCookie();
-  if (!guestId) return { ok: false, reason: "not_found" };
-  return service().mintChatToken(conversationId, guestId);
+  const authUserId = await currentAuthUserId();
+  if (!guestId && !authUserId) return { ok: false, reason: "not_found" };
+  const identity = await resolveIdentity(createStore(sql()), { authUserId, guestId });
+  return service().mintChatToken(conversationId, identity.userId);
 }
