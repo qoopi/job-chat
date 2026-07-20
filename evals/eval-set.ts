@@ -11,7 +11,7 @@ import { CONVERSATIONAL_PROMPTS, P2_INTENT_PROMPTS } from "../tests/fixtures/pla
 //   - 7 launch questions        -> the six fixed templates (imported from the 003 fixture, DRY)
 //   - 12 composed questions      -> query_postings, the AC-4 chart-bearing sample (>= 12 pinned)
 //   - 4 P2-intent + 4 small-talk -> plain mode, no tool (imported from the 009 conformance fixture)
-//   - 3 unanswerable             -> report_unanswerable
+//   - 3 off-domain               -> plain mode, no tool (answer-or-honest-no-live-data + steer)
 // The banned-opener list + tone harness live in ONE home (tests/fixtures/plain-prompts.ts, 009); the
 // runner imports them there for format scoring - this file only marks which cases get the tone check.
 
@@ -190,15 +190,19 @@ const CONVERSATIONAL_CASES: EvalCase[] = [0, 2, 3, 4].map((idx, i) => ({
   expect: { mode: "plain", formatRules: true },
 }));
 
-// Out of scope for the postings data (weather, sport, live stock price): the agent must call
-// report_unanswerable and refuse plainly, never guess.
-const UNANSWERABLE_CASES: EvalCase[] = [
+// Off-domain for the postings data (weather, a past sports result, a live stock price). 2026-07-21
+// vision refinement (answer-anything-then-steer): the agent ANSWERS what it can - a known fact briefly,
+// or an honest "I don't fetch that live" (NEVER a fabricated live number) - then steers back to the job
+// market. Plain mode, NO tool, NO error card (report_unanswerable is retired from the scope path). The
+// strict scorer enforces this: any data tool (a wrong guess) or an old report_unanswerable call fails
+// the no-tool expectation.
+const OFF_DOMAIN_CASES: EvalCase[] = [
   { id: "U1", question: "What is the weather in San Francisco today?" },
   { id: "U2", question: "Who won the 2022 World Cup?" },
   { id: "U3", question: "What is Google's current stock price?" },
 ].map((c) => ({
   ...c,
-  expect: { mode: "plain", tool: "report_unanswerable", formatRules: true },
+  expect: { mode: "plain", formatRules: true },
 }));
 
 export const EVAL_SET: EvalCase[] = [
@@ -206,7 +210,7 @@ export const EVAL_SET: EvalCase[] = [
   ...COMPOSED_CASES,
   ...P2_CASES,
   ...CONVERSATIONAL_CASES,
-  ...UNANSWERABLE_CASES,
+  ...OFF_DOMAIN_CASES,
 ];
 
 /** The AC-4 chart-bearing sample: every case carrying a RAW chartType expectation (pinned at 12). */

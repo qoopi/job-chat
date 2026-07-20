@@ -179,16 +179,16 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
     expect(bannedOpener.toolModePass).toBe(true);
   });
 
-  it("an unanswerable case answered with a data card fails on BOTH tool and mode", () => {
-    const unanswerable = EVAL_SET.find((c) => c.id === "U1")!; // expect: report_unanswerable, plain mode
+  it("an off-domain case answered with a data card fails on BOTH tool and mode", () => {
+    const offDomain = EVAL_SET.find((c) => c.id === "U1")!; // expect: plain mode, NO tool (answer + steer)
     const observed: Observed = {
-      toolCalls: [{ name: "top_companies", input: { days: 30 } }], // guessed a tool instead of refusing
+      toolCalls: [{ name: "top_companies", input: { days: 30 } }], // guessed a tool instead of answering plainly
       text: "Some companies post more during certain seasons.",
       hasInsight: true,
     };
-    const scored = scoreCase(unanswerable, observed);
-    expect(scored.toolPass).toBe(false);
-    expect(scored.modePass).toBe(false);
+    const scored = scoreCase(offDomain, observed);
+    expect(scored.toolPass).toBe(false); // a data tool where none was expected (plain, no tool)
+    expect(scored.modePass).toBe(false); // a data card where plain prose was expected
     expect(scored.toolModePass).toBe(false);
   });
 });
