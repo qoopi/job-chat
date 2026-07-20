@@ -14,6 +14,13 @@ export type MessageRole = "user" | "assistant";
 // query so a malformed id reads as "not found" - without swallowing real DB errors on a valid one.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Postgres unique_violation SQLSTATE. porsager/postgres surfaces the server's SQLSTATE as `err.code`
+// on a PostgresError; `linkAuthUser` uses it to turn the auth_user_id UNIQUE race into a typed refusal.
+const PG_UNIQUE_VIOLATION = "23505";
+function isUniqueViolation(e: unknown): boolean {
+  return typeof e === "object" && e !== null && (e as { code?: unknown }).code === PG_UNIQUE_VIOLATION;
+}
+
 /** A persisted JSON payload (the insight-card parts). Opaque here; validated by `insight.ts`. */
 export type Json = unknown;
 
@@ -62,11 +69,19 @@ export interface Store {
   ): Promise<{ user_id: string; auth_user_id: string | null } | null>;
   /** The users row linked to a Better Auth id, or `null` when unmapped. One indexed lookup. */
   findUserByAuthId(authUserId: string): Promise<User | null>;
-  /** Stamp a Better Auth id onto a users row (first sign-in; conversations follow for free). */
-  linkAuthUser(userId: string, authUserId: string): Promise<void>;
+  /**
+   * Stamp a Better Auth id onto a users row (first sign-in; conversations follow for free). SECURITY:
+   * stamps ONLY an unlinked guest row (auth_user_id IS NULL) - never overwrites another account's
+   * binding. Returns whether it stamped: `false` when the row already carries a DIFFERENT auth_user_id
+   * (0-row match) OR the auth_user_id UNIQUE race lost to a concurrent first sign-in (caught, not
+   * thrown). On `false` the caller re-reads `findUserByAuthId` for the canonical row.
+   */
+  linkAuthUser(userId: string, authUserId: string): Promise<boolean>;
   /**
    * Adopt a guest's conversations into the canonical (account) row on sign-in: one UPDATE of
-   * conversations.user_id, no message copying. Idempotent (a re-run moves nothing).
+   * conversations.user_id, no message copying. Idempotent (a re-run moves nothing). SECURITY: moves
+   * only FROM a genuine guest row (source auth_user_id IS NULL) - never adopts from a row that already
+   * belongs to a DIFFERENT account (a forged guest cookie must not steal a signed-in user's chats).
    */
   adoptGuest(canonicalUserId: string, guestUserId: string): Promise<void>;
   /** A user's conversations, newest first (the signed-in sidebar history, AC-12). */
@@ -152,13 +167,33 @@ export function createStore(sql: Sql): Store {
     },
 
     async linkAuthUser(userId, authUserId) {
-      await sql`UPDATE users SET auth_user_id = ${authUserId} WHERE user_id = ${userId}`;
+      // Stamp only an unlinked guest row: the `auth_user_id IS NULL` guard refuses to overwrite a row
+      // already bound to a DIFFERENT account (a forged/stale guest cookie must not take it over). A
+      // 0-row match => already linked => `false`. The guard passes for the row's OWN NULL, but the SET
+      // can still collide with the auth_user_id UNIQUE index when a concurrent first sign-in stamped
+      // this id onto another row first - catch that race and report `false` (never an untyped 500); the
+      // caller re-reads findUserByAuthId for the canonical winner.
+      try {
+        const rows = await sql`
+          UPDATE users SET auth_user_id = ${authUserId}
+          WHERE user_id = ${userId} AND auth_user_id IS NULL
+          RETURNING user_id`;
+        return rows.length > 0;
+      } catch (e) {
+        if (isUniqueViolation(e)) return false;
+        throw e;
+      }
     },
 
     async adoptGuest(canonicalUserId, guestUserId) {
       // Re-point the guest's conversations to the canonical row (messages ride along via
-      // conversation_id - none are copied). Idempotent: a re-run matches zero rows.
-      await sql`UPDATE conversations SET user_id = ${canonicalUserId} WHERE user_id = ${guestUserId}`;
+      // conversation_id - none are copied). Idempotent: a re-run matches zero rows. SECURITY: the
+      // EXISTS guard moves conversations only when the SOURCE row is a genuine guest (auth_user_id IS
+      // NULL) - never adopts FROM a row already bound to a DIFFERENT account (forged guest cookie).
+      await sql`
+        UPDATE conversations SET user_id = ${canonicalUserId}
+        WHERE user_id = ${guestUserId}
+          AND EXISTS (SELECT 1 FROM users WHERE user_id = ${guestUserId} AND auth_user_id IS NULL)`;
     },
 
     async listConversations(userId) {

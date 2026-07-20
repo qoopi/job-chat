@@ -503,5 +503,64 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       expect((await store.getConversationOwner(convB.id))?.user_id).toBe(canonical);
       expect((await store.getConversationOwner(convC.id))?.user_id).toBe(canonical);
     });
+
+    // 012 review-fix (security): a signed-in caller whose forged/stale guest cookie points at ANOTHER
+    // account's row must never bind onto or adopt from it. The store guards refuse (0 rows), so
+    // resolveIdentity falls back to a fresh canonical row for this auth id - the victim's row and
+    // conversations are untouched. (013 additionally binds adoption to the sign-in transition; this is
+    // the defense-in-depth layer beneath it.)
+    it("refuses a forged guest cookie pointing at another account - mints a fresh row, victim untouched", async () => {
+      const victim = freshGuestId();
+      const victimAuth = `auth-${crypto.randomUUID()}`;
+      await store.getOrCreateUser(victim);
+      await store.linkAuthUser(victim, victimAuth); // the victim is a signed-in account
+      const victimConv = await store.createConversation(victim, "victim's thread");
+
+      // Attacker: a real auth session (attackerAuth) + a cookie forged to the victim's user_id.
+      const attackerAuth = `auth-${crypto.randomUUID()}`;
+      const res = await resolveIdentity(store, { authUserId: attackerAuth, guestId: victim });
+      guests.push(res.userId); // the fresh minted row - clean it up
+
+      expect(res.kind).toBe("account");
+      expect(res.userId).not.toBe(victim); // never bound onto the victim's row
+      expect((await store.findUserByAuthId(attackerAuth))?.user_id).toBe(res.userId); // its own row
+      expect((await store.findUserByAuthId(victimAuth))?.user_id).toBe(victim); // binding intact
+      expect((await store.getConversationOwner(victimConv.id))?.user_id).toBe(victim); // not stolen
+    });
+
+    // 012 review-fix (the auth_user_id UNIQUE race, deterministic): the losing request read
+    // findUserByAuthId -> null, then its linkAuthUser lost to the winner's concurrent stamp. resolveIdentity
+    // must re-read and return the winner's canonical identity (typed, no 500) and adopt the loser's device
+    // conversations onto it. Simulated by pre-inserting the winner + a one-shot findUserByAuthId that
+    // returns null on the loser's first read (its pre-commit snapshot) - not real concurrency.
+    it("is idempotent under the first-sign-in auth_user_id race (re-reads the winner, no throw)", async () => {
+      const winner = freshGuestId();
+      await store.getOrCreateUser(winner);
+      const authId = `auth-${crypto.randomUUID()}`;
+      await store.linkAuthUser(winner, authId); // the concurrent winner already committed
+
+      const loser = freshGuestId(); // the losing request's own device/guest cookie
+      await store.getOrCreateUser(loser);
+      const loserConv = await store.createConversation(loser, "loser device thread");
+
+      // Force the loser's first findUserByAuthId to see no row yet (its pre-commit snapshot), then
+      // delegate to the real store (so the post-collision re-read finds the winner).
+      let firstRead = true;
+      const racingStore: Store = {
+        ...store,
+        findUserByAuthId: async (id) => {
+          if (firstRead && id === authId) {
+            firstRead = false;
+            return null;
+          }
+          return store.findUserByAuthId(id);
+        },
+      };
+
+      const res = await resolveIdentity(racingStore, { authUserId: authId, guestId: loser });
+      expect(res).toEqual({ userId: winner, kind: "account" }); // canonical winner, typed - no 500
+      // The loser device's conversation is adopted onto the winner (as the returning-account branch does).
+      expect((await store.getConversationOwner(loserConv.id))?.user_id).toBe(winner);
+    });
   });
 });

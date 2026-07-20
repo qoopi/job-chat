@@ -113,6 +113,61 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(u);
   });
 
+  // 012 review-fix (security): the stamp primitive must NEVER overwrite a row already linked to a
+  // DIFFERENT account - a forged/stale guest cookie pointing at a signed-in row must not take it over.
+  // The guard is the SQL itself (WHERE auth_user_id IS NULL), so no caller can misuse it.
+  it("linkAuthUser refuses to rebind a row already linked to a DIFFERENT account (guard, no takeover)", async () => {
+    const victim = `test-guest-${crypto.randomUUID()}`;
+    const victimAuth = `auth-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(victim);
+    expect(await store.linkAuthUser(victim, victimAuth)).toBe(true); // legit first stamp
+    // An attacker's auth id must NOT overwrite the victim's binding: 0 rows matched, refused (no throw).
+    const attackerAuth = `auth-${crypto.randomUUID()}`;
+    expect(await store.linkAuthUser(victim, attackerAuth)).toBe(false);
+    expect((await store.findUserByAuthId(victimAuth))?.user_id).toBe(victim); // still the victim's
+    expect(await store.findUserByAuthId(attackerAuth)).toBeNull(); // never bound
+    await purge(victim);
+  });
+
+  // 012 review-fix (the auth_user_id UNIQUE race, deterministic): two concurrent first sign-ins of the
+  // SAME account both read findUserByAuthId -> null, then both stamp their own guest row; the loser's
+  // UPDATE passes the `auth_user_id IS NULL` guard on its OWN row but collides with the winner's
+  // auth_user_id UNIQUE. The store catches that and reports "did not stamp" (typed false), never a 500 -
+  // the caller re-reads for the canonical winner. Simulated by pre-inserting the winner, not concurrency.
+  it("linkAuthUser returns false (typed, no throw) when the auth id is already taken - the UNIQUE race", async () => {
+    const winner = `test-guest-${crypto.randomUUID()}`;
+    const loser = `test-guest-${crypto.randomUUID()}`;
+    const authId = `auth-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(winner);
+    await store.getOrCreateUser(loser);
+    expect(await store.linkAuthUser(winner, authId)).toBe(true); // winner stamped first
+    // The loser's row is unstamped (passes the IS NULL guard) but the SET collides with the UNIQUE
+    // constraint -> caught and reported as false, not surfaced as an untyped throw.
+    expect(await store.linkAuthUser(loser, authId)).toBe(false);
+    expect((await store.findUserByAuthId(authId))?.user_id).toBe(winner); // winner unchanged
+    expect((await store.getOrCreateUser(loser)).auth_user_id).toBeNull(); // loser never bound
+    await purge(winner);
+    await purge(loser);
+  });
+
+  // 012 review-fix (security): adoption must move conversations only FROM a genuine guest row
+  // (auth_user_id IS NULL). A row that already belongs to a DIFFERENT account is off-limits - a forged
+  // guest cookie must not steal a signed-in user's conversations. Guard is the SQL (EXISTS ... IS NULL).
+  it("adoptGuest does not move conversations from a source row linked to a DIFFERENT account (guard, no theft)", async () => {
+    const victim = `test-guest-${crypto.randomUUID()}`;
+    const victimAuth = `auth-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(victim);
+    await store.linkAuthUser(victim, victimAuth); // victim is a signed-in account
+    const vConv = await store.createConversation(victim, "victim's thread");
+    const attacker = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(attacker);
+
+    await store.adoptGuest(attacker, victim); // attacker tries to adopt FROM the account row
+    expect((await store.getConversationOwner(vConv.id))?.user_id).toBe(victim); // unmoved
+    await purge(victim);
+    await purge(attacker);
+  });
+
   // AC-11 (store slice): sign-in on a device holding guest conversations adopts them onto the account's
   // canonical row - a single UPDATE of conversations.user_id, no message copying. Idempotent (re-run =
   // no-op, since no conversation is left under the guest id).

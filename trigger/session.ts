@@ -143,9 +143,24 @@ export async function resolveIdentity(
       if (guestId && guestId !== existing.user_id) await store.adoptGuest(existing.user_id, guestId);
       return { userId: existing.user_id, kind: "account" };
     }
+    // First sign-in this browser: stamp the auth id onto the caller's own row (the guest row if
+    // present, else a fresh one). The store stamps ONLY an unlinked guest row and returns whether it
+    // did: `false` means the cookie's row already belongs to a DIFFERENT account (forged/stale cookie)
+    // OR a concurrent first sign-in won the auth_user_id UNIQUE race - both need a re-read.
     const row = await store.getOrCreateUser(guestId ?? crypto.randomUUID());
-    await store.linkAuthUser(row.user_id, authUserId);
-    return { userId: row.user_id, kind: "account" };
+    if (await store.linkAuthUser(row.user_id, authUserId)) return { userId: row.user_id, kind: "account" };
+    const canonical = await store.findUserByAuthId(authUserId);
+    if (canonical) {
+      // A concurrent stamp won the race: that row is canonical. Adopt this device's guest
+      // conversations onto it (as the returning-account branch does) - idempotent under the race, no throw.
+      if (guestId && guestId !== canonical.user_id) await store.adoptGuest(canonical.user_id, guestId);
+      return { userId: canonical.user_id, kind: "account" };
+    }
+    // No row carries this auth id, so the stamp was refused because the cookie's row is bound to
+    // another account. Never bind onto or adopt from a victim's row - mint a fresh canonical row instead.
+    const fresh = await store.getOrCreateUser(crypto.randomUUID());
+    await store.linkAuthUser(fresh.user_id, authUserId);
+    return { userId: fresh.user_id, kind: "account" };
   }
   const userId = guestId ?? (await store.getOrCreateUser(crypto.randomUUID())).user_id;
   return { userId, kind: "guest" };
