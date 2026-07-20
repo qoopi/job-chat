@@ -13,6 +13,7 @@ import {
   chatTokenScopes,
   createSessionService,
   resolveIdentity,
+  type Identity,
   type MintResult,
   type MintToken,
   type SendResult,
@@ -91,6 +92,19 @@ async function currentAuthUserId(): Promise<string | undefined> {
   }
 }
 
+/**
+ * Resolve the caller's chat Identity for a follow-up action (send / re-mint): the guest cookie plus
+ * any verified Better Auth session, reconciled (adoption) by `resolveIdentity`. `null` when the caller
+ * presents neither - the action refuses as `not_found` (a caller that owns nothing). One home so the
+ * two follow-up actions can never drift.
+ */
+async function resolveCaller(): Promise<Identity | null> {
+  const guestId = await guestIdFromCookie();
+  const authUserId = await currentAuthUserId();
+  if (!guestId && !authUserId) return null;
+  return resolveIdentity(createStore(sql()), { authUserId, guestId });
+}
+
 /** AC-12: first visit mints an httpOnly cookie guest id with a users row; returns the guest id. */
 export async function ensureGuest(): Promise<string> {
   const jar = await cookies();
@@ -128,10 +142,8 @@ export async function startConversation(question: string): Promise<SessionResult
  * agent's `run()` persists the user turn before the backstop counts it.
  */
 export async function sendMessage(conversationId: string, text: string): Promise<SendResult> {
-  const guestId = await guestIdFromCookie();
-  const authUserId = await currentAuthUserId();
-  if (!guestId && !authUserId) return { ok: false, reason: "not_found" };
-  const identity = await resolveIdentity(createStore(sql()), { authUserId, guestId });
+  const identity = await resolveCaller();
+  if (!identity) return { ok: false, reason: "not_found" };
   return service().sendMessage(conversationId, text, identity.userId, identity.kind);
 }
 
@@ -140,9 +152,7 @@ export async function sendMessage(conversationId: string, text: string): Promise
  * OWN conversation (typed `not_found` otherwise, so one guest's token never grants another's session).
  */
 export async function mintChatToken(conversationId: string): Promise<MintResult> {
-  const guestId = await guestIdFromCookie();
-  const authUserId = await currentAuthUserId();
-  if (!guestId && !authUserId) return { ok: false, reason: "not_found" };
-  const identity = await resolveIdentity(createStore(sql()), { authUserId, guestId });
+  const identity = await resolveCaller();
+  if (!identity) return { ok: false, reason: "not_found" };
   return service().mintChatToken(conversationId, identity.userId);
 }
