@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildComposedSql, buildTemplateSql } from "@shared/analytics";
+import type { ClickHouseClient } from "@clickhouse/client";
+import { buildComposedSql, buildTemplateSql, createAnalytics } from "@shared/analytics";
 
 describe("buildTemplateSql", () => {
   it("interpolates salary_compare cities + role and uses quantileExact over FINAL", () => {
@@ -174,6 +175,18 @@ describe("Should_RejectUnknownParams_When_ComposedQueryBuilt (AC-2)", () => {
     ["limit above 50", { measures: ["count"], limit: 51 }],
     ["duplicate dimension", { measures: ["count"], dimensions: ["company", "company"] }],
     ["invalid location_kind", { measures: ["count"], location_kind: "office" }],
+    // The inner `sort` object must be `.strict()` too - an unknown key inside it (with `by`/`dir`
+    // still valid) must be REJECTED, not silently stripped, to hold the reject-unknown contract
+    // uniformly. `dimensions: ["company"]` makes `sort.by` a valid selection, so the ONLY reason to
+    // throw is the unknown `evil` key.
+    [
+      "unknown key inside sort",
+      { measures: ["count"], dimensions: ["company"], sort: { by: "company", dir: "asc", evil: 1 } },
+    ],
+    // Salary bounds are capped like `days`/`limit` in the same schema (bounded-number discipline;
+    // also keeps any interpolated integer well below the >= 1e21 scientific-notation edge).
+    ["min_salary above the currency cap", { measures: ["count"], min_salary: 1_000_000_001 }],
+    ["max_salary above the currency cap", { measures: ["count"], max_salary: 1_000_000_001 }],
   ])("rejects %s before any query is built", (_label, params) => {
     expect(() => buildComposedSql(params, "postings")).toThrow();
   });
@@ -363,5 +376,74 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     expect(buildComposedSql({ measures: ["count"] }, "postings_test").sql).toContain(
       "FROM postings_test FINAL",
     );
+  });
+});
+
+// executeBuilt runs the rows query and the sampleN/freshestAt meta query. They are independent reads,
+// so on the per-turn hot path they must fire CONCURRENTLY (max- not sum-latency), and a failure in
+// either must surface without leaking the sibling's rejection as an unhandled rejection.
+describe("executeBuilt fires the rows and meta queries concurrently (perf)", () => {
+  const isMetaQuery = (sql: string): boolean => sql.includes("sampleN");
+
+  it("issues BOTH queries before the rows query resolves (not sequentially)", async () => {
+    const queries: string[] = [];
+    let releaseRows!: () => void;
+    const rowsGate = new Promise<void>((resolve) => {
+      releaseRows = resolve;
+    });
+    const client = {
+      query: (opts: { query: string }) => {
+        queries.push(opts.query);
+        const meta = isMetaQuery(opts.query);
+        return Promise.resolve({
+          json: async () => {
+            if (!meta) await rowsGate; // the rows query stays pending until we release it
+            return meta ? [{ sampleN: 1, freshestAt: "2026-07-20 00:00:00" }] : [];
+          },
+        });
+      },
+    } as unknown as ClickHouseClient;
+
+    const analytics = createAnalytics({ client, table: "postings_test" });
+    const done = analytics.runComposedQuery({ measures: ["count"] });
+    await new Promise((resolve) => setTimeout(resolve, 0)); // drain microtasks
+
+    // The sequential path would issue ONLY the rows query here (meta waits for rows to resolve); the
+    // concurrent path issues both up front.
+    expect(queries.length).toBe(2);
+
+    releaseRows();
+    await done;
+  });
+
+  it("rejects with the failing query's error and leaves no unhandled rejection", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const client = {
+        query: (opts: { query: string }) => {
+          const meta = isMetaQuery(opts.query);
+          return Promise.resolve({
+            // rows rejects immediately; meta rejects slightly later - a fire-then-await-sequentially
+            // implementation would leak the meta rejection as unhandled once rows throws.
+            json: () =>
+              meta
+                ? new Promise((_resolve, reject) => setTimeout(() => reject(new Error("meta boom")), 5))
+                : Promise.reject(new Error("rows boom")),
+          });
+        },
+      } as unknown as ClickHouseClient;
+
+      const analytics = createAnalytics({ client, table: "postings_test" });
+      await expect(analytics.runComposedQuery({ measures: ["count"] })).rejects.toThrow("rows boom");
+
+      await new Promise((resolve) => setTimeout(resolve, 25)); // let the meta rejection settle
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 });

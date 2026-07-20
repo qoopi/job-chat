@@ -318,9 +318,12 @@ export const ComposedQueryParams = z
     employment_type: z.string().min(1).optional(),
     location_kind: z.enum(["onsite", "remote", "hybrid"]).optional(),
     days: z.number().int().positive().max(3650).optional(),
-    min_salary: z.number().int().positive().optional(),
-    max_salary: z.number().int().positive().optional(),
-    sort: z.object({ by: z.string().min(1), dir: z.enum(["asc", "desc"]) }).optional(),
+    // Capped like days/limit (bounded-number discipline); the ceiling also keeps the interpolated
+    // integer well below the >= 1e21 scientific-notation edge. 1e9 is far above any real salary.
+    min_salary: z.number().int().positive().max(1_000_000_000).optional(),
+    max_salary: z.number().int().positive().max(1_000_000_000).optional(),
+    // `.strict()` on the inner object too: an unknown key inside `sort` must be rejected, not stripped.
+    sort: z.object({ by: z.string().min(1), dir: z.enum(["asc", "desc"]) }).strict().optional(),
     limit: z.number().int().positive().max(50).default(20),
   })
   .strict();
@@ -456,16 +459,9 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
   const table = config.table ?? "postings";
   const { client } = config;
 
-  // Run a BuiltQuery: the rows query, then the sampleN/freshestAt meta query over the SAME `where` (so
+  // Run a BuiltQuery: the rows query AND the sampleN/freshestAt meta query over the SAME `where` (so
   // the count matches the set the rows came from). Shared by both the template and composed paths.
   async function executeBuilt(built: BuiltQuery): Promise<QueryResult> {
-    const rowsRs = await client.query({
-      query: built.sql,
-      format: "JSONEachRow",
-      clickhouse_settings: QUERY_SETTINGS,
-    });
-    const rows = await rowsRs.json<Record<string, unknown>>();
-
     const metaSql = assemble([
       "SELECT",
       "  count() AS sampleN,",
@@ -473,12 +469,21 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
       `FROM ${table} FINAL`,
       built.where,
     ]);
-    const metaRs = await client.query({
-      query: metaSql,
-      format: "JSONEachRow",
-      clickhouse_settings: QUERY_SETTINGS,
-    });
-    const metaRow = (await metaRs.json<{ sampleN: number; freshestAt: string }>())[0];
+
+    // The rows and meta reads are independent (neither consumes the other's result), so fire them
+    // concurrently - on the per-turn ClickHouse Cloud hot path this is max- not sum-latency.
+    // Promise.all attaches a rejection handler to BOTH promises up front, so if one query fails the
+    // sibling's rejection is still handled (no unhandled rejection) and the error surface matches the
+    // old sequential path: the whole call rejects with whichever query failed first.
+    const [rows, metaRow] = await Promise.all([
+      client
+        .query({ query: built.sql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })
+        .then((rs) => rs.json<Record<string, unknown>>()),
+      client
+        .query({ query: metaSql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })
+        .then((rs) => rs.json<{ sampleN: number; freshestAt: string }>())
+        .then((metaRows) => metaRows[0]),
+    ]);
 
     return {
       sql: built.sql,
