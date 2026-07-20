@@ -17,6 +17,7 @@ import { isStreaming, reconcileMessagesById, resolveInsightTarget, type LcpTarge
 import { isAuthDialogOpen } from "@/lib/layers";
 import { closeAuthDialog, openAuthDialog, useAuthDialogOpen, useOpenAuthDialogOnError } from "@/lib/auth-dialog";
 import {
+  clearGuestSession,
   deleteConversation as deleteConversationAction,
   mintChatToken,
   sendMessage as sendMessageAction,
@@ -310,16 +311,27 @@ export function ChatClient({
   // be a fresh ref every ChatClient render and defeat the memo (regenerate is stable across renders).
   const onRetry = useCallback(() => void regenerate(), [regenerate]);
 
-  // Sign out: drop the Better Auth session and return the sidebar to its guest state.
+  // Sign out (017): drop the Better Auth session, then land the user on the LANDING as a guest with no
+  // stale thread. On success (Better Auth's onSuccess), return the sidebar to its guest state, clear the
+  // open thread + history, rotate the guest cookie (defensive - the Google path already cleared it), and
+  // redirect to "/". A failed sign-out leaves the session in place (no data loss) and stays put.
   const onSignOut = useCallback(async () => {
-    try {
-      await authClient.signOut();
-    } catch {
-      /* a failed sign-out leaves the session in place - no data loss */
-    }
-    setSignedIn(false);
-    setConversations([]);
-  }, []);
+    await authClient
+      .signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            setSignedIn(false);
+            setConversations([]);
+            startNewChat(); // clear the open thread so no stale conversation lingers post-sign-out
+            void clearGuestSession(); // rotate the guest cookie so the next visit starts a fresh guest
+            router.push("/"); // land the signed-out user on the landing
+          },
+        },
+      })
+      .catch(() => {
+        /* a failed sign-out leaves the session in place - no data loss */
+      });
+  }, [router, startNewChat]);
 
   // AC-21: delete a conversation from the sidebar (signed-in only; the action re-checks ownership). Drop
   // it from the history list, and if it is the OPEN one, clear to the fresh-chat state (reuse AC-19's

@@ -190,6 +190,15 @@ export async function completeSignIn(): Promise<{ ok: boolean; name?: string }> 
 }
 
 /**
+ * Sign-out companion (017): drop the guest cookie so a signed-out user does NOT resume a stale guest
+ * thread. On the Google sign-in path the cookie was already cleared (completeSignIn) - this is the
+ * defensive rotation for sign-out; the landing's `ensureGuest` mints a fresh guest identity next visit.
+ */
+export async function clearGuestSession(): Promise<void> {
+  (await cookies()).delete({ name: GUEST_COOKIE, path: "/" });
+}
+
+/**
  * AC-12 (UI slice): the signed-in caller's conversations, newest first, for the sidebar history. The
  * client refetches this after an in-page sign-in (the initial list is server-rendered by the chat
  * page). Empty for a caller that owns nothing.
