@@ -113,6 +113,48 @@ test("Should_EchoUserBubbleSynchronously_When_Sent: the user bubble renders befo
   expect(screen.getAllByText("Median salary in Berlin?")).toHaveLength(1);
 });
 
+// Gap closed in 05-testing: the dev's Completion Report claimed the refusal/failure rollback was covered
+// by the test above, but that test only exercises the happy path - it never asserts the bubble is gone
+// after a refusal or a thrown send. Pseudo-mutation check: commenting out both `rollbackEcho()` call
+// sites left all 6 pre-existing tests in this file green, proving the orphan-bubble regression had no
+// test that would catch it. These two close that gap (flow C: a blocked/failed message is not shown as sent).
+test("Should_RollbackOptimisticBubble_When_SendRefused: a cap/budget refusal removes the optimistic bubble, not just shows the notice", async () => {
+  sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
+  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+
+  const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
+  fireEvent.change(box, { target: { value: "Refused question" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+
+  expect(screen.getByText("Refused question")).toBeTruthy(); // the optimistic bubble is up first
+
+  await screen.findByText(/reached the guest message limit/i); // the refusal notice lands
+  // The optimistic bubble must be gone - not orphaned as a "sent" message the refusal contradicts. Scoped
+  // to the bubble class (not a bare queryByText): AC-11 correctly restores the same text into the
+  // composer's textarea, which a bare document-wide text query would also match and hide the regression.
+  expect(screen.queryByText("Refused question", { selector: ".bubble.user" })).toBeNull();
+  expect(document.querySelectorAll(".msg.user")).toHaveLength(0);
+});
+
+test("Should_RollbackOptimisticBubble_When_SendThrows: a thrown/failed send removes the optimistic bubble (toast + draft, not a stuck bubble)", async () => {
+  sendMessageMock.mockRejectedValue(new Error("network down"));
+  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+
+  const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
+  fireEvent.change(box, { target: { value: "Send that will fail" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+
+  expect(screen.getByText("Send that will fail")).toBeTruthy(); // the optimistic bubble is up first
+
+  await screen.findByRole("alert"); // the send-failure toast lands
+  expect(screen.getByText("Could not send - check your connection.")).toBeTruthy();
+  // The optimistic bubble must be gone - the failed turn is not left behind as a stuck "sent" message.
+  // Scoped to the bubble class: the draft is correctly restored into the composer's textarea (interaction
+  // spec section 4), which a bare document-wide text query would also match and hide the regression.
+  expect(screen.queryByText("Send that will fail", { selector: ".bubble.user" })).toBeNull();
+  expect(document.querySelectorAll(".msg.user")).toHaveLength(0);
+});
+
 // --- mechanism (a): a follow-up delivers + watches via sendMessages, hydrated first ---
 
 test("follow-up send: the action's session token hydrates the transport BEFORE the deliver+watch send (streams live, not peekSettled reconnect)", async () => {
