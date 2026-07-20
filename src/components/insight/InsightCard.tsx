@@ -111,7 +111,7 @@ export function InsightCard({
           chartEl
         ) : previewTable ? (
           <div className="table-preview">
-            <DataTable rows={rows.slice(0, LCP_TABLE_PREVIEW_ROWS)} />
+            <DataTable rows={rows.slice(0, LCP_TABLE_PREVIEW_ROWS)} currency={insight.meta.currency} />
             <button
               className="btn btn-outline btn-sm open-full-table"
               type="button"
@@ -121,7 +121,7 @@ export function InsightCard({
             </button>
           </div>
         ) : (
-          <DataTable rows={rows} />
+          <DataTable rows={rows} currency={insight.meta.currency} />
         )}
         {sqlOpen ? <CodeBlock sql={insight.meta.sql} /> : null}
       </div>
@@ -146,6 +146,9 @@ export function InsightCard({
         {showSource ? (
           <span className="src">
             {insight.meta.sampleN.toLocaleString()} {insight.meta.openSet ? "open postings" : "postings"}
+            {/* Salary aggregates are filtered to one currency; disclose the base so a mixed-currency
+               corpus never reads as if the median spanned everything (018 strand 3). */}
+            {insight.meta.currency ? ` · salaries in ${insight.meta.currency}` : ""}
             {/* freshness is Date.now()-relative, so a server/client render straddling a minute boundary
                would mismatch on hydration - suppress the (benign) warning on just this text. */}
             <span suppressHydrationWarning>{rel ? ` — updated ${rel}` : ""}</span> ·{" "}

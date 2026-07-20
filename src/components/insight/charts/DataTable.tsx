@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { DataPoint } from "@shared/insight";
-import { formatUsd } from "@/lib/insight-format";
+import { formatMoney } from "@/lib/insight-format";
 
 // The fifth primitive: a sortable data table (kind:"table", and the Table tab of any chart insight).
 // Header click cycles none -> desc -> asc (element-states board). No apply/save link cells (scope note).
@@ -12,17 +12,19 @@ function humanize(key: string): string {
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// `bucket` is the salary-histogram bucket floor (a numeric currency amount) - format it as money too
+// (018 strand 3). A composed time bucket is a date STRING, so it never reaches the numeric money branch.
 function isMoneyKey(key: string): boolean {
-  return /salary|median|pay|target/i.test(key);
+  return /salary|median|pay|target|bucket/i.test(key);
 }
 
-function formatCell(key: string, value: string | number | null): string {
+function formatCell(key: string, value: string | number | null, currency: string): string {
   if (value === null || value === undefined) return "-";
-  if (typeof value === "number") return isMoneyKey(key) ? formatUsd(value) : value.toLocaleString();
+  if (typeof value === "number") return isMoneyKey(key) ? formatMoney(value, currency) : value.toLocaleString();
   return value;
 }
 
-export function DataTable({ rows }: { rows: DataPoint[] }) {
+export function DataTable({ rows, currency = "USD" }: { rows: DataPoint[]; currency?: string }) {
   const columns = useMemo(() => (rows[0] ? Object.keys(rows[0]) : []), [rows]);
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [dir, setDir] = useState<Dir>("none");
@@ -79,7 +81,7 @@ export function DataTable({ rows }: { rows: DataPoint[] }) {
             <tr key={i}>
               {columns.map((key) => (
                 <td key={key} className={typeof row[key] === "number" ? "r" : ""}>
-                  {formatCell(key, row[key])}
+                  {formatCell(key, row[key], currency)}
                 </td>
               ))}
             </tr>

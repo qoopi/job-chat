@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   errorCopy,
   refusalCopy,
+  formatMoney,
   formatUsd,
   freshnessLabel,
   labelKeyOf,
@@ -116,8 +117,24 @@ describe("series key detection (charts read DataPoint[] by convention)", () => {
     expect(valueKeyOf(compare, "city")).toBe("median");
   });
 
-  it("valueKeysOf returns every numeric measure column (grouped-bars support)", () => {
-    expect(valueKeysOf(compare, "city")).toEqual(["median", "n"]);
+  it("valueKeysOf returns the plottable measures, excluding the `n` sample-size context column", () => {
+    // 018 strand 3: `n` (the sample size for salary_compare) is never a plotted series, so it is dropped
+    // - a count of ~3 beside a median of ~180000 would render an invisible, misleading second bar.
+    expect(valueKeysOf(compare, "city")).toEqual(["median"]);
     expect(valueKeysOf(companies, "company")).toEqual(["count"]);
+  });
+});
+
+describe("formatMoney (real currency, not a hardcoded $ - 018 strand 3)", () => {
+  it("formats known currencies with their symbol", () => {
+    expect(formatMoney(182000, "USD")).toBe("$182k");
+    expect(formatMoney(182000, "EUR")).toBe("€182k");
+    expect(formatMoney(182000, "GBP")).toBe("£182k");
+  });
+  it("prefixes an unknown currency with its ISO code (never a wrong symbol)", () => {
+    expect(formatMoney(180000, "CHF")).toBe("CHF 180k");
+  });
+  it("defaults to USD when no currency is given (existing callers unchanged)", () => {
+    expect(formatMoney(750)).toBe("$750");
   });
 });

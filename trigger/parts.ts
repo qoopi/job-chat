@@ -26,6 +26,28 @@ export function chartTypeFor(tool: TemplateName): ChartType | "table" {
 /** How many slices a donut stays readable at; a donut pick beyond this is corrected to bars (AC-4). */
 const DONUT_MAX_SLICES = 6;
 
+/** A trend needs at least this many points to read as a line; fewer routes to a table (018 strand 3). */
+export const MIN_TREND_POINTS = 3;
+
+/** Signal-quality thresholds (018 strand 3). One exported home so the gate is tunable in one place. */
+export const FRAGMENTATION = {
+  // A ranked COUNT grouping is noise (no dominant group) when its leader holds LESS than this share of
+  // the sample - many near-equal tiny groups, e.g. 3,023 distinct titles over 3,257 postings (~1 each).
+  // Below the floor the verdict says "no single <dimension> dominates" instead of crowning the noise.
+  minLeaderShare: 0.1,
+} as const;
+
+/** Sum the `count` measure across the shown rows (the donut wholeness + fragmentation checks). */
+export function sumCount(rows: Record<string, unknown>[]): number {
+  return rows.reduce((sum, r) => sum + num(r.count), 0);
+}
+
+/** A donut is honest only for a TRUE whole: a readable slice count whose slices sum to the sample (so
+ *  the ring accounts for every posting, not a truncated top-N). Else the visual falls back to bars. */
+function donutIsWhole(rowCount: number, sliceSum: number, sampleN: number): boolean {
+  return rowCount <= DONUT_MAX_SLICES && sliceSum === sampleN;
+}
+
 /** The subset of the composed params (@shared/analytics ComposedQuery) the parts path reads. */
 export interface ComposedShape {
   measures: readonly string[];
@@ -63,16 +85,24 @@ export function chartTypeForShape(
   shape: { dimensions?: readonly string[]; bucket?: string; measures?: readonly string[] },
   rawPick: ChartType | "table",
   rowCount: number,
+  // When provided, a donut additionally requires its slices to sum to the sample (a true whole, 018
+  // strand 3). Absent (older callers / tests) leaves the wholeness invariant unchecked.
+  wholeness?: { sliceSum: number; sampleN: number },
 ): ChartType | "table" {
   const dims = shape.dimensions?.length ?? 0;
   const keys = dims + (shape.bucket ? 1 : 0);
   if (keys >= 2) return "table"; // a cross-tab / entity-ish result
-  if (shape.bucket) return "trend"; // exactly one grouping key, the time bucket
+  if (shape.bucket) return rowCount >= MIN_TREND_POINTS ? "trend" : "table"; // a trend needs >=3 points
   if (dims === 1) {
-    // Ruling 29: a donut only for a single COUNT measure (a true share of a whole); any salary measure
-    // (or a 2-measure result) falls back to bars, as does an unreadable count donut beyond the slice cap.
+    // Two measures on one categorical axis share no scale (a count next to a salary) - a table, never
+    // shared-axis bars (018 strand 3).
+    if ((shape.measures?.length ?? 1) >= 2) return "table";
+    // Ruling 29 + strand 3: a donut only for a single COUNT measure that is a TRUE whole (slices sum to
+    // the sample) and stays readable (<= slice cap); any salary measure or a truncated/oversized share
+    // falls back to bars.
     const countShare = shape.measures?.length === 1 && shape.measures[0] === "count";
-    return rawPick === "donut" && countShare && rowCount <= DONUT_MAX_SLICES ? "donut" : "bars";
+    const whole = !wholeness || donutIsWhole(rowCount, wholeness.sliceSum, wholeness.sampleN);
+    return rawPick === "donut" && countShare && rowCount <= DONUT_MAX_SLICES && whole ? "donut" : "bars";
   }
   return "table"; // no grouping key: a single-row aggregate
 }
@@ -106,12 +136,17 @@ function verdictFor(tool: TemplateName, rows: Record<string, unknown>[], params:
   switch (tool) {
     case "salary_distribution":
       return `The median salary is ${num(top.median)} across ${sampleN} postings.`;
-    case "salary_compare":
+    case "salary_compare": {
       // With a single city row (the other city had no salaried postings) there is no comparison to
       // report, so state the one median plainly rather than claiming it "pays more" than an absent one.
-      return rows.length < 2
-        ? `The median salary in ${String(top.city)} is ${num(top.median)}.`
-        : `${String(top.city)} pays more, with a median of ${num(top.median)}.`;
+      if (rows.length < 2) return `The median salary in ${String(top.city)} is ${num(top.median)}.`;
+      const second = rows[1];
+      // Equal medians is a tie, not a win - "about the same" instead of a false "pays more" (018 strand 3).
+      if (num(top.median) === num(second.median)) {
+        return `Pay is about the same in ${String(top.city)} and ${String(second.city)}, around ${num(top.median)}.`;
+      }
+      return `${String(top.city)} pays more, with a median of ${num(top.median)}.`;
+    }
     case "postings_trend": {
       // sampleN (count over the same window) is the ONE denominator - never rows.reduce, which a LIMIT
       // could truncate below the true total. It equals the source line's number by construction.
@@ -171,7 +206,15 @@ function verdictForComposed(params: ComposedShape, rows: Record<string, unknown>
       const counts = rows.map((r) => num(r.count));
       const topCount = num(top.count);
       // Verify from the rows which extreme rows[0] holds - a custom `sort:{dir:"asc"}` makes it the min.
-      if (counts.every((c) => c <= topCount)) return `${labelText(top[dimKey!])} leads with ${topCount} of ${sampleN} postings.`;
+      if (counts.every((c) => c <= topCount)) {
+        // rows[0] holds the max - about to name a leader. If it commands too small a share, the grouping
+        // is noise (many near-equal tiny groups, e.g. 3,023 distinct titles) - refuse to crown it.
+        if (sampleN > 0 && topCount / sampleN < FRAGMENTATION.minLeaderShare) {
+          const dimName = DIM_LABEL[dimKey!] ?? dimKey!;
+          return `No single ${dimName} dominates - the largest, ${labelText(top[dimKey!])}, has ${topCount} of ${sampleN} postings.`;
+        }
+        return `${labelText(top[dimKey!])} leads with ${topCount} of ${sampleN} postings.`;
+      }
       if (counts.every((c) => c >= topCount)) return `${labelText(top[dimKey!])} has the fewest, with ${topCount} of ${sampleN} postings.`;
     }
     return `${sampleN} postings in total.`;
@@ -290,13 +333,18 @@ function assembleInsight(
   result: QueryResult,
 ): DataInsight {
   // openSet threads through only when the predicate applied (AC-3); absent = full history, never injected.
+  // currency threads through only for a salary aggregate (018 strand 3), so the source line + table can
+  // disclose the base and format the real currency instead of a hardcoded "$".
   const meta = {
     sql: result.sql,
     sampleN: result.meta.sampleN,
     updatedAt: result.meta.freshestAt,
     ...(result.meta.openSet ? { openSet: true } : {}),
+    ...(result.meta.currency ? { currency: result.meta.currency } : {}),
   };
-  const data = result.rows as DataPoint[];
+  // A chart's group labels are coalesced (a null/empty city or level reads as "unspecified", never a
+  // bare null in the axis); a table keeps its cells verbatim (DataTable renders a null cell as "-").
+  const data = (visual === "table" ? result.rows : coalesceSeriesLabels(result.rows)) as DataPoint[];
   const candidate =
     visual === "table"
       ? { id, kind: "table" as const, verdict, rows: data, followups, meta }
@@ -304,14 +352,29 @@ function assembleInsight(
   return DataInsightSchema.parse(candidate);
 }
 
+/** Replace null/empty values in a chart's LABEL columns (any column that holds a string somewhere) with
+ *  "unspecified", so a missing group label never renders as a blank/null axis tick. Numeric measure
+ *  columns are never touched. */
+function coalesceSeriesLabels(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  if (rows.length === 0) return rows;
+  const labelKeys = Object.keys(rows[0]).filter((k) => rows.some((r) => typeof r[k] === "string"));
+  if (labelKeys.length === 0) return rows;
+  return rows.map((row) => {
+    const out = { ...row };
+    for (const k of labelKeys) if (out[k] === null || out[k] === "") out[k] = LABEL_FALLBACK;
+    return out;
+  });
+}
+
 export function buildInsight({ id, tool, params, result }: BuildInsightArgs): DataInsight {
-  return assembleInsight(
-    id,
-    chartTypeFor(tool),
-    verdictFor(tool, result.rows, params, result.meta.sampleN),
-    FOLLOWUPS[tool],
-    result,
-  );
+  const rows = result.rows;
+  const sampleN = result.meta.sampleN;
+  // The pinned template visual, corrected for signal quality (018 strand 3): a trend with too few points
+  // becomes a table; a pinned donut (share_split) that is not a readable true whole becomes bars.
+  let visual = chartTypeFor(tool);
+  if (visual === "trend" && rows.length < MIN_TREND_POINTS) visual = "table";
+  if (visual === "donut" && !donutIsWhole(rows.length, sumCount(rows), sampleN)) visual = "bars";
+  return assembleInsight(id, visual, verdictFor(tool, rows, params, sampleN), FOLLOWUPS[tool], result);
 }
 
 export interface BuildComposedInsightArgs {

@@ -420,7 +420,31 @@ describe("Should_FallBackToFitChartType_When_RawPickUnfit (chartTypeForShape, AC
   it("restricts donut to a count measure - a non-count share-of-whole falls back to bars (ruling 29)", () => {
     expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["median_salary"] }, "donut", 4)).toBe("bars");
     expect(chartTypeForShape({ dimensions: ["location_kind"], measures: ["p25_salary"] }, "donut", 3)).toBe("bars");
-    expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["count", "median_salary"] }, "donut", 4)).toBe("bars");
+  });
+
+  // 018 strand 3: two measures on one categorical axis have no shared scale (a count next to a salary),
+  // so a single-dimension 2-measure result routes to a TABLE, never grouped shared-axis bars.
+  it("routes a two-measure single-dimension result to a table (no shared-axis nonsense)", () => {
+    expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["count", "median_salary"] }, "donut", 4)).toBe("table");
+    expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["p25_salary", "p75_salary"] }, "bars", 4)).toBe("table");
+  });
+
+  // 018 strand 3: a trend needs >= 3 points to read as a line; fewer routes to a table.
+  it("routes a time bucket with fewer than 3 points to a table (a trend needs >= 3 points)", () => {
+    expect(chartTypeForShape({ dimensions: [], bucket: "month" }, "trend", 2)).toBe("table");
+    expect(chartTypeForShape({ dimensions: [], bucket: "month" }, "trend", 1)).toBe("table");
+    expect(chartTypeForShape({ dimensions: [], bucket: "month" }, "trend", 3)).toBe("trend");
+  });
+
+  // 018 strand 3: a donut is honest only for a TRUE whole - its slices must sum to the sample. A
+  // truncated top-N (slices summing below sampleN) falls back to bars even at <= 6 slices.
+  it("serves a donut only when the slices sum to the sample (a true whole), else bars", () => {
+    expect(
+      chartTypeForShape({ dimensions: ["location_kind"], measures: ["count"] }, "donut", 3, { sliceSum: 10, sampleN: 10 }),
+    ).toBe("donut");
+    expect(
+      chartTypeForShape({ dimensions: ["company"], measures: ["count"] }, "donut", 5, { sliceSum: 40, sampleN: 3488 }),
+    ).toBe("bars");
   });
 
   it("corrects an unfit pick on a single-dimension shape to bars", () => {
@@ -711,6 +735,96 @@ describe("Strand 1: sampleN is the sole denominator (verdict matches the source 
       result: truncated([{ bucket: "2026-05-01", median_salary: 150000 }, { bucket: "2026-06-01", median_salary: 170000 }], 900),
     });
     expect(insight.verdict).toContain("across the 2 shown");
+  });
+});
+
+// 018 strand 3: signal-quality gates - fragmentation, honest ties, currency threading, and the
+// template-side visual corrections (min trend points, donut only for a true whole).
+describe("Strand 3: signal-quality gates", () => {
+  const composed = (
+    rows: Record<string, unknown>[],
+    sampleN: number,
+    extra: Partial<QueryResult["meta"]> = {},
+  ): QueryResult => ({ sql: "SELECT 1", rows, meta: { sampleN, freshestAt: "2026-07-18 06:00:00", openSet: true, ...extra } });
+
+  it("does NOT crown a fragmented grouping - the leader's share is below the floor (no dominant group)", () => {
+    // The top title holds 40 of 3,257 (~1.2%), far below the floor: many near-equal titles, no leader.
+    const insight = buildComposedInsight({
+      id: "f1",
+      params: { measures: ["count"], dimensions: ["title"] },
+      chartType: "bars",
+      result: composed([{ title: "Software Engineer", count: 40 }, { title: "Data Scientist", count: 35 }], 3257),
+    });
+    expect(insight.verdict.toLowerCase()).toContain("no single role");
+    expect(insight.verdict).not.toContain("leads");
+    expect(insight.verdict).toContain("40 of 3257");
+    // The card still renders the top-N bars, honestly labeled.
+    if (insight.kind === "chart") expect(insight.series.length).toBe(2);
+  });
+
+  it("keeps the normal leader verdict when one group genuinely dominates (share above the floor)", () => {
+    const insight = buildComposedInsight({
+      id: "f2",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      result: composed([{ company: "Google", count: 3257 }, { company: "YouTube", count: 135 }], 3488),
+    });
+    expect(insight.verdict).toContain("Google leads with 3257 of 3488");
+    expect(insight.verdict.toLowerCase()).not.toContain("no single");
+  });
+
+  it("salary_compare on an exact tie says 'about the same', never a false 'pays more'", () => {
+    const insight = buildInsight({
+      id: "t1",
+      tool: "salary_compare",
+      params: {},
+      result: composed([{ city: "San Francisco", median: 180000, n: 10 }, { city: "Los Angeles", median: 180000, n: 8 }], 18),
+    });
+    expect(insight.verdict.toLowerCase()).toContain("about the same");
+    expect(insight.verdict).not.toContain("pays more");
+  });
+
+  it("threads the salary currency into the insight meta (for the source line + money formatter)", () => {
+    const insight = buildComposedInsight({
+      id: "c1",
+      params: { measures: ["median_salary"], dimensions: ["experience_level"] },
+      chartType: "bars",
+      result: composed([{ experience_level: "Senior", median_salary: 180000 }], 500, { currency: "USD" }),
+    });
+    expect(insight.meta.currency).toBe("USD");
+  });
+
+  it("corrects a template trend with < 3 points to a table, and a non-whole share_split donut to bars", () => {
+    const trend = buildInsight({
+      id: "v1",
+      tool: "postings_trend",
+      params: { days: 7 },
+      result: composed([{ day: "2026-07-20", count: 9 }, { day: "2026-07-19", count: 5 }], 14, { openSet: undefined }),
+    });
+    expect(trend.kind).toBe("table"); // only 2 points
+
+    // share_split slices summing BELOW sampleN (a truncated/partial whole) -> bars, not a false donut.
+    const donut = buildInsight({
+      id: "v2",
+      tool: "share_split",
+      params: { dimension: "experience" },
+      result: composed([{ label: "Senior", count: 40 }, { label: "Junior", count: 30 }], 3488),
+    });
+    expect(donut.kind).toBe("chart");
+    if (donut.kind === "chart") expect(donut.chartType).toBe("bars");
+  });
+
+  it("coalesces null/empty group labels in a chart series to 'unspecified' (never a bare null axis)", () => {
+    const insight = buildComposedInsight({
+      id: "n1",
+      params: { measures: ["count"], dimensions: ["city"] },
+      chartType: "bars",
+      result: composed([{ city: "San Francisco", count: 5 }, { city: null, count: 3 }, { city: "", count: 2 }], 10),
+    });
+    if (insight.kind === "chart") {
+      const cities = insight.series.map((r) => r.city);
+      expect(cities).toEqual(["San Francisco", "unspecified", "unspecified"]);
+    }
   });
 });
 

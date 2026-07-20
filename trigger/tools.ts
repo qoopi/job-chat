@@ -16,6 +16,7 @@ import {
   emptyModelOutput,
   emptyPart,
   errorPart,
+  sumCount,
   toModelOutput,
   type ErrorPart,
   type RefusalPart,
@@ -141,7 +142,11 @@ function composedTool(deps: CatalogDeps) {
           deps.emit(emptyPart(id));
           return { ...emptyModelOutput("query_postings"), rawChartType: rawPick };
         }
-        const served = chartTypeForShape(params, rawPick, result.rows.length);
+        // Pass the slice sum + sample so a donut is served only for a TRUE whole (018 strand 3).
+        const served = chartTypeForShape(params, rawPick, result.rows.length, {
+          sliceSum: sumCount(result.rows),
+          sampleN: result.meta.sampleN,
+        });
         const insight = buildComposedInsight({ id, params, chartType: served, result });
         deps.emit({ type: "data-insight", id, data: insight });
         // Record the RAW chartType pick on the tool result: AC-4 scores the pick BEFORE any fallback (the

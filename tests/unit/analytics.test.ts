@@ -122,6 +122,44 @@ describe("buildTemplateSql", () => {
   });
 });
 
+// 018 strand 3: salary aggregates are filtered to the DOMINANT currency (never a mixed-currency median)
+// and flagged `salary` so executeBuilt resolves the base currency for the source line + money formatter.
+describe("Should_FilterToDominantCurrency_When_SalaryAggregate (018 strand 3)", () => {
+  const DOMINANT = "salary_currency IN (SELECT salary_currency FROM postings FINAL";
+
+  it("adds the dominant-currency subquery + salary flag to salary_distribution", () => {
+    const built = buildTemplateSql("salary_distribution", { city: "Berlin" }, "postings");
+    expect(built.sql).toContain(DOMINANT);
+    expect(built.sql).toContain("ORDER BY count() DESC, salary_currency ASC");
+    expect(built.salary).toBe(true);
+  });
+
+  it("adds the dominant-currency subquery + salary flag to salary_compare", () => {
+    const built = buildTemplateSql(
+      "salary_compare",
+      { cities: ["San Francisco", "Los Angeles"] },
+      "postings",
+    );
+    expect(built.sql).toContain(DOMINANT);
+    expect(built.salary).toBe(true);
+  });
+
+  it("adds it to a composed salary measure and flags salary", () => {
+    const built = buildComposedSql(
+      { measures: ["median_salary"], dimensions: ["experience_level"] },
+      "postings",
+    );
+    expect(built.sql).toContain(DOMINANT);
+    expect(built.salary).toBe(true);
+  });
+
+  it("does NOT add it (nor the salary flag) to a count-only composed query", () => {
+    const built = buildComposedSql({ measures: ["count"], dimensions: ["company"] }, "postings");
+    expect(built.sql).not.toContain("salary_currency");
+    expect(built.salary).toBeFalsy();
+  });
+});
+
 describe("Should_ApplyOpenSetPredicate_When_CurrentStateRead (AC-3)", () => {
   const PREDICATE = "ingested_at = (SELECT max(ingested_at) FROM postings)";
 
@@ -458,6 +496,41 @@ describe("executeBuilt fires the rows and meta queries concurrently (perf)", () 
     const analytics = createAnalytics({ client, table: "postings_test" });
     const res = await analytics.runComposedQuery({ measures: ["count"], bucket: "day" });
     expect(res.rows.map((r) => r.day)).toEqual(["2026-07-18", "2026-07-19", "2026-07-20"]);
+  });
+
+  // 018 strand 3: a salary aggregate's meta query resolves the dominant currency, which threads into
+  // result.meta.currency (the source line + money formatter read it). A count query carries no currency.
+  it("threads the resolved currency into meta for a salary aggregate", async () => {
+    const client = {
+      query: (opts: { query: string }) =>
+        Promise.resolve({
+          json: async () =>
+            opts.query.includes("sampleN")
+              ? [{ sampleN: 300, freshestAt: "2026-07-20 00:00:00", currency: "EUR" }]
+              : [{ experience_level: "Senior", median_salary: 90000 }],
+        }),
+    } as unknown as ClickHouseClient;
+    const analytics = createAnalytics({ client, table: "postings_test" });
+    const res = await analytics.runComposedQuery({
+      measures: ["median_salary"],
+      dimensions: ["experience_level"],
+    });
+    expect(res.meta.currency).toBe("EUR");
+  });
+
+  it("carries no currency for a non-salary (count) query", async () => {
+    const client = {
+      query: (opts: { query: string }) =>
+        Promise.resolve({
+          json: async () =>
+            opts.query.includes("sampleN")
+              ? [{ sampleN: 10, freshestAt: "2026-07-20 00:00:00" }]
+              : [{ company: "Google", count: 4 }],
+        }),
+    } as unknown as ClickHouseClient;
+    const analytics = createAnalytics({ client, table: "postings_test" });
+    const res = await analytics.runComposedQuery({ measures: ["count"], dimensions: ["company"] });
+    expect(res.meta.currency).toBeUndefined();
   });
 
   it("rejects with the failing query's error and leaves no unhandled rejection", async () => {

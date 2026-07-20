@@ -124,6 +124,20 @@ export interface BuiltQuery {
   // newest-first; executeBuilt reverses them so the display axis stays oldest -> newest. Absent = the
   // query's own order is the display order.
   reverse?: boolean;
+  // A salary aggregate: it is filtered to the dominant salary_currency (never averaging mixed
+  // currencies), so the meta query resolves that currency for the source line / money formatter.
+  salary?: boolean;
+}
+
+/**
+ * The dominant-currency predicate (018 strand 3): keep only rows whose salary_currency is the most
+ * common one among the salaried rows matching the SAME base filters, so a median/percentile is never
+ * computed across mixed currencies. An `IN (... LIMIT 1)` (not `=`) so an empty salaried set yields no
+ * rows gracefully rather than throwing on an empty scalar subquery.
+ */
+function dominantCurrencyFilter(table: string, baseFilters: string[]): string {
+  const inner = whereClause([...baseFilters, "salary_currency IS NOT NULL"]);
+  return `salary_currency IN (SELECT salary_currency FROM ${table} FINAL ${inner} GROUP BY salary_currency ORDER BY count() DESC, salary_currency ASC LIMIT 1)`;
 }
 
 /**
@@ -139,6 +153,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       if (p.city) filters.push(`city = ${chStr(p.city)}`);
       if (p.country) filters.push(`country = ${chStr(p.country)}`);
       filters.push(openSetFilter(table));
+      filters.push(dominantCurrencyFilter(table, filters)); // single-currency salaried set only
       const where = whereClause(filters);
       const sql = assemble([
         "WITH salaried AS (",
@@ -155,7 +170,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "ORDER BY bucket",
         `LIMIT ${LIMITS.salary_distribution}`,
       ]);
-      return { sql, where, openSet: true };
+      return { sql, where, openSet: true, salary: true };
     }
     case "salary_compare": {
       const p = SalaryCompareParams.parse(rawParams);
@@ -166,6 +181,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       ];
       if (p.role) filters.push(roleFilter(p.role));
       filters.push(openSetFilter(table));
+      filters.push(dominantCurrencyFilter(table, filters)); // compare within one currency only
       const where = whereClause(filters);
       const sql = assemble([
         "SELECT",
@@ -178,7 +194,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "ORDER BY median DESC, city ASC",
         `LIMIT ${LIMITS.salary_compare}`,
       ]);
-      return { sql, where, openSet: true };
+      return { sql, where, openSet: true, salary: true };
     }
     case "postings_trend": {
       const p = PostingsTrendParams.parse(rawParams);
@@ -401,8 +417,9 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
     throw new Error(`sort.by must be a selected measure or dimension: ${sort.by}`);
   }
 
+  const isSalary = p.measures.some((m) => SALARY_MEASURES.has(m));
   const filters: string[] = [];
-  if (p.measures.some((m) => SALARY_MEASURES.has(m))) {
+  if (isSalary) {
     filters.push("salary_min IS NOT NULL", "salary_max IS NOT NULL");
   }
   if (p.role) filters.push(roleFilter(p.role));
@@ -418,6 +435,9 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   const openSet = p.days === undefined;
   if (openSet) filters.push(openSetFilter(table));
   else filters.push(trendWindow(table, p.days!));
+  // Salary measures aggregate within the dominant currency only - never a mixed-currency median (added
+  // last so its subquery scopes over the salaried + user + open-set/window filters, 018 strand 3).
+  if (isSalary) filters.push(dominantCurrencyFilter(table, filters));
   const where = whereClause(filters);
 
   const sortExpr = p.measures.includes(sort.by as ComposedMeasure)
@@ -446,15 +466,16 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
     `ORDER BY ${orderParts.join(", ")}`,
     `LIMIT ${p.limit}`,
   ]);
-  return { sql, where, openSet, reverse: chronologicalTrend };
+  return { sql, where, openSet, reverse: chronologicalTrend, salary: isSalary };
 }
 
 export interface QueryResult {
   sql: string;
   rows: Record<string, unknown>[];
-  // `openSet` is present (true) only on a current-state read; absent = full history (AC-3). Optional so
-  // every persisted P1 payload stays valid and it is never default-injected.
-  meta: { sampleN: number; freshestAt: string; openSet?: boolean };
+  // `openSet` is present (true) only on a current-state read; absent = full history (AC-3). `currency`
+  // is present only on a salary aggregate (the dominant currency it was filtered to). Both optional so
+  // every persisted P1 payload stays valid and neither is default-injected.
+  meta: { sampleN: number; freshestAt: string; openSet?: boolean; currency?: string };
 }
 
 export interface Analytics {
@@ -476,13 +497,11 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
   // Run a BuiltQuery: the rows query AND the sampleN/freshestAt meta query over the SAME `where` (so
   // the count matches the set the rows came from). Shared by both the template and composed paths.
   async function executeBuilt(built: BuiltQuery): Promise<QueryResult> {
-    const metaSql = assemble([
-      "SELECT",
-      "  count() AS sampleN,",
-      "  max(ingested_at) AS freshestAt",
-      `FROM ${table} FINAL`,
-      built.where,
-    ]);
+    // A salary aggregate additionally resolves the dominant currency it was filtered to (any() over the
+    // now single-currency set), so the source line / money formatter can disclose the real base.
+    const metaSelect = ["  count() AS sampleN", "  max(ingested_at) AS freshestAt"];
+    if (built.salary) metaSelect.push("  any(salary_currency) AS currency");
+    const metaSql = assemble(["SELECT", metaSelect.join(",\n"), `FROM ${table} FINAL`, built.where]);
 
     // The rows and meta reads are independent (neither consumes the other's result), so fire them
     // concurrently - on the per-turn ClickHouse Cloud hot path this is max- not sum-latency.
@@ -495,7 +514,7 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
         .then((rs) => rs.json<Record<string, unknown>>()),
       client
         .query({ query: metaSql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })
-        .then((rs) => rs.json<{ sampleN: number; freshestAt: string }>())
+        .then((rs) => rs.json<{ sampleN: number; freshestAt: string; currency?: string }>())
         .then((metaRows) => metaRows[0]),
     ]);
 
@@ -510,6 +529,7 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
         sampleN: Number(metaRow.sampleN),
         freshestAt: String(metaRow.freshestAt),
         ...(built.openSet ? { openSet: true } : {}),
+        ...(built.salary && metaRow.currency ? { currency: String(metaRow.currency) } : {}),
       },
     };
   }
