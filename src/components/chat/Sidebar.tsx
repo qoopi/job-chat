@@ -1,10 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import Link from "next/link";
 import type { Conversation } from "@shared/store";
 import { PlusIcon, ChevronLeftIcon } from "@/components/icons";
 import { freshnessLabel } from "@/lib/insight-format";
+
+// The small text-link button shared by the sidebar foot's Sign in (guest) and Sign out (signed-in).
+const footLinkStyle: CSSProperties = {
+  display: "block",
+  padding: 0,
+  border: 0,
+  background: "none",
+  font: "inherit",
+  fontSize: "var(--fs-2xs)",
+  color: "var(--shell-fg-dim)",
+  cursor: "pointer",
+};
 
 // The shell sidebar (interaction-spec s5). Guest: the teaser + Sign in (opens the lazy auth dialog).
 // Signed-in: the real history list (newest first, title + relative date, active highlight, click loads,
@@ -165,16 +177,7 @@ export function Sidebar({
               <button
                 type="button"
                 onClick={() => onSignOut?.()}
-                style={{
-                  display: "block",
-                  padding: 0,
-                  border: 0,
-                  background: "none",
-                  font: "inherit",
-                  fontSize: "var(--fs-2xs)",
-                  color: "var(--shell-fg-dim)",
-                  cursor: "pointer",
-                }}
+                style={footLinkStyle}
               >
                 Sign out
               </button>
@@ -188,16 +191,7 @@ export function Sidebar({
               <button
                 type="button"
                 onClick={() => onSignIn?.()}
-                style={{
-                  display: "block",
-                  padding: 0,
-                  border: 0,
-                  background: "none",
-                  font: "inherit",
-                  fontSize: "var(--fs-2xs)",
-                  color: "var(--shell-fg-dim)",
-                  cursor: "pointer",
-                }}
+                style={footLinkStyle}
               >
                 Sign in
               </button>
