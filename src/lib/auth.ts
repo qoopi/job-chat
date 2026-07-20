@@ -31,6 +31,13 @@ export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL,
   database: new Pool(authPoolConfig(process.env.DATABASE_URL)),
   emailAndPassword: { enabled: true },
+  // Account linking: a user who signed up with email/password may later sign in with Google using
+  // the SAME email. Better Auth refuses this by default (anti-takeover). Google verifies its emails,
+  // so it is a TRUSTED provider - safe to auto-link an incoming Google login to the existing account
+  // by verified email. Without this, same-email Google sign-in errors `account_not_linked`.
+  account: {
+    accountLinking: { enabled: true, trustedProviders: ["google"] },
+  },
   ...(googleId && googleSecret
     ? { socialProviders: { google: { clientId: googleId, clientSecret: googleSecret } } }
     : {}),
