@@ -193,9 +193,18 @@ export function ChatClient({
   // `React.memo(AssistantMessage)` still bails on settled turns. See reconcileMessagesById.
   const view = useMemo(() => reconcileMessagesById(messages), [messages]);
 
-  // The open LCP's body, re-resolved from the current (immutable) messages. Truthiness also gates the
-  // dock: if a target can't resolve (it can't in practice - payloads persist), nothing docks or renders.
-  const lcpInsight = useMemo(() => (lcpTarget ? resolveInsightTarget(view, lcpTarget) : null), [view, lcpTarget]);
+  // The open LCP's body, re-resolved from the current (immutable) messages. Cheap ref-find of the target
+  // message each render; the EXPENSIVE resolve (classify + Zod safeParse -> a FRESH insight object, whose
+  // new `rows` ref makes the un-memoized DataTable re-sort up to 50 rows) is memoized on that message's
+  // REF, not the whole `view` array. `view` is a fresh ref every stream chunk (reconcileMessagesById
+  // rebuilds the array), but a settled target keeps its object ref - so an LCP left open during an
+  // unrelated follow-up's stream does NOT re-parse or re-sort per chunk. Truthiness also gates the dock:
+  // an unresolvable target (can't happen in practice - payloads persist) docks/renders nothing.
+  const targetMessage = lcpTarget ? view.find((m) => m.id === lcpTarget.messageId) ?? null : null;
+  const lcpInsight = useMemo(
+    () => (targetMessage && lcpTarget ? resolveInsightTarget([targetMessage], lcpTarget) : null),
+    [targetMessage, lcpTarget],
+  );
 
   // AC-9 close-on-Esc, single keydown listener honoring the layer priority (interaction-spec): the auth
   // dialog, when 013 ships it, sits above the LCP and takes Esc first (isAuthDialogOpen seam). Until

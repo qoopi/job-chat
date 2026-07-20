@@ -21,8 +21,11 @@ export function Bubble({
   const ref = useRef<HTMLDivElement>(null);
   const [wrapped, setWrapped] = useState(false);
 
-  // No deps: re-measure on every render so a STREAMING bubble that grows past one line updates. The
-  // setState is guarded to a no-op when unchanged, so it cannot loop - eslint's infinite-chain
+  // No deps: re-measure whenever this bubble RE-RENDERS, so a streaming adviser bubble that grows past
+  // one line updates its radius as content lands. Settled bubbles are memoized upstream (MessageList's
+  // UserBubble + AssistantMessage), so a settled turn does not re-render and this effect does not run
+  // for it during a later turn's stream - the reflow is confined to bubbles whose content is changing.
+  // The setState is guarded to a no-op when unchanged, so it cannot loop - eslint's infinite-chain
   // heuristic is a false positive here (same disable pattern as ChatClient's mount effect).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {

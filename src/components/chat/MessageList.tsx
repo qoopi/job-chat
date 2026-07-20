@@ -87,6 +87,15 @@ const AssistantMessage = memo(function AssistantMessage({
   );
 });
 
+// User bubbles are memoized on their message ref so a SETTLED user turn does not re-render - and its
+// Bubble wrap-measure effect (a synchronous getComputedStyle + scrollHeight reflow) does not re-run -
+// while a later turn streams. This is the same protection the AssistantMessage memo gives adviser
+// turns; without it, MessageList's per-chunk re-map would re-measure every prior user bubble, cost
+// scaling with thread length. `message` is ref-stable once settled, so the shallow compare bails.
+const UserBubble = memo(function UserBubble({ message }: { message: UIMessage }) {
+  return <Bubble role="user">{messageText(message)}</Bubble>;
+});
+
 export function MessageList({
   messages,
   pending,
@@ -118,9 +127,7 @@ export function MessageList({
     <div className="thread">
       {messages.map((m) =>
         m.role === "user" ? (
-          <Bubble key={m.id} role="user">
-            {messageText(m)}
-          </Bubble>
+          <UserBubble key={m.id} message={m} />
         ) : (
           <AssistantMessage
             key={m.id}

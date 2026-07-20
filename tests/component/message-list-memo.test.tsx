@@ -77,3 +77,37 @@ test("Should_NotReRenderSettledInsightCard_When_LaterTurnStreams", () => {
   expect(probe.byId.get("settled-card")).toBe(1);
   expect(probe.byId.get("streaming-card")).toBe(1);
 });
+
+// Companion perf probe for the USER bubble. Bubble's wrap-measure effect calls getComputedStyle (a
+// synchronous forced reflow) every time it re-renders. User bubbles are memoized on their message ref
+// (UserBubble), so a settled user turn must NOT re-measure when a later turn streams. We spy on
+// getComputedStyle and assert only the NEW user bubble measures on the streaming re-render. Without the
+// UserBubble memo the settled bubble re-renders with the parent and re-measures, so the count is 2.
+test("Should_NotReMeasureSettledUserBubble_When_LaterTurnStreams", () => {
+  const gcs = vi.spyOn(window, "getComputedStyle");
+  // settled is a data-insight card (no Bubble), so the lone user turn is the only bubble that measures.
+  const first: UIMessage[] = [userTurn, settled];
+  const { rerender } = render(
+    <MessageList messages={first} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
+  );
+  gcs.mockClear(); // ignore the mount-time measurement of the settled user bubble
+
+  const streaming: UIMessage = {
+    id: "a2",
+    role: "assistant",
+    parts: [{ type: "data-insight", id: "a2-c0", data: insight("streaming-card-2", "Stripe leads next quarter.") }],
+  };
+  const second: UIMessage[] = [
+    userTurn, // same ref -> UserBubble memo bails, no re-measure
+    settled,
+    { id: "u2", role: "user", parts: [{ type: "text", text: "next" }] },
+    streaming,
+  ];
+  rerender(
+    <MessageList messages={second} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
+  );
+
+  // Only the freshly-mounted u2 bubble measured; the settled user bubble did not re-run its reflow.
+  expect(gcs).toHaveBeenCalledTimes(1);
+  gcs.mockRestore();
+});

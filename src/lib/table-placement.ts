@@ -6,7 +6,8 @@
 export const LCP_TABLE_THRESHOLD = 8;
 export const LCP_TABLE_PREVIEW_ROWS = 5;
 
-export type TablePlacement = "inline" | "lcp";
+// Local to this file - the return type of `tablePlacement`, not part of the module's public API.
+type TablePlacement = "inline" | "lcp";
 
 /** Where a table of `rows` renders: inline in the thread, or as a preview that opens the LCP. */
 export function tablePlacement(rows: readonly unknown[]): TablePlacement {
