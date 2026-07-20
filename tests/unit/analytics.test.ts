@@ -266,6 +266,68 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     expect(sql).toContain("ORDER BY toStartOfWeek(published_at) ASC");
   });
 
+  // Two dimensions together: GROUP BY carries both, in the array order; the deterministic ORDER BY is
+  // the sort spec (default: the measure DESC) then the REMAINING dimensions ASC in the same order - the
+  // exact composition every valid-combo test above exercised with only ONE dimension, never two.
+  it("two dimensions group by both and order by the measure then both dimensions ASC", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], dimensions: ["company", "city"] },
+      "postings",
+    );
+    expect(sql).toBe(
+      [
+        "SELECT",
+        "  company,",
+        "  city,",
+        "  count() AS count",
+        "FROM postings FINAL",
+        "WHERE ingested_at = (SELECT max(ingested_at) FROM postings)",
+        "GROUP BY company, city",
+        "ORDER BY count DESC, company ASC, city ASC",
+        "LIMIT 20",
+      ].join("\n"),
+    );
+  });
+
+  // A dimension AND a time bucket together (epic technical design: "Where the composed query has both
+  // dimensions and a time bucket, the bucket is a GROUP BY expression... keep deterministic ORDER BY").
+  // Default sort is chronological (bucket ASC) even with a dimension present; the dimension becomes the
+  // remaining ASC tiebreaker. Distinct from the single-dimension and bucket-only cases above.
+  it("a dimension plus a time bucket groups by both, sorted chronologically by default", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], dimensions: ["company"], bucket: "week" },
+      "postings",
+    );
+    expect(sql).toBe(
+      [
+        "SELECT",
+        "  company,",
+        "  toStartOfWeek(published_at) AS bucket,",
+        "  count() AS count",
+        "FROM postings FINAL",
+        "WHERE ingested_at = (SELECT max(ingested_at) FROM postings)",
+        "GROUP BY company, toStartOfWeek(published_at)",
+        "ORDER BY toStartOfWeek(published_at) ASC, company ASC",
+        "LIMIT 20",
+      ].join("\n"),
+    );
+  });
+
+  // An explicit sort override on the dimension (not the bucket) puts the dimension first in ORDER BY -
+  // proves `sort.by` can select either the dimension or the bucket key when both are present.
+  it("an explicit sort by the dimension overrides the bucket-first default", () => {
+    const { sql } = buildComposedSql(
+      {
+        measures: ["count"],
+        dimensions: ["company"],
+        bucket: "week",
+        sort: { by: "company", dir: "desc" },
+      },
+      "postings",
+    );
+    expect(sql).toContain("ORDER BY company DESC, toStartOfWeek(published_at) ASC");
+  });
+
   // location_kind (Enum8) is toString'd so it serializes/orders by name, and grouped by the raw
   // expression so the `location_kind` alias never shadows the column.
   it("a location_kind dimension is toString'd and grouped by the raw expression", () => {
