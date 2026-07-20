@@ -604,6 +604,16 @@ a:hover {
   cursor: pointer;
 }
 
+/* AC-8 table preview: 5-row preview + "Open full table" affordance for an over-threshold table. */
+.table-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.open-full-table {
+  align-self: flex-start;
+}
+
 /* tabs */
 .tabs {
   display: inline-flex;

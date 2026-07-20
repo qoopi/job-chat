@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { DataInsight } from "@shared/insight";
 import { freshnessLabel, splitFirstNumber } from "@/lib/insight-format";
+import { LCP_TABLE_PREVIEW_ROWS, tablePlacement } from "@/lib/table-placement";
 import { InsightChart } from "./charts/InsightChart";
 import { DataTable } from "./charts/DataTable";
 import { CodeBlock } from "./CodeBlock";
@@ -30,16 +31,23 @@ export function InsightCard({
   insight,
   usedFollowups = [],
   onFollowup,
+  onOpenTable,
 }: {
   insight: DataInsight;
   usedFollowups?: string[];
   onFollowup?: (text: string) => void;
+  /** AC-8: open the full table in the LCP. Called from the over-threshold preview affordance. */
+  onOpenTable?: () => void;
 }) {
   const isChart = insight.kind === "chart";
   const [tab, setTab] = useState<Tab>(isChart ? "chart" : "table");
   const [sqlOpen, setSqlOpen] = useState(false);
 
   const rows = isChart ? insight.series : insight.rows;
+  // AC-8: a table insight over the row threshold renders as a 5-row preview + an "Open full table"
+  // affordance; the LCP shows the full body. Charts always render in-chat (the rule is table-only), so
+  // a chart's Table tab keeps showing every row.
+  const previewTable = !isChart && tablePlacement(rows) === "lcp";
   // Suppress the whole source line on an empty (sampleN 0) result: no "0 postings", no epoch freshness.
   // A real answer always has sampleN > 0; this is defensive - an empty result now renders no card at all.
   const showSource = insight.meta.sampleN > 0;
@@ -95,7 +103,22 @@ export function InsightCard({
         role="tabpanel"
         aria-labelledby={tab === "chart" ? chartTabId : tableTabId}
       >
-        {isChart && tab === "chart" ? chartEl : <DataTable rows={rows} />}
+        {isChart && tab === "chart" ? (
+          chartEl
+        ) : previewTable ? (
+          <div className="table-preview">
+            <DataTable rows={rows.slice(0, LCP_TABLE_PREVIEW_ROWS)} />
+            <button
+              className="btn btn-outline btn-sm open-full-table"
+              type="button"
+              onClick={() => onOpenTable?.()}
+            >
+              Open full table ({rows.length.toLocaleString()} rows)
+            </button>
+          </div>
+        ) : (
+          <DataTable rows={rows} />
+        )}
         {sqlOpen ? <CodeBlock sql={insight.meta.sql} /> : null}
       </div>
 
