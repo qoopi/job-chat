@@ -99,3 +99,32 @@ test("Should_KeepDraftWithNotice_When_SignedInGuardRefuses", async () => {
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(composer().value).toBe("Median DE salary in SF?");
 });
+
+// Audit focus (013 testing pass): completeSignIn's TRANSITION (adopt + cookie-clear) can fail (see
+// tests/unit/complete-sign-in.test.ts for the server-side sequencing). AuthDialog's onSubmit catches the
+// rejection and shows a generic error WITHOUT calling onSuccess - so ChatClient's queued draft must
+// survive untouched and the dialog must stay open (no auto-send attempt), not silently lose the request.
+test("Should_KeepQueuedDraftAndDialogOpen_When_AdoptionFails", async () => {
+  sendMessageMock.mockResolvedValueOnce({ ok: false, reason: "guest_cap" });
+  signInEmailMock.mockResolvedValue({ error: null });
+  completeSignInMock.mockRejectedValueOnce(new Error("adoption store failure"));
+
+  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  const box = composer();
+  fireEvent.change(box, { target: { value: "Median DE salary in SF?" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+
+  await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" });
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "a@b.com" } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw123456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+  await waitFor(() => expect(completeSignInMock).toHaveBeenCalled());
+  await screen.findByText("Something went wrong. Try again."); // AuthDialog's catch-path error
+
+  // no auto-send was attempted (only the original cap-hit call), the dialog is still up, and the
+  // blocked draft is exactly what it was - nothing lost, nothing double-queued.
+  expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(composer().value).toBe("Median DE salary in SF?");
+});
