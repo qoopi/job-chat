@@ -92,6 +92,14 @@ export function ChatClient({
   // so it lives in a ref (not state) - that makes the read-then-clear in `onAuthSuccess` synchronous, so
   // a double-fired `onSuccess` sees `null` on the second pass and cannot double-send (take-once).
   const queuedDraftRef = useRef<string | null>(null);
+  // Reentrancy guard: while a turn is in flight (`send` between its start and its finally), a second
+  // `send` is ignored. Without it a follow-up chip clicked mid-stream fires a concurrent
+  // `sendMessage({ messageId })`, which truncates-after-id and can drop the in-flight send's optimistic
+  // bubble (spurious "Could not send" + an orphan persisted turn + a duplicate run - the AC-16 class). A
+  // ref (not `pending` state) so the check reads current synchronously without adding `pending` to
+  // `send`'s deps (which would rebuild the callback and defeat the MessageList memo bail). Ignoring the
+  // duplicate mid-stream send mirrors the composer's own streaming-disabled state.
+  const sendingRef = useRef(false);
   const dialogOpen = useAuthDialogOpen();
   // Instant "answering" feedback (006 ruling): set the moment a turn is sent or the arrival attach
   // begins, so the indicator + streaming composer appear AT ONCE and bridge the run-wake gap before the
@@ -154,6 +162,8 @@ export function ChatClient({
     async (raw: string, opts?: { fromAuth?: boolean }) => {
       const text = raw.trim();
       if (!text) return;
+      if (sendingRef.current) return; // a turn is already in flight - ignore the concurrent send
+      sendingRef.current = true;
       setFailed(null);
       setAwaiting(true); // instant answering indicator + streaming composer through the run-wake gap
 
@@ -181,6 +191,7 @@ export function ChatClient({
         } catch {
           failSend(text);
         } finally {
+          sendingRef.current = false; // release the guard (moot when we navigated away - the page remounts)
           if (freshChatRef.current) setAwaiting(false); // only when we did NOT navigate away
         }
         return;
@@ -247,6 +258,7 @@ export function ChatClient({
           failSend(text);
         }
       } finally {
+        sendingRef.current = false; // release the guard once this turn's await chain settles
         setAwaiting(false); // fallback clear for paths that never stream (refusal / invalid / abort)
       }
     },

@@ -155,6 +155,68 @@ test("Should_RollbackOptimisticBubble_When_SendThrows: a thrown/failed send remo
   expect(document.querySelectorAll(".msg.user")).toHaveLength(0);
 });
 
+// --- concurrent-send guard: a follow-up chip clicked mid-stream must not fire a 2nd send ---
+// Regression for the code-review should-fix: `send` had NO reentrancy guard and follow-up chips were
+// `disabled={used}` ONLY (not gated by streaming/pending). A chip clicked while a turn is in flight
+// fired a second concurrent `sendMessage({messageId})` which truncates-after-id (dropping the other
+// send's optimistic bubble -> spurious "Could not send" + an orphan persisted turn + a duplicate run,
+// the AC-16 class). The fix is BOTH a `sendingRef` guard at the top of `send` AND pending-gated chips,
+// consistent with the composer's own streaming-disabled state. Contract: exactly one send proceeds.
+test("Should_IgnoreConcurrentSend_When_TurnInFlight: a follow-up chip clicked while a turn streams fires no 2nd send (guard + pending-gated chip)", async () => {
+  // A settled prior turn with a follow-up chip is on screen.
+  const initial: UIMessage[] = [
+    { id: "u0", role: "user", parts: [{ type: "text", text: "Top companies?" }] },
+    {
+      id: "a0",
+      role: "assistant",
+      parts: [
+        {
+          type: "data-insight",
+          id: "a0-c0",
+          data: {
+            id: "card0",
+            kind: "chart",
+            chartType: "bars",
+            verdict: "Amazon leads hiring with 214 open roles.",
+            series: [{ company: "Amazon", count: 214 }],
+            followups: ["Only remote roles"],
+            meta: { sql: "SELECT 1", sampleN: 3483, updatedAt: "2026-07-18 19:12:00" },
+          },
+        },
+      ],
+    },
+  ];
+  // Hold the gate unresolved so the first send stays in flight (pending) while the chip is clicked.
+  let release: (v: unknown) => void = () => {};
+  sendMessageMock.mockReturnValue(new Promise((res) => (release = res)));
+  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={initial} e2e={false} />);
+
+  // First send via the composer - it holds the turn open (gate unresolved), so pending stays true.
+  const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
+  fireEvent.change(box, { target: { value: "First question" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+
+  await screen.findByText("First question", { selector: ".bubble.user" }); // optimistic bubble up
+  expect(sendMessageMock).toHaveBeenCalledTimes(1);
+
+  // The turn is in flight: the chip is pending-gated (disabled), matching the composer's streaming state.
+  const chip = screen.getByRole("button", { name: /Only remote roles/ });
+  expect((chip as HTMLButtonElement).disabled).toBe(true);
+
+  // Even so, clicking it must not fire a second concurrent send (the guard is the belt-and-suspenders).
+  fireEvent.click(chip);
+
+  // Exactly one send proceeded: no 2nd action call, no orphan chip-text bubble, first bubble intact.
+  expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  expect(sendMessageMock).toHaveBeenCalledWith(CONVERSATION_ID, "First question");
+  expect(screen.queryByText("Only remote roles", { selector: ".bubble.user" })).toBeNull();
+  expect(screen.getByText("First question", { selector: ".bubble.user" })).toBeTruthy();
+
+  // Settle cleanly (avoid a dangling act warning): the held gate resolves ok, the turn finishes.
+  release({ ok: true, publicAccessToken: "tok" });
+  await waitFor(() => expect(setSessionMock).toHaveBeenCalled());
+});
+
 // --- mechanism (a): a follow-up delivers + watches via sendMessages, hydrated first ---
 
 test("follow-up send: the action's session token hydrates the transport BEFORE the deliver+watch send (streams live, not peekSettled reconnect)", async () => {

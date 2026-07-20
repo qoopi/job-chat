@@ -127,8 +127,8 @@ describe("delete the open conversation (AC-21)", () => {
     );
     expect(screen.getByText("Top companies?")).toBeTruthy(); // the open thread renders
 
-    // Inline confirm -> Delete.
-    fireEvent.click(screen.getByRole("button", { name: "Delete Top companies today" }));
+    // Inline confirm -> Delete. The affordance name carries a short id suffix; match the title prefix.
+    fireEvent.click(screen.getByRole("button", { name: /^Delete Top companies today/ }));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => expect(deleteConversationMock).toHaveBeenCalledWith(CONVERSATION_ID));

@@ -32,12 +32,16 @@ export function InsightCard({
   usedFollowups = [],
   onFollowup,
   onOpenTable,
+  pending = false,
 }: {
   insight: DataInsight;
   usedFollowups?: string[];
   onFollowup?: (text: string) => void;
   /** AC-8: open the full table in the LCP. Called from the over-threshold preview affordance. */
   onOpenTable?: () => void;
+  /** A turn is in flight: follow-up chips are disabled while it streams, consistent with the composer's
+   *  streaming-disabled state, so a chip cannot fire a concurrent send that races the live turn. */
+  pending?: boolean;
 }) {
   const isChart = insight.kind === "chart";
   const [tab, setTab] = useState<Tab>(isChart ? "chart" : "table");
@@ -131,7 +135,7 @@ export function InsightCard({
                 key={f}
                 className="chip"
                 type="button"
-                disabled={used}
+                disabled={used || pending}
                 onClick={() => onFollowup?.(f)}
               >
                 {used ? `${f} ✓` : f}

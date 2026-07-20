@@ -89,8 +89,9 @@ describe("delete conversation (AC-21)", () => {
       <Sidebar signedIn conversations={convs} activeId={convs[0].id} onDeleteConversation={onDeleteConversation} />,
     );
 
-    // The affordance opens an inline confirm - not a modal, and nothing deletes yet.
-    fireEvent.click(screen.getByRole("button", { name: "Delete Top companies hiring" }));
+    // The affordance opens an inline confirm - not a modal, and nothing deletes yet. The accessible
+    // name carries a short id suffix (disambiguates same-titled rows), so match on the title prefix.
+    fireEvent.click(screen.getByRole("button", { name: /^Delete Top companies hiring/ }));
     expect(screen.getByText("Delete this chat?")).toBeTruthy();
     expect(onDeleteConversation).not.toHaveBeenCalled();
 
@@ -100,7 +101,7 @@ describe("delete conversation (AC-21)", () => {
     expect(onDeleteConversation).not.toHaveBeenCalled();
 
     // Re-open and confirm -> the delete fires with the row's id.
-    fireEvent.click(screen.getByRole("button", { name: "Delete Top companies hiring" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Delete Top companies hiring/ }));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(onDeleteConversation).toHaveBeenCalledWith(convs[0].id);
   });

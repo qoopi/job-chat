@@ -28,6 +28,7 @@ const AssistantMessage = memo(function AssistantMessage({
   onRetry,
   onOpenLcp,
   onSignIn,
+  pending,
 }: {
   message: UIMessage;
   usedFollowups: Set<string>;
@@ -35,6 +36,10 @@ const AssistantMessage = memo(function AssistantMessage({
   onRetry: () => void;
   onOpenLcp: (messageId: string, partId: string) => void;
   onSignIn?: () => void;
+  /** A turn is in flight - disables this card's follow-up chips (no concurrent send while it streams).
+   *  `pending` only flips at turn boundaries (not per stream chunk), so settled cards still bail on the
+   *  per-chunk re-map; the chart subtree stays memoized on the insight ref, so the flip is cheap. */
+  pending: boolean;
 }) {
   const text = messageText(message);
   const cards = dataParts(message);
@@ -60,6 +65,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 usedFollowups={used}
                 onFollowup={(text) => onFollowup(cls.insight.id, text)}
                 onOpenTable={() => onOpenLcp(message.id, id)}
+                pending={pending}
               />
             </div>
           );
@@ -142,6 +148,7 @@ export function MessageList({
             onRetry={onRetry}
             onOpenLcp={onOpenLcp}
             onSignIn={onSignIn}
+            pending={pending}
           />
         ),
       )}
