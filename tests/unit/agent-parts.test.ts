@@ -286,6 +286,23 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
     expect(parts).toEqual({ kind: "system" });
   });
 
+  // AC-25 single refusal surface: when a turn ends in a system error card, its accompanying model prose
+  // (the "something went wrong" narration the tool asked the model to write) is NOT also persisted - the
+  // turn resumes as exactly one surface, the error card, never card + doubled text.
+  it("drops the accompanying prose when a turn ends in a system error card (AC-25)", () => {
+    const message = {
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Something went wrong on my side - please try again." },
+        { type: "data-insight", id: "call-1", data: buildSkeleton("call-1", "top_companies") },
+        { type: "data-error", id: "call-1", data: { kind: "system" } },
+      ],
+    };
+    const { content, parts } = extractAssistantPersistence(message);
+    expect(content).toBe(""); // the prose is dropped - the error card is the single surface
+    expect(parts).toEqual({ kind: "system" });
+  });
+
   // Defensive: a skeleton that was never superseded (neither filled nor errored) is dropped rather
   // than persisted, so resume never restores a stuck spinner.
   it("drops an orphan loading skeleton rather than persisting it", () => {

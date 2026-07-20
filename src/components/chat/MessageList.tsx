@@ -43,10 +43,15 @@ const AssistantMessage = memo(function AssistantMessage({
 }) {
   const text = messageText(message);
   const cards = dataParts(message);
+  // AC-25 single refusal surface: when this turn carries an error card, the card is the one surface -
+  // suppress the accompanying model prose so the same failure is never rendered twice (card + prose).
+  // Mirrors the persistence-layer drop in trigger/parts.ts, so live and resumed turns render identically.
+  const hasErrorCard = cards.some(({ data }) => classifyCardData(data).kind === "error");
+  const showText = Boolean(text) && !hasErrorCard;
 
   return (
     <>
-      {text ? (
+      {showText ? (
         <Bubble role="ai">
           {/* Light markdown from the agent: render **bold** as bold, strip the rest to plain (#4a). */}
           {proseSpans(text).map((s, i) =>

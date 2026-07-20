@@ -151,6 +151,25 @@ describe("MessageList", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  test("AC-25: a system-error turn shows only the error card, not the doubled model prose", () => {
+    // The model both wrote an apology AND the tool emitted a system error card. Exactly one refusal
+    // surface must render: the error card. The prose bubble is suppressed (no doubled text).
+    const messages: UIMessage[] = [
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "Something went wrong on my side - please try again." },
+          { type: "data-error", id: "a1-e", data: { kind: "system" } },
+        ],
+      },
+    ];
+    const { container } = render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />);
+    expect(container.querySelector(".err-card")).toBeTruthy(); // the single surface
+    expect(container.querySelector(".bubble.ai")).toBeNull(); // the prose bubble is suppressed
+    expect(container.textContent).not.toContain("Something went wrong on my side - please try again.");
+  });
+
   test("AC-15: a refusal part renders the polite limit notice (not the error card)", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "data-refusal", id: "a1-r", data: { reason: "guest_cap" } }] },

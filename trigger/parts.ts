@@ -447,6 +447,13 @@ function isPersistablePayload(data: unknown): boolean {
   return false;
 }
 
+/** An error-card payload (the taxonomized `data-error` marker). AC-25's single-surface rule keys on this. */
+function isErrorMarker(data: unknown): boolean {
+  if (typeof data !== "object" || data === null) return false;
+  const kind = (data as Record<string, unknown>).kind;
+  return kind === "system" || kind === "unanswerable";
+}
+
 /**
  * Extract the persisted assistant content + card payload from a completed turn's response message.
  * Text parts are joined; the card parts (`data-insight`, `data-error`, `data-refusal`) are de-duped
@@ -476,7 +483,11 @@ export function extractAssistantPersistence(message: MessageLike): {
   }
   const payloads = [...byId.values()].filter(isPersistablePayload);
   const payload = payloads.length === 0 ? null : payloads.length === 1 ? payloads[0] : payloads;
-  return { content, parts: payload };
+  // AC-25 single refusal surface: a turn that ends in an error card carries the user-facing message in
+  // that card, so its accompanying model prose (the "something went wrong" narration) is dropped - the
+  // turn persists (and resumes) as exactly one surface. The render layer applies the same rule live.
+  const finalContent = payloads.some(isErrorMarker) ? "" : content;
+  return { content: finalContent, parts: payload };
 }
 
 /**
