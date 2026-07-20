@@ -139,6 +139,24 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(guest);
   });
 
+  // Adversarial order: a guest signs in having never started a chat (zero conversations). The UPDATE
+  // matches zero rows - a safe no-op, not an error - and leaves the canonical row's own conversations
+  // (if any) untouched.
+  it("adoptGuest is a no-op for a guest with zero conversations", async () => {
+    const canonical = `test-guest-${crypto.randomUUID()}`;
+    const guest = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(canonical);
+    await store.getOrCreateUser(guest); // guest row exists, but starts no conversation
+    const priorConv = await store.createConversation(canonical, "canonical's own thread");
+
+    await expect(store.adoptGuest(canonical, guest)).resolves.toBeUndefined();
+    // The canonical's pre-existing conversation is unaffected by an empty adoption.
+    expect((await store.getConversationOwner(priorConv.id))?.user_id).toBe(canonical);
+
+    await purge(canonical);
+    await purge(guest);
+  });
+
   // AC-12 (store slice): the sidebar history is newest-first. created_at is pinned to distinct values so
   // the ordering assertion is deterministic (not a clock-race between same-millisecond inserts).
   it("listConversations returns the user's conversations newest-first (AC-12)", async () => {

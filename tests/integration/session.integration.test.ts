@@ -355,6 +355,21 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(await svc.sendMessage(crypto.randomUUID(), "hi", guestId)).toEqual({ ok: false, reason: "not_found" });
   });
 
+  // Parity with sendMessage above: an unknown (well-formed, never-created) id must refuse on the
+  // mint-token layer too, not just when a real conversation is owned by someone else.
+  it("mintChatToken returns not_found for an unknown conversation id", async () => {
+    const guestId = freshGuestId();
+    const svc = createSessionService({
+      store,
+      guards: { guestCap: 10, dailyBudget: HUGE },
+      startSession: okStartSession(),
+      mintToken: okMintToken(),
+      sendToInbox: okSendToInbox(),
+      now: () => new Date(),
+    });
+    expect(await svc.mintChatToken(crypto.randomUUID(), guestId)).toEqual({ ok: false, reason: "not_found" });
+  });
+
   // should-fix ownership (mint side): a token is minted only for the caller's OWN conversation.
   it("mintChatToken mints for the owner but refuses a cross-guest conversation (not_found)", async () => {
     const owner = freshGuestId();
@@ -449,6 +464,44 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
         kind: "account",
       });
       expect((await store.getConversationOwner(conv.id))?.user_id).toBe(canonical); // adopted
+    });
+
+    // Adversarial order: the SAME account is reached from two different guest cookies in sequence
+    // (device B, then device C) - proves adoption chains cleanly rather than the second call
+    // clobbering or skipping the first device's already-adopted conversation.
+    it("adopts two different guests' conversations into the same account, one after another", async () => {
+      const canonical = freshGuestId(); // the account, already signed in once before
+      await store.getOrCreateUser(canonical);
+      const authId = `auth-${crypto.randomUUID()}`;
+      await store.linkAuthUser(canonical, authId);
+
+      const deviceB = freshGuestId();
+      await store.getOrCreateUser(deviceB);
+      const convB = await store.createConversation(deviceB, "device B thread");
+
+      const deviceC = freshGuestId();
+      await store.getOrCreateUser(deviceC);
+      const convC = await store.createConversation(deviceC, "device C thread");
+
+      expect(await resolveIdentity(store, { authUserId: authId, guestId: deviceB })).toEqual({
+        userId: canonical,
+        kind: "account",
+      });
+      expect((await store.getConversationOwner(convB.id))?.user_id).toBe(canonical);
+
+      // Device C signs in next. Device B's already-adopted conversation must stay put, not revert.
+      expect(await resolveIdentity(store, { authUserId: authId, guestId: deviceC })).toEqual({
+        userId: canonical,
+        kind: "account",
+      });
+      expect((await store.getConversationOwner(convC.id))?.user_id).toBe(canonical);
+      expect((await store.getConversationOwner(convB.id))?.user_id).toBe(canonical); // still adopted
+
+      // Re-running either adoption is still a no-op (idempotent chaining, not just single-shot).
+      await store.adoptGuest(canonical, deviceB);
+      await store.adoptGuest(canonical, deviceC);
+      expect((await store.getConversationOwner(convB.id))?.user_id).toBe(canonical);
+      expect((await store.getConversationOwner(convC.id))?.user_id).toBe(canonical);
     });
   });
 });
