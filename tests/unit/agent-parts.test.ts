@@ -553,6 +553,58 @@ describe("buildComposedInsight builds a strict-valid insight for the seventh too
     expect(insight.verdict).not.toContain("Meta leads");
     expect(insight.verdict).toContain("14");
   });
+
+  // ROUND-2 REGRESSION (honesty): the agent may request an ASCENDING sort - the natural pick for
+  // "which city has the FEWEST / pays the LEAST" - so the executor returns rows in ascending order and
+  // rows[0] is the LOWEST, not the leader. The verdict must verify the extreme FROM the rows (never
+  // assume the default measure-desc sort produced rows[0]): it must name the honest extreme (the lowest,
+  // which is exactly what the user asked for) and must NEVER claim rows[0] "leads" or is "highest".
+  it("count with sort dir:asc names the FEWEST, never a false 'leads' (rows[0] is the minimum)", () => {
+    const insight = buildComposedInsight({
+      id: "q9",
+      params: { measures: ["count"], dimensions: ["city"], sort: { by: "count", dir: "asc" } },
+      chartType: "bars",
+      result: composedResult(
+        [
+          { city: "Akron", count: 1 },
+          { city: "Austin", count: 40 },
+          { city: "New York", count: 5000 },
+        ],
+        5041,
+      ),
+    });
+    expect(insight.verdict).not.toContain("leads");
+    expect(insight.verdict.toLowerCase()).not.toContain("highest");
+    expect(insight.verdict).toContain("Akron"); // rows[0], the genuine minimum, is the honest headline
+    expect(insight.verdict.toLowerCase()).toContain("fewest");
+    expect(insight.verdict).not.toContain("New York"); // the real max is NOT named as the leader
+  });
+
+  it("a salary measure with sort dir:asc names the LOWEST, never a false 'highest'", () => {
+    const insight = buildComposedInsight({
+      id: "q10",
+      params: {
+        measures: ["median_salary"],
+        dimensions: ["city"],
+        sort: { by: "median_salary", dir: "asc" },
+      },
+      chartType: "bars",
+      result: composedResult(
+        [
+          { city: "Detroit", median_salary: 60000 },
+          { city: "Austin", median_salary: 130000 },
+          { city: "San Francisco", median_salary: 220000 },
+        ],
+        30,
+      ),
+    });
+    expect(insight.verdict.toLowerCase()).not.toContain("highest");
+    expect(insight.verdict).not.toContain("leads");
+    expect(insight.verdict).toContain("Detroit"); // rows[0], the genuine minimum
+    expect(insight.verdict.toLowerCase()).toContain("lowest");
+    expect(insight.verdict).toContain("60000");
+    expect(insight.verdict).not.toContain("San Francisco"); // the real max is NOT named as the leader
+  });
 });
 
 describe("composedFollowups derives two deterministic chips from the params (no LLM)", () => {

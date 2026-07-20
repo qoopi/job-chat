@@ -42,6 +42,10 @@ export interface ComposedShape {
   days?: number;
   min_salary?: number;
   max_salary?: number;
+  // Carried so this shape matches the tool's parsed params: a custom `sort` is WHY rows[0] is not always
+  // the max (the agent can ask for `dir:"asc"`). The verdict verifies the extreme from the ROWS
+  // themselves (sort-agnostic), so it never trusts this field to decide the leader.
+  sort?: { by: string; dir: "asc" | "desc" };
 }
 
 /**
@@ -128,31 +132,43 @@ const COMPOSED_MEASURE_LABEL: Record<string, string> = {
 
 /**
  * The generic composed verdict - leads with the key number (honesty), like the per-template verdicts.
- * Count is summable into a headline total; salary quantiles are not. A single-dimension, non-bucketed
- * result is a ranking (the default sort is measure-descending), so the top row genuinely leads and is
- * named; a trend / cross-tab / bare aggregate leads with the total (count) or the observed range
- * (salary) instead, so no false superlative is ever claimed.
+ * Count is summable into a headline total; salary quantiles are not. For a single-dimension, non-bucketed
+ * result (a ranking), the verdict names ONLY the extreme it can VERIFY from the rows: rows[0] as the
+ * leader / highest when it genuinely holds the max, or as the fewest / lowest when it holds the min - the
+ * agent can sort ASCENDING (the natural pick for "which city pays the LEAST"), so rows[0] is never assumed
+ * to lead. When rows[0] is neither extreme (sorted by some other key), or for a trend / cross-tab / bare
+ * aggregate, the verdict leads with the total (count) or the observed range (salary) - so no false
+ * superlative is ever claimed.
  */
 function verdictForComposed(params: ComposedShape, rows: Record<string, unknown>[]): string {
   const measure = params.measures[0];
   const top = rows[0];
   const dimKey = params.dimensions?.[0];
-  // A ranking only when there is EXACTLY one dimension and no bucket: then the measure-desc sort makes
-  // the top row the genuine extreme. A 2-dim cross-tab's top row is one cell, NOT the group leader (its
-  // group's other rows can sum higher), so it must NOT take the leader branch - it aggregates instead.
+  // A ranking only when there is EXACTLY one dimension and no bucket. A 2-dim cross-tab's top row is one
+  // cell, NOT the group leader (its group's other rows can sum higher); a bucketed result is a trend.
+  // Neither is a ranking, so both aggregate instead of naming a leader.
   const ranked = params.dimensions?.length === 1 && !params.bucket;
 
   if (measure === "count") {
     const total = rows.reduce((sum, r) => sum + num(r.count), 0);
-    return ranked
-      ? `${String(top[dimKey!])} leads with ${num(top.count)} of ${total} postings.`
-      : `${total} postings in total.`;
+    if (ranked) {
+      const counts = rows.map((r) => num(r.count));
+      const topCount = num(top.count);
+      // Verify from the rows which extreme rows[0] holds - a custom `sort:{dir:"asc"}` makes it the min.
+      if (counts.every((c) => c <= topCount)) return `${String(top[dimKey!])} leads with ${topCount} of ${total} postings.`;
+      if (counts.every((c) => c >= topCount)) return `${String(top[dimKey!])} has the fewest, with ${topCount} of ${total} postings.`;
+    }
+    return `${total} postings in total.`;
   }
 
   const label = COMPOSED_MEASURE_LABEL[measure] ?? measure;
-  if (ranked) return `${String(top[dimKey!])} has the highest ${label} at ${num(top[measure])}.`;
-  if (dimKey === undefined && !params.bucket) return `The ${label} is ${num(top[measure])}.`;
   const values = rows.map((r) => num(r[measure]));
+  if (ranked) {
+    const topVal = num(top[measure]);
+    if (values.every((v) => v <= topVal)) return `${String(top[dimKey!])} has the highest ${label} at ${topVal}.`;
+    if (values.every((v) => v >= topVal)) return `${String(top[dimKey!])} has the lowest ${label} at ${topVal}.`;
+  }
+  if (dimKey === undefined && !params.bucket) return `The ${label} is ${num(top[measure])}.`;
   return `The ${label} ranges from ${Math.min(...values)} to ${Math.max(...values)}.`;
 }
 
