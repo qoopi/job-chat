@@ -52,6 +52,12 @@ export function ChatClient({
   const [draft, setDraft] = useState("");
   const [used, setUsed] = useState<Set<string>>(new Set());
   const [failed, setFailed] = useState<string | null>(null);
+  // Instant "answering" feedback (006 ruling): set the moment a turn is sent or the arrival attach
+  // begins, so the indicator + streaming composer appear AT ONCE and bridge the run-wake gap before the
+  // SDK moves `status` off "ready". `pending` is `isStreaming(status) || awaiting`, so once the stream is
+  // live `status` dominates; the send/attach `finally` clears the flag when the await chain settles
+  // (stream end, Stop-abort, refusal, invalid, or a no-op reconnect), never leaving it stuck.
+  const [awaiting, setAwaiting] = useState(false);
   const started = useRef(false);
 
   const send = useCallback(
@@ -59,53 +65,63 @@ export function ChatClient({
       const text = raw.trim();
       if (!text) return;
       setFailed(null);
-
-      if (e2e) {
-        void sendMessage({ text });
-        return;
-      }
+      setAwaiting(true); // instant answering indicator + streaming composer through the run-wake gap
 
       try {
-        const r = await sendMessageAction(conversationId, text);
-        if (!r.ok) {
-          if (r.reason === "guest_cap" || r.reason === "daily_budget") {
-            // Same polite notice as the agent-side backstop: append a data-refusal turn so the one
-            // MessageList path renders it (decision 19 / 004 handoff), not a bespoke banner.
-            setMessages((prev) => [
-              ...prev,
-              makeUserMessage(text),
-              { id: crypto.randomUUID(), role: "assistant", parts: [{ type: "data-refusal", data: { reason: r.reason } }] } as UIMessage,
-            ]);
-            return;
+        if (e2e) {
+          // Mock transport streams the scripted turn; a Stop-abort rejects here and is expected (no toast).
+          try {
+            await sendMessage({ text });
+          } catch {
+            /* stream aborted (Stop) or mock stream error - e2e only, no send-failure toast */
           }
-          setFailed(text); // invalid_input / not_found -> send-failure toast
-          setDraft(text); // draft preserved (interaction-spec section 4)
           return;
         }
-        // Hydrate the transport with the action's scoped token, then DELIVER + WATCH the turn via the
-        // transport's `sendMessages` (`useChat.sendMessage`). That one primitive appends the turn to
-        // `.in` (which triggers the run) AND subscribes with wait - the only SDK 4.5.4 path that streams
-        // a freshly-triggered follow-up live. `resumeStream`/`reconnectToStream` forces peekSettled,
-        // built for reload-resume: attaching to a run triggered milliseconds earlier it reads the
-        // settled prior turn and never delivers the fresh chunks (006 diagnosis, routed to 004).
-        // `useChat.sendMessage` adds the optimistic user turn itself, so no manual setMessages here.
-        //
-        // Carry the prior turn's `.out` cursor forward. `sendMessages` subscribes with
-        // `lastEventId: state.lastEventId` (SDK 4.5.4 chat.js); `setSession` REPLACES the cached session,
-        // so passing it without `lastEventId` would WIPE the cursor and the follow-up subscribe would
-        // replay the session `.out` log from the START - re-delivering the prior turn's chunks, which the
-        // AI SDK cannot reconcile by id (they accumulate into the one new streaming message: 006 live
-        // artifact). Threading the tracked cursor resumes AFTER the prior turn, so only this turn streams.
-        const prior = transport.getSession(conversationId);
-        transport.setSession(conversationId, {
-          publicAccessToken: r.publicAccessToken,
-          isStreaming: true,
-          lastEventId: prior?.lastEventId,
-        });
-        await sendMessage({ text });
-      } catch {
-        setFailed(text);
-        setDraft(text);
+
+        try {
+          const r = await sendMessageAction(conversationId, text);
+          if (!r.ok) {
+            if (r.reason === "guest_cap" || r.reason === "daily_budget") {
+              // Same polite notice as the agent-side backstop: append a data-refusal turn so the one
+              // MessageList path renders it (decision 19 / 004 handoff), not a bespoke banner.
+              setMessages((prev) => [
+                ...prev,
+                makeUserMessage(text),
+                { id: crypto.randomUUID(), role: "assistant", parts: [{ type: "data-refusal", data: { reason: r.reason } }] } as UIMessage,
+              ]);
+              return;
+            }
+            setFailed(text); // invalid_input / not_found -> send-failure toast
+            setDraft(text); // draft preserved (interaction-spec section 4)
+            return;
+          }
+          // Hydrate the transport with the action's scoped token, then DELIVER + WATCH the turn via the
+          // transport's `sendMessages` (`useChat.sendMessage`). That one primitive appends the turn to
+          // `.in` (which triggers the run) AND subscribes with wait - the only SDK 4.5.4 path that streams
+          // a freshly-triggered follow-up live. `resumeStream`/`reconnectToStream` forces peekSettled,
+          // built for reload-resume: attaching to a run triggered milliseconds earlier it reads the
+          // settled prior turn and never delivers the fresh chunks (006 diagnosis, routed to 004).
+          // `useChat.sendMessage` adds the optimistic user turn itself, so no manual setMessages here.
+          //
+          // Carry the prior turn's `.out` cursor forward. `sendMessages` subscribes with
+          // `lastEventId: state.lastEventId` (SDK 4.5.4 chat.js); `setSession` REPLACES the cached session,
+          // so passing it without `lastEventId` would WIPE the cursor and the follow-up subscribe would
+          // replay the session `.out` log from the START - re-delivering the prior turn's chunks, which the
+          // AI SDK cannot reconcile by id (they accumulate into the one new streaming message: 006 live
+          // artifact). Threading the tracked cursor resumes AFTER the prior turn, so only this turn streams.
+          const prior = transport.getSession(conversationId);
+          transport.setSession(conversationId, {
+            publicAccessToken: r.publicAccessToken,
+            isStreaming: true,
+            lastEventId: prior?.lastEventId,
+          });
+          await sendMessage({ text });
+        } catch {
+          setFailed(text);
+          setDraft(text);
+        }
+      } finally {
+        setAwaiting(false); // fallback clear for paths that never stream (refusal / invalid / abort)
       }
     },
     [e2e, conversationId, sendMessage, setMessages, transport],
@@ -116,10 +132,15 @@ export function ChatClient({
   // and hydrate the transport so resumeStream subscribes to the in-flight run instead of no-op'ing on an
   // empty session cache (006 P0). Prod only - E2E arrival streams via the mock's mount-time send.
   const attachOnArrival = useCallback(async () => {
-    const r = await mintChatToken(conversationId);
-    if (!r.ok) return;
-    transport.setSession(conversationId, { publicAccessToken: r.token, isStreaming: true });
-    await resumeStream();
+    setAwaiting(true); // indicator shows AT ONCE on arrival, through the mint + attach gap (server bubble already present)
+    try {
+      const r = await mintChatToken(conversationId);
+      if (!r.ok) return;
+      transport.setSession(conversationId, { publicAccessToken: r.token, isStreaming: true });
+      await resumeStream();
+    } finally {
+      setAwaiting(false);
+    }
   }, [conversationId, transport, resumeStream]);
 
   // AC-3 arrival: the landing question is already answered on this screen. E2E streams it via the mock
@@ -163,7 +184,10 @@ export function ChatClient({
   // `React.memo(AssistantMessage)` still bails on settled turns. See reconcileMessagesById.
   const view = useMemo(() => reconcileMessagesById(messages), [messages]);
 
-  const composerState: ComposerState = isStreaming(status) ? "streaming" : "default";
+  // `pending` = streaming OR the pre-stream run-wake gap. Drives BOTH the composer streaming state and
+  // the MessageList answering indicator off one flag, so the indicator + Stop stay in lockstep.
+  const pending = isStreaming(status) || awaiting;
+  const composerState: ComposerState = pending ? "streaming" : "default";
 
   return (
     <div className="app" style={{ height: "100vh" }}>
@@ -174,7 +198,7 @@ export function ChatClient({
           <div className="thread-scroll">
             <MessageList
               messages={view}
-              status={status}
+              pending={pending}
               usedFollowups={used}
               onFollowup={onFollowup}
               onRetry={onRetry}

@@ -759,6 +759,41 @@ a:hover {
   );
 }
 
+/* answering indicator (streaming wait state - typing dots in an ai bubble; replaces the hollow
+   skeleton card on the streaming path, 006 ruling). Reuses .bubble.ai; the dots bounce via a minimal
+   keyframe (no dot animation existed in the ported system). */
+.bubble.ai.answering {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 14px 16px;
+}
+.answering-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  animation: answering-bounce 1.4s infinite ease-in-out both;
+}
+.answering-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.answering-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes answering-bounce {
+  0%,
+  70%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
 /* error card */
 .err-card {
   display: flex;

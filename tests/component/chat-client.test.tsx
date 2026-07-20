@@ -109,6 +109,31 @@ test("follow-up send: the action's session token hydrates the transport BEFORE t
   expect(setSessionMock.mock.invocationCallOrder[0]).toBeLessThan(sendMessagesMock.mock.invocationCallOrder[0]);
 });
 
+test("instant feedback: the answering indicator + Stop show AT ONCE on send, through the run-wake gap before the run streams (006 ruling 1)", async () => {
+  // Hold the sendMessage action unresolved: the window between hitting send and the run producing output
+  // (the ~6s run-wake gap). During it the SDK has not moved status off "ready" yet, so the ONLY thing
+  // that can give instant feedback is the local awaiting bridge.
+  let release: (v: unknown) => void = () => {};
+  sendMessageMock.mockReturnValue(new Promise((res) => { release = res; }));
+  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+
+  const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
+  fireEvent.change(box, { target: { value: "Top companies?" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+
+  // Instant: the animated indicator is up and the composer is in its streaming state (Stop control) -
+  // never a hollow skeleton card - even though no stream chunk has arrived and the action is still pending.
+  expect(await screen.findByRole("status", { name: "Answering" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+  expect(document.querySelector(".insight")).toBeNull();
+  expect(document.querySelector(".skeleton")).toBeNull();
+
+  // Let it settle (a cap refusal ends the turn without streaming) so the bridge clears cleanly.
+  release({ ok: false, reason: "guest_cap" });
+  await screen.findByText(/reached the guest message limit/i);
+  expect(screen.queryByRole("status", { name: "Answering" })).toBeNull();
+});
+
 test("arrival: a new chat mints its session token and hydrates the transport so the first run streams on mount (AC-3)", async () => {
   mintChatTokenMock.mockResolvedValue({ ok: true, token: "tok-arrival" });
   const initial: UIMessage[] = [{ id: "u1", role: "user", parts: [{ type: "text", text: "Which companies are hiring the most?" }] }];
