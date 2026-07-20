@@ -27,9 +27,17 @@ function authPoolConfig(raw: string | undefined) {
   return { connectionString: u.toString(), ssl };
 }
 
+// Cache the pool on globalThis so Next.js dev HMR reuses ONE pool instead of leaking a fresh
+// `new Pool` (up to 10 connections each) on every module reload - which exhausts the Managed
+// Postgres connection limit and surfaces as intermittent CONNECT_TIMEOUT / read ETIMEDOUT.
+const globalForAuthPool = globalThis as unknown as { __jobchatAuthPool?: Pool };
+const authPool =
+  globalForAuthPool.__jobchatAuthPool ?? new Pool(authPoolConfig(process.env.DATABASE_URL));
+if (process.env.NODE_ENV !== "production") globalForAuthPool.__jobchatAuthPool = authPool;
+
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL,
-  database: new Pool(authPoolConfig(process.env.DATABASE_URL)),
+  database: authPool,
   emailAndPassword: { enabled: true },
   // Account linking: a user who signed up with email/password may later sign in with Google using
   // the SAME email. Better Auth refuses this by default (anti-takeover). Google verifies its emails,

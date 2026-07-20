@@ -33,10 +33,12 @@ import type { jobChatAgent } from "../../trigger/chat";
 const GUEST_COOKIE = "jobchat_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 
-// One lazy Postgres pool for the server process (no connection until first query).
-let sqlSingleton: Sql | undefined;
+// One lazy Postgres pool cached on globalThis (shared key with server-store.ts) so Next.js dev HMR
+// reuses ONE client instead of leaking a fresh pool per module reload (which exhausts the Managed
+// Postgres connection limit -> intermittent CONNECT_TIMEOUT / read ETIMEDOUT). See auth.ts.
+const globalForSql = globalThis as unknown as { __jobchatSql?: Sql };
 function sql(): Sql {
-  return (sqlSingleton ??= postgres(process.env.DATABASE_URL!));
+  return (globalForSql.__jobchatSql ??= postgres(process.env.DATABASE_URL!));
 }
 
 // Start (or resume) the durable session and mint its browser token, server-side so the secret key

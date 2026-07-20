@@ -8,9 +8,11 @@ import { auth as authServer } from "@/lib/auth";
 // connection until first query, so the build passes with no .env), mirroring the actions layer. Kept
 // out of "use server" so a Server Component can await it directly during render; `server-only` makes a
 // stray client import a build error.
-let sqlSingleton: Sql | undefined;
+// Cache on globalThis (shared key with actions.ts) so Next.js dev HMR reuses ONE porsager client
+// instead of leaking a fresh pool per module reload - see the auth-pool note in auth.ts.
+const globalForSql = globalThis as unknown as { __jobchatSql?: Sql };
 function store(): Store {
-  return createStore((sqlSingleton ??= postgres(process.env.DATABASE_URL!)));
+  return createStore((globalForSql.__jobchatSql ??= postgres(process.env.DATABASE_URL!)));
 }
 
 const GUEST_COOKIE = "jobchat_guest";
