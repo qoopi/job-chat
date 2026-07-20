@@ -64,11 +64,13 @@ export function ChatClient({
   const [failed, setFailed] = useState<string | null>(null);
   // Auth is client-driven after mount: `signedIn`/`conversations` seed from the SSR resolve, then an
   // in-page sign-in / sign-out flips them (the sidebar updates without a full-page refresh). `dialogOpen`
-  // comes from the shared open-store (interaction-spec s6; one dialog at a time). `queuedDraft` is the
-  // blocked message held across the dialog for AC-11 auto-send.
+  // comes from the shared open-store (interaction-spec s6; one dialog at a time).
   const [signedIn, setSignedIn] = useState(signedInInitial);
   const [conversations, setConversations] = useState(conversationsInitial);
-  const [queuedDraft, setQueuedDraft] = useState<string | null>(null);
+  // AC-11 queued draft: the blocked message held across the dialog for auto-send. It is never rendered,
+  // so it lives in a ref (not state) - that makes the read-then-clear in `onAuthSuccess` synchronous, so
+  // a double-fired `onSuccess` sees `null` on the second pass and cannot double-send (take-once).
+  const queuedDraftRef = useRef<string | null>(null);
   const dialogOpen = useAuthDialogOpen();
   // Instant "answering" feedback (006 ruling): set the moment a turn is sent or the arrival attach
   // begins, so the indicator + streaming composer appear AT ONCE and bridge the run-wake gap before the
@@ -118,7 +120,7 @@ export function ChatClient({
               // auto-send on sign-in. A signed-in cap (or the post-sign-in re-send) just shows the notice
               // and keeps the draft - there is no sign-in remedy.
               if (r.reason === "guest_cap" && !signedIn && !opts?.fromAuth) {
-                setQueuedDraft(text);
+                queuedDraftRef.current = text;
                 openAuthDialog();
               }
               return;
@@ -216,8 +218,10 @@ export function ChatClient({
   const onAuthSuccess = useCallback(async () => {
     closeAuthDialog();
     setSignedIn(true);
-    const q = queuedDraft;
-    setQueuedDraft(null);
+    // Take-once: read-and-clear the ref synchronously so a double-fired `onSuccess` (or a re-render
+    // mid-send) sees `null` on the second pass - the queued draft auto-sends exactly once, never twice.
+    const q = queuedDraftRef.current;
+    queuedDraftRef.current = null;
     if (q) {
       setDraft("");
       await send(q, { fromAuth: true });
@@ -227,7 +231,7 @@ export function ChatClient({
     } catch {
       /* keep the prior list on a transient list failure */
     }
-  }, [queuedDraft, send]);
+  }, [send]);
 
   // Sign out: drop the Better Auth session and return the sidebar to its guest state.
   const onSignOut = useCallback(async () => {
