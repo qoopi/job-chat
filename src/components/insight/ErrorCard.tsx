@@ -15,7 +15,18 @@ export function ErrorCard({ kind, onRetry }: { kind: ErrorKind; onRetry?: () => 
   );
 }
 
-// AC-15/AC-20 refusal: a polite limit notice (not an error card) shown until the auth dialog exists.
-export function RefusalNotice({ reason }: { reason: RefusalReason }) {
-  return <div className="notice">{refusalCopy(reason)}</div>;
+// AC-13/AC-15/AC-20 refusal: a polite limit notice (not an error card). At the GUEST cap it carries a
+// sign-in affordance (interaction-spec s6 - no silent refusal); `onSignIn` opens the lazy auth dialog.
+// A signed-in cap / daily budget / too-long refusal renders the copy alone (no sign-in remedy).
+export function RefusalNotice({ reason, onSignIn }: { reason: RefusalReason; onSignIn?: () => void }) {
+  return (
+    <div className="notice">
+      {refusalCopy(reason)}
+      {onSignIn && reason === "guest_cap" ? (
+        <button className="btn btn-shell btn-sm" type="button" onClick={onSignIn}>
+          Sign in
+        </button>
+      ) : null}
+    </div>
+  );
 }

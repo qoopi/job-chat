@@ -19,7 +19,7 @@ export function errorCopy(kind: ErrorKind): string {
 /** AC-15/AC-20: a polite limit notice (not an error) shown until the auth dialog exists. `too_long`
  *  is the agent-run input-size backstop (a payload past MAX_INPUT_CHARS reaching `.in` directly). */
 export function refusalCopy(reason: RefusalReason): string {
-  if (reason === "guest_cap") return "You have reached the guest message limit. Sign in soon to keep going.";
+  if (reason === "guest_cap") return "You have reached the guest message limit. Sign in to keep going.";
   if (reason === "too_long") return "That message is too long. Please shorten it and try again.";
   return "The service has reached today's message limit. Try again tomorrow.";
 }

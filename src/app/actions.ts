@@ -4,7 +4,7 @@ import { cookies, headers } from "next/headers";
 import postgres, { type Sql } from "postgres";
 import { auth, sessions } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
-import { createStore } from "@shared/store";
+import { createStore, type Conversation } from "@shared/store";
 import { getGuardConfig } from "@shared/env";
 import { isE2E } from "@/lib/e2e";
 import { auth as authServer } from "@/lib/auth";
@@ -155,4 +155,33 @@ export async function mintChatToken(conversationId: string): Promise<MintResult>
   const identity = await resolveCaller();
   if (!identity) return { ok: false, reason: "not_found" };
   return service().mintChatToken(conversationId, identity.userId);
+}
+
+/**
+ * The sign-in TRANSITION (AC-11, decision-log ruling): called by the client the moment an in-page
+ * sign-in succeeds. Binds the fresh Better Auth session to the chat identity - `resolveIdentity` adopts
+ * the guest's conversations onto the account (idempotent, guarded at the store) - then clears the guest
+ * cookie so the per-request path stops seeing it and never re-adopts. A no-op when no verified session
+ * exists yet (or E2E). Adoption is bound to THIS transition, not to per-request resolution.
+ */
+export async function completeSignIn(): Promise<{ ok: boolean }> {
+  const authUserId = await currentAuthUserId();
+  if (!authUserId) return { ok: false };
+  const guestId = await guestIdFromCookie();
+  await resolveIdentity(createStore(sql()), { authUserId, guestId });
+  if (guestId) (await cookies()).delete(GUEST_COOKIE); // stop the per-request path from re-adopting
+  return { ok: true };
+}
+
+/**
+ * AC-12 (UI slice): the signed-in caller's conversations, newest first, for the sidebar history. The
+ * client refetches this after an in-page sign-in (the initial list is server-rendered by the chat
+ * page). Empty for a caller that owns nothing.
+ */
+export async function listMyConversations(): Promise<
+  Pick<Conversation, "id" | "title" | "created_at">[]
+> {
+  const identity = await resolveCaller();
+  if (!identity) return [];
+  return createStore(sql()).listConversations(identity.userId);
 }

@@ -895,6 +895,107 @@ a:hover {
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
+/* the sign-in affordance (AC-13) right-aligns after the polite copy */
+.notice .btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ---------- auth dialog (lazy - interaction-spec s6; ported from the handoff components.css) ---------- */
+/* backdrop: dims the page, centers the dialog, catches backdrop clicks (s6.5). Above the LCP + toast
+   (dialog > LCP > thread). rgba matches the mock (shell-strong at 38%). */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: rgba(24, 24, 27, 0.38);
+}
+.dialog {
+  width: 360px;
+  max-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.dialog h3 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.dialog .sub {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin: -8px 0 0;
+}
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field label {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.field input {
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  outline: 0;
+  background: var(--surface);
+  color: var(--text);
+}
+.field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.field.invalid input {
+  border-color: var(--danger);
+}
+.field-error {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+.dialog-note {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  text-align: center;
+}
+.dialog-note button {
+  font: inherit;
+  font-size: var(--fs-xs);
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
 
 /* ---------- data table ---------- */
 .data-table {

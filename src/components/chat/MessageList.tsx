@@ -27,12 +27,14 @@ const AssistantMessage = memo(function AssistantMessage({
   onFollowup,
   onRetry,
   onOpenLcp,
+  onSignIn,
 }: {
   message: UIMessage;
   usedFollowups: Set<string>;
   onFollowup: (cardId: string, text: string) => void;
   onRetry: () => void;
   onOpenLcp: (messageId: string, partId: string) => void;
+  onSignIn?: () => void;
 }) {
   const text = messageText(message);
   const cards = dataParts(message);
@@ -77,7 +79,7 @@ const AssistantMessage = memo(function AssistantMessage({
         if (cls.kind === "refusal") {
           return (
             <div key={id} className="msg ai">
-              <RefusalNotice reason={cls.reason} />
+              <RefusalNotice reason={cls.reason} onSignIn={onSignIn} />
             </div>
           );
         }
@@ -103,6 +105,7 @@ export function MessageList({
   onFollowup,
   onRetry,
   onOpenLcp,
+  onSignIn,
 }: {
   messages: UIMessage[];
   /** A turn is in flight and has yet to produce content - streaming OR the pre-stream run-wake gap. */
@@ -112,6 +115,8 @@ export function MessageList({
   onRetry: () => void;
   /** AC-8: open a table card's full body in the LCP, keyed by its message + part id. */
   onOpenLcp: (messageId: string, partId: string) => void;
+  /** AC-13: open the auth dialog from a guest cap notice. Absent (signed-in) hides the affordance. */
+  onSignIn?: () => void;
 }) {
   const last = messages[messages.length - 1];
   // AC-8 (006 ruling): the answering indicator stands in for the pending answer while the turn is in
@@ -136,6 +141,7 @@ export function MessageList({
             onFollowup={onFollowup}
             onRetry={onRetry}
             onOpenLcp={onOpenLcp}
+            onSignIn={onSignIn}
           />
         ),
       )}
