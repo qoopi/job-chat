@@ -3,11 +3,17 @@ import { LandingComposer } from "@/components/landing/LandingComposer";
 import { LandingSignIn } from "@/components/landing/LandingSignIn";
 import { GITHUB_URL, HACKATHON_URL, SEARCHNAPPLY_URL } from "@/lib/links";
 import { isE2E } from "@/lib/e2e";
+import { resolveViewer } from "@/lib/server-store";
 
 // Landing (mock 4b) - product in one shell-colored screen. The ask box + chips (LandingComposer) submit
 // the first message and hand off to the chat with the stream already attached (AC-3). AC-19: credit
 // links live here - the hackathon credit in the header, GitHub + searchnapply in the footer.
-export default function Landing() {
+// 017 fix round 2: the header is session-aware - the session is read server-side (resolveViewer) and
+// seeds LandingSignIn (signed-in shows the account + "Open chat" + Sign out; guest shows Sign in). Skipped
+// under E2E (no Postgres/auth session there), where the landing is always the guest surface.
+export default async function Landing() {
+  const e2e = isE2E();
+  const viewer = e2e ? null : await resolveViewer();
   return (
     <div
       style={{
@@ -41,7 +47,7 @@ export default function Landing() {
             &times; <span style={{ color: "var(--triggerdev)", fontWeight: 600 }}>Trigger.dev</span> hackathon
           </a>
         </div>
-        <LandingSignIn />
+        <LandingSignIn signedIn={viewer?.signedIn ?? false} accountName={viewer?.accountName ?? undefined} />
       </header>
 
       {/* hero */}
@@ -73,7 +79,7 @@ export default function Landing() {
           Ask a question, get a verdict with a chart — from 3,483 live postings. Add your resume
           and it finds the roles that fit you.
         </p>
-        <LandingComposer e2e={isE2E()} />
+        <LandingComposer e2e={e2e} />
       </main>
 
       {/* footer credits: GitHub + searchnapply */}

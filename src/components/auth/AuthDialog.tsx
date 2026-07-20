@@ -30,7 +30,11 @@ function googleErrorMessage(code: string): string {
   }
 }
 
-export function AuthDialog({ onClose }: { onClose: () => void }) {
+// `next` is the post-sign-in destination the HOST decides (017 fix round 2): the landing host passes
+// `/chat/new` (sign-in takes the user INTO the app), a chat host passes its own conversation path (sign-in
+// returns to that chat). It flows through /auth/complete's resolve-then-compare-origin safeNext guard, so
+// it must stay a same-origin path. Falls back to the current page for any host that omits it.
+export function AuthDialog({ onClose, next }: { onClose: () => void; next?: string }) {
   // Seed the error from a Google redirect's `?error=<code>` (Better Auth's errorCallbackURL bounced the
   // browser back here). Read in the initializer, not an effect: the dialog only ever mounts client-side
   // (dialogOpen is false on the server), so `window` is defined and there is no SSR flash. The param is
@@ -103,12 +107,13 @@ export function AuthDialog({ onClose }: { onClose: () => void }) {
     setLoading(true);
     try {
       // Full-page CLIENT-initiated redirect (gold standard s2.3). STABLE callbackURL (a fixed route, not
-      // window.location.href) that finalizes the sign-in and lands the user back where they started
-      // (`next`); errorCallbackURL returns to THIS page so the ?error handler above can show what failed.
-      const next = window.location.pathname + window.location.search;
+      // window.location.href) that finalizes the sign-in and lands the user on the HOST-decided `next`
+      // (landing -> /chat/new; a chat -> that chat); errorCallbackURL returns to THIS page so the ?error
+      // handler above can show what failed. Fall back to the current page when a host omits `next`.
+      const dest = next ?? window.location.pathname + window.location.search;
       await authClient.signIn.social({
         provider: "google",
-        callbackURL: `/auth/complete?next=${encodeURIComponent(next)}`,
+        callbackURL: `/auth/complete?next=${encodeURIComponent(dest)}`,
         errorCallbackURL: window.location.pathname,
       });
     } catch {

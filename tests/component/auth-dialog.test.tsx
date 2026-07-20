@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { AuthDialog } from "@/components/auth/AuthDialog";
 import type { UIMessage } from "ai";
 import type { DataInsight } from "@shared/insight";
-import { closeAuthDialog } from "@/lib/auth-dialog";
+import { closeAuthDialog, openAuthDialog } from "@/lib/auth-dialog";
 import { setAuthDialogOpen } from "@/lib/layers";
 
 // 017: Google-ONLY sign-in (email/password removed). The lazy auth dialog opens on a Sign-in tap AND at
@@ -102,6 +102,34 @@ describe("google-only auth dialog (017)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
     expect(signInSocialMock).toHaveBeenCalledTimes(1);
     expect(signInSocialMock.mock.calls[0][0]).toMatchObject({ provider: "google" });
+  });
+});
+
+// 017 fix round 2 (must-fix 1): the HOST decides the post-sign-in destination it hands /auth/complete.
+// A landing-initiated sign-in lands the user INSIDE the app (`/chat/new`), not back on the marketing "/";
+// a chat-initiated sign-in keeps returning to that same conversation. Both `next` values still flow
+// through the route's resolve-then-compare-origin safeNext guard (a same-origin leading-slash path).
+describe("post-sign-in destination decided by the host (017 fix round 2)", () => {
+  test("Should_LandInChatNew_When_SignInStartedFromLanding", async () => {
+    render(<LandingComposer e2e={false} />);
+    act(() => openAuthDialog()); // the landing header / composer opens the shared dialog
+    fireEvent.click(await screen.findByRole("button", { name: /Continue with Google/i }));
+
+    expect(signInSocialMock).toHaveBeenCalledTimes(1);
+    expect((signInSocialMock.mock.calls[0][0] as { callbackURL: string }).callbackURL).toBe(
+      `/auth/complete?next=${encodeURIComponent("/chat/new")}`,
+    );
+  });
+
+  test("Should_ReturnToCurrentChat_When_SignInStartedFromAChat", () => {
+    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    clickSidebarSignIn();
+    fireEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
+
+    expect(signInSocialMock).toHaveBeenCalledTimes(1);
+    expect((signInSocialMock.mock.calls[0][0] as { callbackURL: string }).callbackURL).toBe(
+      `/auth/complete?next=${encodeURIComponent(`/chat/${CONVERSATION_ID}`)}`,
+    );
   });
 });
 

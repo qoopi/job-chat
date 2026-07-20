@@ -42,6 +42,7 @@ export function ChatClient({
   initialMessages,
   pendingQuestion,
   autoStream = false,
+  newChat = false,
   e2e = false,
   signedIn: signedInInitial = false,
   accountName: accountNameInitial,
@@ -52,6 +53,9 @@ export function ChatClient({
   initialMessages: UIMessage[];
   pendingQuestion?: string;
   autoStream?: boolean;
+  /** 017: a fresh chat shell (`/chat/new`) - no thread to resume; the first send starts a new conversation
+   *  (arms `freshChatRef`). The landing-initiated sign-in's destination. */
+  newChat?: boolean;
   e2e?: boolean;
   /** AC-12/AC-13: SSR-resolved sign-in state + the account's history (empty for a guest). Client state
    *  takes over after an in-page sign-in / sign-out (no full-page refresh needed). */
@@ -73,8 +77,9 @@ export function ChatClient({
   const [titleState, setTitleState] = useState(title);
   // AC-19 New chat in place: after a client-side reset, the NEXT message starts a brand-new conversation
   // (the landing handoff), not a follow-up on the reset thread. This ref arms that first send. A ref (not
-  // state) because it only steers the imperative send path - it never needs to re-render.
-  const freshChatRef = useRef(false);
+  // state) because it only steers the imperative send path - it never needs to re-render. Seeded from
+  // `newChat` so a `/chat/new` shell (017) is armed from mount - its first send creates the conversation.
+  const freshChatRef = useRef(newChat);
   // AC-19: bumped on New chat to move focus to the composer (Composer watches this).
   const [focusNonce, setFocusNonce] = useState(0);
   const [used, setUsed] = useState<Set<string>>(new Set());
@@ -464,8 +469,9 @@ export function ChatClient({
           </button>
         </div>
       ) : null}
-      {/* Topmost layer (interaction-spec "Priority of layers": auth dialog > LCP > thread). */}
-      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} /> : null}
+      {/* Topmost layer (interaction-spec "Priority of layers": auth dialog > LCP > thread). Sign-in from
+          inside a chat returns to THIS conversation (017 fix round 2). */}
+      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} next={`/chat/${conversationId}`} /> : null}
     </div>
   );
 }

@@ -25,7 +25,11 @@ export default async function ChatPage({
   searchParams: Promise<{ new?: string; q?: string }>;
 }) {
   const { id } = await params;
-  if (!ConversationIdSchema.safeParse(id).success) notFound();
+  // `/chat/new` (017 fix round 2): a fresh chat shell, NOT a stored conversation - the landing-initiated
+  // sign-in's destination. It bypasses the UUID gate (nothing to resume), still seeds the signed-in
+  // account's history, and arms ChatClient to start a new conversation on the first send.
+  const isNewChat = id === "new";
+  if (!isNewChat && !ConversationIdSchema.safeParse(id).success) notFound();
   const { new: isNew, q } = await searchParams;
   const e2e = isE2E();
 
@@ -37,8 +41,9 @@ export default async function ChatPage({
   let accountName: string | undefined;
 
   if (e2e) {
-    // No Postgres in the automated suite: resume from the fixture, or carry the landing question in.
-    const fixture = e2eFixtureThread(id);
+    // No Postgres in the automated suite: resume from the fixture, or carry the landing question in. A
+    // fresh shell resumes nothing (no fixture lookup for "new").
+    const fixture = isNewChat ? undefined : e2eFixtureThread(id);
     if (fixture) {
       title = fixture.title;
       initialMessages = storeToUiMessages(fixture.messages);
@@ -47,12 +52,15 @@ export default async function ChatPage({
     }
   } else {
     const viewer = await resolveViewer();
-    const loaded = await loadConversation(id);
-    // Hydrate only when the caller owns the conversation (guest cookie or signed-in account) - defense
-    // in depth beyond the token's ownership check; fail-closed for a non-owner (empty thread).
-    if (loaded && viewer.ownerIds.includes(loaded.conversation.user_id)) {
-      title = loaded.conversation.title;
-      initialMessages = storeToUiMessages(loaded.messages);
+    // A fresh shell has no thread to load - only the account context (sign-in state + history).
+    if (!isNewChat) {
+      const loaded = await loadConversation(id);
+      // Hydrate only when the caller owns the conversation (guest cookie or signed-in account) - defense
+      // in depth beyond the token's ownership check; fail-closed for a non-owner (empty thread).
+      if (loaded && viewer.ownerIds.includes(loaded.conversation.user_id)) {
+        title = loaded.conversation.title;
+        initialMessages = storeToUiMessages(loaded.messages);
+      }
     }
     signedIn = viewer.signedIn;
     accountName = viewer.accountName ?? undefined;
@@ -65,7 +73,8 @@ export default async function ChatPage({
       title={title}
       initialMessages={initialMessages}
       pendingQuestion={pendingQuestion}
-      autoStream={isNew === "1"}
+      autoStream={!isNewChat && isNew === "1"}
+      newChat={isNewChat}
       e2e={e2e}
       signedIn={signedIn}
       accountName={accountName}

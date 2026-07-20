@@ -120,7 +120,8 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
           </button>
         ))}
       </div>
-      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} /> : null}
+      {/* Landing-initiated sign-in lands the user INSIDE the app (a fresh chat shell), not back on "/". */}
+      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} next="/chat/new" /> : null}
     </>
   );
 }

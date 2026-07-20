@@ -138,4 +138,37 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
 
     expect(listOwnerConversationsMock).not.toHaveBeenCalled();
   });
+
+  // 017 fix round 2 (must-fix 1): `/chat/new` is the landing-initiated sign-in's destination - a FRESH
+  // chat shell (armed to start a new conversation on the first send), NOT a stored-conversation resume and
+  // NOT a 404. "new" bypasses the UUID gate: nothing is loaded, but the signed-in account's history still
+  // seeds the sidebar so the user lands "into the app".
+  it("Should_RenderFreshShell_When_IdIsNew", async () => {
+    resolveViewerMock.mockResolvedValue(
+      viewer({ signedIn: true, ownerIds: ["account-1"], accountUserId: "account-1", accountName: "Ada" }),
+    );
+    listOwnerConversationsMock.mockResolvedValue([
+      { id: CONVERSATION_ID, title: "A thread", created_at: new Date() },
+    ]);
+
+    const element = (await ChatPage({
+      params: Promise.resolve({ id: "new" }),
+      searchParams: Promise.resolve({}),
+    })) as unknown as {
+      props: {
+        newChat?: boolean;
+        initialMessages: unknown[];
+        conversations: unknown[];
+        signedIn: boolean;
+        autoStream: boolean;
+      };
+    };
+
+    expect(element.props.newChat).toBe(true); // armed as a fresh chat shell
+    expect(element.props.initialMessages).toEqual([]); // nothing resumed
+    expect(element.props.autoStream).toBe(false); // no arrival auto-stream on a fresh shell
+    expect(loadConversationMock).not.toHaveBeenCalled(); // "new" is not a stored id - never queried
+    expect(element.props.conversations).toHaveLength(1); // history still seeded for the signed-in account
+    expect(element.props.signedIn).toBe(true);
+  });
 });
