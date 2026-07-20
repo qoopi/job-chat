@@ -389,12 +389,21 @@ describe("Should_FallBackToFitChartType_When_RawPickUnfit (chartTypeForShape, AC
     expect(chartTypeForShape({ dimensions: ["title"] }, "bars", 20)).toBe("bars");
   });
 
-  it("honors a donut pick only for a readable share-of-whole (<= 6 slices)", () => {
-    expect(chartTypeForShape({ dimensions: ["experience_level"] }, "donut", 4)).toBe("donut");
-    expect(chartTypeForShape({ dimensions: ["location_kind"] }, "donut", 6)).toBe("donut");
+  it("honors a donut pick only for a readable share-of-whole (<= 6 slices) of a COUNT measure", () => {
+    expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["count"] }, "donut", 4)).toBe("donut");
+    expect(chartTypeForShape({ dimensions: ["location_kind"], measures: ["count"] }, "donut", 6)).toBe("donut");
     // > 6 slices: a donut is unreadable, so the unfit pick is corrected to bars.
-    expect(chartTypeForShape({ dimensions: ["company"] }, "donut", 7)).toBe("bars");
-    expect(chartTypeForShape({ dimensions: ["company"] }, "donut", 12)).toBe("bars");
+    expect(chartTypeForShape({ dimensions: ["company"], measures: ["count"] }, "donut", 7)).toBe("bars");
+    expect(chartTypeForShape({ dimensions: ["company"], measures: ["count"] }, "donut", 12)).toBe("bars");
+  });
+
+  // Ruling 29 (2026-07-21): a donut is a share of a whole, meaningful only for a COUNT/share measure.
+  // A single-dimension NON-count result (median/p25/p75) NEVER renders as a donut - it falls back to
+  // bars even at <= 6 slices. A 2-measure result (count + a salary) is not a pure share either -> bars.
+  it("restricts donut to a count measure - a non-count share-of-whole falls back to bars (ruling 29)", () => {
+    expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["median_salary"] }, "donut", 4)).toBe("bars");
+    expect(chartTypeForShape({ dimensions: ["location_kind"], measures: ["p25_salary"] }, "donut", 3)).toBe("bars");
+    expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["count", "median_salary"] }, "donut", 4)).toBe("bars");
   });
 
   it("corrects an unfit pick on a single-dimension shape to bars", () => {

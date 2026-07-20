@@ -48,10 +48,10 @@ export function InsightCard({
   const [sqlOpen, setSqlOpen] = useState(false);
 
   const rows = isChart ? insight.series : insight.rows;
-  // AC-8: a table insight over the row threshold renders as a 5-row preview + an "Open full table"
-  // affordance; the LCP shows the full body. Charts always render in-chat (the rule is table-only), so
-  // a chart's Table tab keeps showing every row.
-  const previewTable = !isChart && tablePlacement(rows) === "lcp";
+  // AC-8 + Ruling 27: any table VIEW over the row threshold renders as a 5-row preview + an "Open full
+  // table" affordance that opens the full body in the LCP - a table insight AND a chart card's Table tab
+  // (one rule for every table view). A chart's Chart tab is unaffected (it renders the chart, not rows).
+  const previewTable = tab === "table" && tablePlacement(rows) === "lcp";
   // Suppress the whole source line on an empty (sampleN 0) result: no "0 postings", no epoch freshness.
   // A real answer always has sampleN > 0; this is defensive - an empty result now renders no card at all.
   const showSource = insight.meta.sampleN > 0;

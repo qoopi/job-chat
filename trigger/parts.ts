@@ -53,12 +53,14 @@ export interface ComposedShape {
  * chartType (the RAW pick, recorded by the tool BEFORE this runs); this returns the SERVED type: the
  * pick when it fits the data shape, else the shape's fit type. Shapes: a time bucket is a trend; a
  * single categorical dimension is a comparison (bars), or a share-of-whole donut when the agent asked
- * for one AND it stays readable (<= DONUT_MAX_SLICES slices); two grouping keys (2 dims, or a dim + a
- * bucket) or a bare aggregate are an entity-ish table. No histogram branch - the value-bucket histogram
- * shape is unreachable in the composed param space (v1 salary_distribution owns it).
+ * for one AND it is a COUNT measure (ruling 29 - a donut is a share of a whole, meaningful only for a
+ * count; median/p25/p75 are never a donut) AND it stays readable (<= DONUT_MAX_SLICES slices); two
+ * grouping keys (2 dims, or a dim + a bucket) or a bare aggregate are an entity-ish table. No histogram
+ * branch - the value-bucket histogram shape is unreachable in the composed param space (v1
+ * salary_distribution owns it).
  */
 export function chartTypeForShape(
-  shape: { dimensions?: readonly string[]; bucket?: string },
+  shape: { dimensions?: readonly string[]; bucket?: string; measures?: readonly string[] },
   rawPick: ChartType | "table",
   rowCount: number,
 ): ChartType | "table" {
@@ -66,7 +68,12 @@ export function chartTypeForShape(
   const keys = dims + (shape.bucket ? 1 : 0);
   if (keys >= 2) return "table"; // a cross-tab / entity-ish result
   if (shape.bucket) return "trend"; // exactly one grouping key, the time bucket
-  if (dims === 1) return rawPick === "donut" && rowCount <= DONUT_MAX_SLICES ? "donut" : "bars";
+  if (dims === 1) {
+    // Ruling 29: a donut only for a single COUNT measure (a true share of a whole); any salary measure
+    // (or a 2-measure result) falls back to bars, as does an unreadable count donut beyond the slice cap.
+    const countShare = shape.measures?.length === 1 && shape.measures[0] === "count";
+    return rawPick === "donut" && countShare && rowCount <= DONUT_MAX_SLICES ? "donut" : "bars";
+  }
   return "table"; // no grouping key: a single-row aggregate
 }
 
