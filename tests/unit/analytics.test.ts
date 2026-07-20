@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTemplateSql } from "@shared/analytics";
+import { buildComposedSql, buildTemplateSql } from "@shared/analytics";
 
 describe("buildTemplateSql", () => {
   it("interpolates salary_compare cities + role and uses quantileExact over FINAL", () => {
@@ -89,6 +89,216 @@ describe("buildTemplateSql", () => {
   it("defaults latest_postings limit to 20 and honors the injected table name", () => {
     expect(buildTemplateSql("latest_postings", {}, "postings").sql).toContain("LIMIT 20");
     expect(buildTemplateSql("top_companies", {}, "postings_test").sql).toContain(
+      "FROM postings_test FINAL",
+    );
+  });
+
+  // Task 008: country is a chStr-equality filter on the two v1 templates the composed builder cannot
+  // serve (latest_postings is an entity list; salary_distribution is the v1-only histogram shape).
+  it("adds a country equality filter to latest_postings (same shape as city)", () => {
+    const { sql } = buildTemplateSql("latest_postings", { country: "United States" }, "postings");
+    expect(sql).toContain("country = 'United States'");
+  });
+
+  it("adds a country equality filter to salary_distribution", () => {
+    const { sql } = buildTemplateSql("salary_distribution", { country: "Germany" }, "postings");
+    expect(sql).toContain("country = 'Germany'");
+  });
+
+  it("escapes a quote in the country filter (no literal break-out)", () => {
+    const { sql } = buildTemplateSql("latest_postings", { country: "Cote d'Ivoire" }, "postings");
+    expect(sql).toContain("country = 'Cote d\\'Ivoire'");
+  });
+});
+
+describe("Should_ApplyOpenSetPredicate_When_CurrentStateRead (AC-3)", () => {
+  const PREDICATE = "ingested_at = (SELECT max(ingested_at) FROM postings)";
+
+  // The five non-trend templates read the open set (latest ingest snapshot) by default.
+  it.each([
+    ["salary_distribution", {}],
+    ["salary_compare", { cities: ["San Francisco", "Los Angeles"] }],
+    ["top_companies", {}],
+    ["share_split", { dimension: "experience" }],
+    ["latest_postings", {}],
+  ] as const)("applies the predicate to %s (current-state template)", (name, params) => {
+    expect(buildTemplateSql(name, params, "postings").sql).toContain(PREDICATE);
+  });
+
+  it("applies the predicate to a bare composed query (no days window)", () => {
+    expect(buildComposedSql({ measures: ["count"], dimensions: ["company"] }, "postings").sql).toContain(
+      PREDICATE,
+    );
+  });
+
+  // A trend / any days-windowed read keeps full history - closed postings are legitimate history.
+  it("does NOT apply the predicate to postings_trend", () => {
+    expect(buildTemplateSql("postings_trend", { days: 7 }, "postings").sql).not.toContain("ingested_at =");
+  });
+
+  it("does NOT apply the predicate to days-windowed top_companies", () => {
+    expect(buildTemplateSql("top_companies", { days: 30 }, "postings").sql).not.toContain("ingested_at =");
+  });
+
+  it("does NOT apply the predicate to a days-windowed composed query", () => {
+    expect(
+      buildComposedSql({ measures: ["count"], dimensions: ["company"], days: 30 }, "postings").sql,
+    ).not.toContain("ingested_at =");
+  });
+
+  // The predicate must live in the shared WHERE so the sampleN/freshestAt meta query counts the same set.
+  it("carries the predicate in the returned `where` (so the meta query counts the open set)", () => {
+    expect(buildTemplateSql("top_companies", {}, "postings").where).toContain(PREDICATE);
+    expect(buildComposedSql({ measures: ["count"] }, "postings").where).toContain(PREDICATE);
+  });
+
+  // The BuiltQuery.openSet flag is what runQuery/runComposedQuery thread into meta.openSet.
+  it("flags openSet true for current-state reads and false for windowed reads", () => {
+    expect(buildTemplateSql("top_companies", {}, "postings").openSet).toBe(true);
+    expect(buildTemplateSql("top_companies", { days: 30 }, "postings").openSet).toBe(false);
+    expect(buildTemplateSql("postings_trend", { days: 7 }, "postings").openSet).toBe(false);
+    expect(buildComposedSql({ measures: ["count"] }, "postings").openSet).toBe(true);
+    expect(buildComposedSql({ measures: ["count"], days: 7 }, "postings").openSet).toBe(false);
+  });
+});
+
+describe("Should_RejectUnknownParams_When_ComposedQueryBuilt (AC-2)", () => {
+  it.each([
+    ["unknown measure", { measures: ["avg_salary"] }],
+    ["unknown dimension", { measures: ["count"], dimensions: ["salary"] }],
+    ["unknown filter key", { measures: ["count"], bogus: 1 }],
+    ["unknown time bucket", { measures: ["count"], bucket: "hour" }],
+    ["zero measures", { measures: [] }],
+    ["three measures", { measures: ["count", "median_salary", "p25_salary"] }],
+    ["three dimensions", { measures: ["count"], dimensions: ["company", "city", "region"] }],
+    ["limit above 50", { measures: ["count"], limit: 51 }],
+    ["duplicate dimension", { measures: ["count"], dimensions: ["company", "company"] }],
+    ["invalid location_kind", { measures: ["count"], location_kind: "office" }],
+  ])("rejects %s before any query is built", (_label, params) => {
+    expect(() => buildComposedSql(params, "postings")).toThrow();
+  });
+
+  it("rejects a sort key that is not a selected measure or dimension", () => {
+    expect(() =>
+      buildComposedSql(
+        { measures: ["count"], dimensions: ["company"], sort: { by: "city", dir: "asc" } },
+        "postings",
+      ),
+    ).toThrow();
+  });
+
+  // Injection-style free-text is ACCEPTED (a valid string) but escaped in the emitted SQL - the same
+  // chStr/likeEscape contract the templates hold. It must stay inert, not be rejected.
+  it("escapes injection strings in a free-text filter rather than rejecting them", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], dimensions: ["company"], company: "x' OR '1'='1" },
+      "postings",
+    );
+    expect(sql).toContain("company ILIKE '%x\\' OR \\'1\\'=\\'1%'");
+  });
+
+  it("escapes a bare city equality break-out attempt", () => {
+    const { sql } = buildComposedSql({ measures: ["count"], city: "trail\\" }, "postings");
+    expect(sql).toContain("city = 'trail\\\\'");
+  });
+});
+
+describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
+  // Canonical shape locked exactly: count by company, open-set, deterministic order (mirrors top_companies).
+  it("count by company -> grouped, open-set, measure-desc then dimension-asc", () => {
+    const { sql } = buildComposedSql({ measures: ["count"], dimensions: ["company"] }, "postings");
+    expect(sql).toBe(
+      [
+        "SELECT",
+        "  company,",
+        "  count() AS count",
+        "FROM postings FINAL",
+        "WHERE ingested_at = (SELECT max(ingested_at) FROM postings)",
+        "GROUP BY company",
+        "ORDER BY count DESC, company ASC",
+        "LIMIT 20",
+      ].join("\n"),
+    );
+  });
+
+  // A single overall aggregate (no dimensions, no bucket) - no GROUP BY, still deterministic.
+  it("a single measure with no dimensions omits GROUP BY", () => {
+    const { sql } = buildComposedSql({ measures: ["count"] }, "postings");
+    expect(sql).not.toContain("GROUP BY");
+    expect(sql).toContain("count() AS count");
+    expect(sql).toContain("ORDER BY count DESC");
+  });
+
+  // "median salary by experience level" (AC-1 example): salary measure implies the NOT NULL filter.
+  it("median_salary by experience_level implies the NOT NULL salary filter", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["median_salary"], dimensions: ["experience_level"] },
+      "postings",
+    );
+    expect(sql).toContain("salary_min IS NOT NULL");
+    expect(sql).toContain("salary_max IS NOT NULL");
+    expect(sql).toContain("round(quantileExact(0.5)((salary_min + salary_max) / 2)) AS median_salary");
+    expect(sql).toContain("GROUP BY experience_level");
+    expect(sql).toContain("ORDER BY median_salary DESC, experience_level ASC");
+  });
+
+  it("p25/p75 salary measures map to their quantiles", () => {
+    const { sql } = buildComposedSql({ measures: ["p25_salary", "p75_salary"] }, "postings");
+    expect(sql).toContain("round(quantileExact(0.25)((salary_min + salary_max) / 2)) AS p25_salary");
+    expect(sql).toContain("round(quantileExact(0.75)((salary_min + salary_max) / 2)) AS p75_salary");
+  });
+
+  // "top companies in the US" (AC-1 example): a country filter alongside a company dimension.
+  it("count by company filtered to a country", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], dimensions: ["company"], country: "United States" },
+      "postings",
+    );
+    expect(sql).toContain("country = 'United States'");
+    expect(sql).toContain("GROUP BY company");
+  });
+
+  // A time bucket is a GROUP BY expression aliased `bucket` for stable Recharts keys, ordered chronologically.
+  it("a time bucket groups + orders by the bucket expression, aliased bucket", () => {
+    const { sql } = buildComposedSql({ measures: ["count"], bucket: "week" }, "postings");
+    expect(sql).toContain("toStartOfWeek(published_at) AS bucket");
+    expect(sql).toContain("GROUP BY toStartOfWeek(published_at)");
+    expect(sql).toContain("ORDER BY toStartOfWeek(published_at) ASC");
+  });
+
+  // location_kind (Enum8) is toString'd so it serializes/orders by name, and grouped by the raw
+  // expression so the `location_kind` alias never shadows the column.
+  it("a location_kind dimension is toString'd and grouped by the raw expression", () => {
+    const { sql } = buildComposedSql({ measures: ["count"], dimensions: ["location_kind"] }, "postings");
+    expect(sql).toContain("toString(location_kind) AS location_kind");
+    expect(sql).toContain("GROUP BY toString(location_kind)");
+  });
+
+  it("a location_kind equality filter is accepted for the three enum values", () => {
+    const { sql } = buildComposedSql({ measures: ["count"], location_kind: "remote" }, "postings");
+    expect(sql).toContain("location_kind = 'remote'");
+  });
+
+  it("salary bound filters compare the midpoint", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], min_salary: 100000, max_salary: 200000 },
+      "postings",
+    );
+    expect(sql).toContain("(salary_min + salary_max) / 2 >= 100000");
+    expect(sql).toContain("(salary_min + salary_max) / 2 <= 200000");
+  });
+
+  it("honors an explicit sort override and the limit bound", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], dimensions: ["company"], sort: { by: "company", dir: "asc" }, limit: 5 },
+      "postings",
+    );
+    expect(sql).toContain("ORDER BY company ASC");
+    expect(sql).toContain("LIMIT 5");
+  });
+
+  it("honors the injected table name", () => {
+    expect(buildComposedSql({ measures: ["count"] }, "postings_test").sql).toContain(
       "FROM postings_test FINAL",
     );
   });

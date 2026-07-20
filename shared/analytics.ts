@@ -64,8 +64,23 @@ function trendWindow(table: string, days: number): string {
   return `published_at > (SELECT max(published_at) FROM ${table} FINAL) - INTERVAL ${days} DAY`;
 }
 
+/**
+ * The open-set predicate (AC-3): keep only rows from the latest ingest snapshot. Sound because every
+ * row of an ingest run is stamped with one shared `ingested_at` (shared/ingest.ts), so the max is that
+ * run's timestamp and equality selects exactly the current-state postings. No FINAL in the subquery:
+ * max(ingested_at) is dedup-invariant (a superseded row always has an OLDER version), so FINAL would
+ * only add cost. Applied to current-state reads; a days-windowed read keeps full history instead.
+ */
+function openSetFilter(table: string): string {
+  return `ingested_at = (SELECT max(ingested_at) FROM ${table})`;
+}
+
 const SalaryDistributionParams = z
-  .object({ role: z.string().min(1).optional(), city: z.string().min(1).optional() })
+  .object({
+    role: z.string().min(1).optional(),
+    city: z.string().min(1).optional(),
+    country: z.string().min(1).optional(),
+  })
   .strict();
 const SalaryCompareParams = z
   .object({ role: z.string().min(1).optional(), cities: z.array(z.string().min(1)).length(2) })
@@ -83,6 +98,7 @@ const LatestPostingsParams = z
   .object({
     company: z.string().min(1).optional(),
     level: z.string().min(1).optional(),
+    country: z.string().min(1).optional(),
     limit: z.number().int().positive().max(100).default(20),
   })
   .strict();
@@ -102,6 +118,7 @@ export type TemplateName = keyof typeof TEMPLATE_PARAM_SCHEMAS;
 export interface BuiltQuery {
   sql: string; // the main rows query (revealed by Show query)
   where: string; // the shared WHERE clause, reused for the sampleN/freshestAt meta query
+  openSet: boolean; // whether the open-set predicate was applied (current-state read) - carried to meta
 }
 
 /**
@@ -115,6 +132,8 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       const filters = ["salary_min IS NOT NULL", "salary_max IS NOT NULL"];
       if (p.role) filters.push(roleFilter(p.role));
       if (p.city) filters.push(`city = ${chStr(p.city)}`);
+      if (p.country) filters.push(`country = ${chStr(p.country)}`);
+      filters.push(openSetFilter(table));
       const where = whereClause(filters);
       const sql = assemble([
         "WITH salaried AS (",
@@ -131,7 +150,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "ORDER BY bucket",
         `LIMIT ${LIMITS.salary_distribution}`,
       ]);
-      return { sql, where };
+      return { sql, where, openSet: true };
     }
     case "salary_compare": {
       const p = SalaryCompareParams.parse(rawParams);
@@ -141,6 +160,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         `city IN (${p.cities.map((c) => chStr(c)).join(", ")})`,
       ];
       if (p.role) filters.push(roleFilter(p.role));
+      filters.push(openSetFilter(table));
       const where = whereClause(filters);
       const sql = assemble([
         "SELECT",
@@ -153,7 +173,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "ORDER BY median DESC, city ASC",
         `LIMIT ${LIMITS.salary_compare}`,
       ]);
-      return { sql, where };
+      return { sql, where, openSet: true };
     }
     case "postings_trend": {
       const p = PostingsTrendParams.parse(rawParams);
@@ -170,13 +190,17 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "ORDER BY day",
         `LIMIT ${LIMITS.postings_trend}`,
       ]);
-      return { sql, where };
+      // Trend keeps full history (closed postings are legitimate history) - no open-set predicate.
+      return { sql, where, openSet: false };
     }
     case "top_companies": {
       const p = TopCompaniesParams.parse(rawParams);
       const filters: string[] = [];
       if (p.days !== undefined) filters.push(trendWindow(table, p.days));
       if (p.city) filters.push(`city = ${chStr(p.city)}`);
+      // Current-state only when unwindowed; a days window is a historical read.
+      const openSet = p.days === undefined;
+      if (openSet) filters.push(openSetFilter(table));
       const where = whereClause(filters);
       const sql = assemble([
         "SELECT",
@@ -188,13 +212,14 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "ORDER BY count DESC, company ASC",
         `LIMIT ${LIMITS.top_companies}`,
       ]);
-      return { sql, where };
+      return { sql, where, openSet };
     }
     case "share_split": {
       const p = ShareSplitParams.parse(rawParams);
       const dimColumn = p.dimension === "experience" ? "experience_level" : "location_kind";
       const filters: string[] = [];
       if (p.role) filters.push(roleFilter(p.role));
+      filters.push(openSetFilter(table));
       const where = whereClause(filters);
       // toString() so location_kind (an Enum8) sorts and serializes as its name, not its int - the
       // tie order stays alphabetical and predictable across both dimensions.
@@ -208,13 +233,15 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "ORDER BY count DESC, label ASC",
         `LIMIT ${LIMITS.share_split}`,
       ]);
-      return { sql, where };
+      return { sql, where, openSet: true };
     }
     case "latest_postings": {
       const p = LatestPostingsParams.parse(rawParams);
       const filters: string[] = [];
       if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
       if (p.level) filters.push(`experience_level = ${chStr(p.level)}`);
+      if (p.country) filters.push(`country = ${chStr(p.country)}`);
+      filters.push(openSetFilter(table));
       const where = whereClause(filters);
       const sql = assemble([
         "SELECT",
@@ -231,7 +258,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "ORDER BY published_at DESC, external_id DESC",
         `LIMIT ${p.limit}`,
       ]);
-      return { sql, where };
+      return { sql, where, openSet: true };
     }
     default: {
       const exhaustive: never = name;
@@ -240,14 +267,184 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
   }
 }
 
+// ---- Composable query builder (the everything-else path beside the six templates) ---------------
+// query_postings' data layer (AC-1/AC-2): a whitelisted aggregate over the postings schema. Same
+// safety contract as the templates - Zod validates every param, enums map to fixed column names, and
+// chStr/likeEscape escape every free-text value; nothing here is a raw interpolated identifier.
+
+const COMPOSED_MEASURES = ["count", "median_salary", "p25_salary", "p75_salary"] as const;
+const COMPOSED_DIMENSIONS = [
+  "company",
+  "city",
+  "region",
+  "country",
+  "experience_level",
+  "employment_type",
+  "location_kind",
+  "title",
+] as const;
+const TIME_BUCKETS = ["day", "week", "month"] as const;
+
+type ComposedMeasure = (typeof COMPOSED_MEASURES)[number];
+type ComposedDimension = (typeof COMPOSED_DIMENSIONS)[number];
+type TimeBucket = (typeof TIME_BUCKETS)[number];
+
+const isUnique = (values: readonly string[]): boolean => new Set(values).size === values.length;
+
+/**
+ * The query_postings input schema, exported like TEMPLATE_PARAM_SCHEMAS so 009 wires the tool input
+ * from the one home (DRY). Structural validation only (kept a strict ZodObject); the cross-field sort
+ * check lives in buildComposedSql (still before any query runs).
+ */
+export const ComposedQueryParams = z
+  .object({
+    measures: z
+      .array(z.enum(COMPOSED_MEASURES))
+      .min(1)
+      .max(2)
+      .refine(isUnique, "measures must be unique"),
+    dimensions: z
+      .array(z.enum(COMPOSED_DIMENSIONS))
+      .max(2)
+      .refine(isUnique, "dimensions must be unique")
+      .default([]),
+    bucket: z.enum(TIME_BUCKETS).optional(),
+    role: z.string().min(1).optional(),
+    company: z.string().min(1).optional(),
+    city: z.string().min(1).optional(),
+    region: z.string().min(1).optional(),
+    country: z.string().min(1).optional(),
+    experience_level: z.string().min(1).optional(),
+    employment_type: z.string().min(1).optional(),
+    location_kind: z.enum(["onsite", "remote", "hybrid"]).optional(),
+    days: z.number().int().positive().max(3650).optional(),
+    min_salary: z.number().int().positive().optional(),
+    max_salary: z.number().int().positive().optional(),
+    sort: z.object({ by: z.string().min(1), dir: z.enum(["asc", "desc"]) }).optional(),
+    limit: z.number().int().positive().max(50).default(20),
+  })
+  .strict();
+export type ComposedQuery = z.infer<typeof ComposedQueryParams>;
+
+const SALARY_MEASURES: ReadonlySet<ComposedMeasure> = new Set([
+  "median_salary",
+  "p25_salary",
+  "p75_salary",
+]);
+
+function measureSelect(m: ComposedMeasure): string {
+  switch (m) {
+    case "count":
+      return "count() AS count";
+    case "median_salary":
+      return "round(quantileExact(0.5)((salary_min + salary_max) / 2)) AS median_salary";
+    case "p25_salary":
+      return "round(quantileExact(0.25)((salary_min + salary_max) / 2)) AS p25_salary";
+    case "p75_salary":
+      return "round(quantileExact(0.75)((salary_min + salary_max) / 2)) AS p75_salary";
+  }
+}
+
+interface DimensionSpec {
+  alias: string; // the output column / stable Recharts key
+  select: string; // the SELECT-list expression (aliased)
+  group: string; // the GROUP BY / ORDER BY expression (never the bare alias)
+}
+
+function dimensionSpec(d: ComposedDimension): DimensionSpec {
+  // location_kind is an Enum8: toString so it serializes and orders by its NAME, not its int (same as
+  // share_split). GROUP/ORDER by the raw expression, not the `location_kind` alias, so the alias can
+  // never shadow the column of the same name.
+  if (d === "location_kind") {
+    return {
+      alias: "location_kind",
+      select: "toString(location_kind) AS location_kind",
+      group: "toString(location_kind)",
+    };
+  }
+  return { alias: d, select: d, group: d };
+}
+
+function bucketSpec(b: TimeBucket): DimensionSpec {
+  const fn = b === "day" ? "toStartOfDay" : b === "week" ? "toStartOfWeek" : "toStartOfMonth";
+  const expr = `${fn}(published_at)`;
+  return { alias: "bucket", select: `${expr} AS bucket`, group: expr };
+}
+
+/**
+ * Validate composed params (throws on invalid) and build the exact interpolated SQL. Pure, like
+ * buildTemplateSql - the SQL and the validation are unit-testable without a client. Deterministic
+ * ORDER BY (the sort spec, then the remaining dimensions ASC) so results are stable, mirroring the
+ * templates. Applies the open-set predicate unless a `days` window makes it a historical read.
+ */
+export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery {
+  const p = ComposedQueryParams.parse(rawParams);
+
+  const dims: DimensionSpec[] = p.dimensions.map(dimensionSpec);
+  if (p.bucket) dims.push(bucketSpec(p.bucket));
+
+  // sort: default to chronological when time-bucketed (like postings_trend), else the first measure
+  // descending (like top_companies). The key must name a selected measure or dimension.
+  const sortable = new Set<string>([...p.measures, ...dims.map((d) => d.alias)]);
+  const sort = p.sort ?? { by: p.bucket ? "bucket" : p.measures[0], dir: p.bucket ? "asc" : "desc" };
+  if (!sortable.has(sort.by)) {
+    throw new Error(`sort.by must be a selected measure or dimension: ${sort.by}`);
+  }
+
+  const filters: string[] = [];
+  if (p.measures.some((m) => SALARY_MEASURES.has(m))) {
+    filters.push("salary_min IS NOT NULL", "salary_max IS NOT NULL");
+  }
+  if (p.role) filters.push(roleFilter(p.role));
+  if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
+  if (p.city) filters.push(`city = ${chStr(p.city)}`);
+  if (p.region) filters.push(`region = ${chStr(p.region)}`);
+  if (p.country) filters.push(`country = ${chStr(p.country)}`);
+  if (p.experience_level) filters.push(`experience_level = ${chStr(p.experience_level)}`);
+  if (p.employment_type) filters.push(`employment_type = ${chStr(p.employment_type)}`);
+  if (p.location_kind) filters.push(`location_kind = ${chStr(p.location_kind)}`);
+  if (p.min_salary !== undefined) filters.push(`(salary_min + salary_max) / 2 >= ${p.min_salary}`);
+  if (p.max_salary !== undefined) filters.push(`(salary_min + salary_max) / 2 <= ${p.max_salary}`);
+  const openSet = p.days === undefined;
+  if (openSet) filters.push(openSetFilter(table));
+  else filters.push(trendWindow(table, p.days!));
+  const where = whereClause(filters);
+
+  const sortExpr = p.measures.includes(sort.by as ComposedMeasure)
+    ? sort.by
+    : dims.find((d) => d.alias === sort.by)!.group;
+  const orderParts = [`${sortExpr} ${sort.dir.toUpperCase()}`];
+  for (const d of dims) {
+    if (d.alias === sort.by) continue;
+    orderParts.push(`${d.group} ASC`);
+  }
+
+  const selectList = [...dims.map((d) => d.select), ...p.measures.map(measureSelect)];
+  const sql = assemble([
+    "SELECT",
+    "  " + selectList.join(",\n  "),
+    `FROM ${table} FINAL`,
+    where,
+    dims.length ? `GROUP BY ${dims.map((d) => d.group).join(", ")}` : "",
+    `ORDER BY ${orderParts.join(", ")}`,
+    `LIMIT ${p.limit}`,
+  ]);
+  return { sql, where, openSet };
+}
+
 export interface QueryResult {
   sql: string;
   rows: Record<string, unknown>[];
-  meta: { sampleN: number; freshestAt: string };
+  // `openSet` is present (true) only on a current-state read; absent = full history (AC-3). Optional so
+  // every persisted P1 payload stays valid and it is never default-injected.
+  meta: { sampleN: number; freshestAt: string; openSet?: boolean };
 }
 
 export interface Analytics {
   runQuery(name: TemplateName, params: unknown): Promise<QueryResult>;
+  // The execution seam for query_postings (009's tool calls this). Tools receive Analytics, never a raw
+  // client, so the composed path must live on the interface too.
+  runComposedQuery(params: unknown): Promise<QueryResult>;
 }
 
 /**
@@ -259,35 +456,43 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
   const table = config.table ?? "postings";
   const { client } = config;
 
+  // Run a BuiltQuery: the rows query, then the sampleN/freshestAt meta query over the SAME `where` (so
+  // the count matches the set the rows came from). Shared by both the template and composed paths.
+  async function executeBuilt(built: BuiltQuery): Promise<QueryResult> {
+    const rowsRs = await client.query({
+      query: built.sql,
+      format: "JSONEachRow",
+      clickhouse_settings: QUERY_SETTINGS,
+    });
+    const rows = await rowsRs.json<Record<string, unknown>>();
+
+    const metaSql = assemble([
+      "SELECT",
+      "  count() AS sampleN,",
+      "  max(ingested_at) AS freshestAt",
+      `FROM ${table} FINAL`,
+      built.where,
+    ]);
+    const metaRs = await client.query({
+      query: metaSql,
+      format: "JSONEachRow",
+      clickhouse_settings: QUERY_SETTINGS,
+    });
+    const metaRow = (await metaRs.json<{ sampleN: number; freshestAt: string }>())[0];
+
+    return {
+      sql: built.sql,
+      rows,
+      meta: {
+        sampleN: Number(metaRow.sampleN),
+        freshestAt: String(metaRow.freshestAt),
+        ...(built.openSet ? { openSet: true } : {}),
+      },
+    };
+  }
+
   return {
-    async runQuery(name, params) {
-      const { sql, where } = buildTemplateSql(name, params, table);
-      const rowsRs = await client.query({
-        query: sql,
-        format: "JSONEachRow",
-        clickhouse_settings: QUERY_SETTINGS,
-      });
-      const rows = await rowsRs.json<Record<string, unknown>>();
-
-      const metaSql = assemble([
-        "SELECT",
-        "  count() AS sampleN,",
-        "  max(ingested_at) AS freshestAt",
-        `FROM ${table} FINAL`,
-        where,
-      ]);
-      const metaRs = await client.query({
-        query: metaSql,
-        format: "JSONEachRow",
-        clickhouse_settings: QUERY_SETTINGS,
-      });
-      const metaRow = (await metaRs.json<{ sampleN: number; freshestAt: string }>())[0];
-
-      return {
-        sql,
-        rows,
-        meta: { sampleN: Number(metaRow.sampleN), freshestAt: String(metaRow.freshestAt) },
-      };
-    },
+    runQuery: (name, params) => executeBuilt(buildTemplateSql(name, params, table)),
+    runComposedQuery: (params) => executeBuilt(buildComposedSql(params, table)),
   };
 }

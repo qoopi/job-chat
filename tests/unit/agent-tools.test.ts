@@ -22,6 +22,7 @@ describe("buildCatalogTools", () => {
         rows: [{ company: "Google", count: 4 }],
         meta: { sampleN: 10, freshestAt: "2026-07-18 06:00:00" },
       })),
+      runComposedQuery: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.top_companies.execute!({}, opts);
@@ -42,6 +43,7 @@ describe("buildCatalogTools", () => {
         rows: [],
         meta: { sampleN: 0, freshestAt: "1970-01-01 00:00:00" },
       })),
+      runComposedQuery: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.salary_distribution.execute!({ city: "SF" }, opts);
@@ -61,6 +63,7 @@ describe("buildCatalogTools", () => {
       runQuery: vi.fn(async () => {
         throw new Error("ClickHouse unreachable");
       }),
+      runComposedQuery: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.salary_distribution.execute!({ city: "SF" }, opts);
