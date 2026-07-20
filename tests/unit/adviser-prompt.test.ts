@@ -60,10 +60,16 @@ describe("adviser-v2 system prompt", () => {
     expect(ADVISER_V2_VERSION).toBe("adviser-v2");
   });
 
-  it("carries over the two answer modes and the <=2-sentence plain rule", () => {
+  // 016 reconciliation: the flat "at most two sentences" resolves to answer-BODY <=2 sentences (small
+  // answers like "Yes." stay small) PLUS one short steer sentence permitted on a redirect turn - so the
+  // taxonomy's mandated answer+steer no longer contradicts the brevity cap.
+  it("carries over the two answer modes and the answer-body <=2-sentence rule, permitting one steer sentence on redirect", () => {
     expect(ADVISER_V2.toLowerCase()).toContain("two");
     expect(ADVISER_V2.toLowerCase()).toContain("plain");
+    // The answer BODY still holds at most two sentences.
     expect(ADVISER_V2.toLowerCase()).toMatch(/two sentences|2 sentences/);
+    // ...and a redirect turn may add ONE short steer sentence beyond the body (the resolved contradiction).
+    expect(ADVISER_V2.toLowerCase()).toContain("one short steer sentence");
   });
 
   it("carries over honesty, city aliases, and no tool-mechanics narration", () => {

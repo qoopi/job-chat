@@ -474,6 +474,13 @@ async function main(): Promise<void> {
   }
 
   const system = prompt === "v1" ? ADVISER_V1 : ADVISER_V2;
+  // STALE BASELINE guard: v1 is frozen/unshipped and its text still instructs report_unanswerable, which
+  // was RETIRED from the shared catalog (016) - a v1 run scores a prompt whose escape-hatch tool no longer
+  // exists, so its tool/mode numbers are not comparable to v2. Do NOT re-tune v1; read v1 results as a
+  // stale baseline only. (v2 is the shipped prompt; trigger/chat.ts wires it.)
+  if (prompt === "v1") {
+    console.warn("[eval] WARNING: --prompt v1 is a STALE baseline - report_unanswerable was retired from the catalog; v1's tool/mode numbers are not comparable to v2, and v1 is not to be re-tuned.");
+  }
   const model = buildModel();
 
   console.log(HEAVY);
