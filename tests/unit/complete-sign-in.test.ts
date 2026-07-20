@@ -55,6 +55,7 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     linkAuthUser: boom,
     adoptGuest: boom,
     listConversations: boom,
+    deleteConversation: boom,
     messageCounts: boom,
     ...overrides,
   };

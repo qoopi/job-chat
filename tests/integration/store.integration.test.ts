@@ -230,6 +230,32 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(u);
   });
 
+  // AC-21: deleting a conversation removes it AND its messages (the FK has no ON DELETE CASCADE, so the
+  // store deletes both in one transaction). A sibling conversation's messages are untouched.
+  it("deleteConversation removes the conversation and its messages, leaving siblings intact (AC-21)", async () => {
+    const owner = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(owner);
+    const target = await store.createConversation(owner, "delete me");
+    await store.appendMessage(target.id, "user", "q1", null);
+    await store.appendMessage(target.id, "assistant", "a1", { id: "p", kind: "table" });
+    const keep = await store.createConversation(owner, "keep me");
+    await store.appendMessage(keep.id, "user", "q2", null);
+
+    await store.deleteConversation(target.id);
+
+    expect(await store.getConversation(target.id)).toBeNull(); // conversation gone
+    const orphaned = await sql`SELECT count(*)::int AS c FROM messages WHERE conversation_id = ${target.id}`;
+    expect(orphaned[0].c).toBe(0); // its messages cascaded (no FK-violation, no orphans)
+    // The sibling and its message survive.
+    expect((await store.getConversation(keep.id))?.messages).toHaveLength(1);
+
+    // Idempotent / malformed-id safety: deleting again and a garbage id are both no-ops, not errors.
+    await expect(store.deleteConversation(target.id)).resolves.toBeUndefined();
+    await expect(store.deleteConversation("not-a-uuid")).resolves.toBeUndefined();
+
+    await purge(owner);
+  });
+
   it("messageCounts scopes to a user (cap) and aggregates globally (daily budget)", async () => {
     const freshGuest = `test-guest-${crypto.randomUUID()}`;
     await store.getOrCreateUser(freshGuest);

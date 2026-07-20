@@ -420,6 +420,61 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     });
   });
 
+  // AC-21: deleteConversation is ownership-gated exactly like sendMessage/mintChatToken. A non-owner -
+  // guest OR account - reads as not_found and the conversation survives; the owner's delete removes it.
+  describe("deleteConversation ownership (AC-21)", () => {
+    function svc() {
+      return createSessionService({
+        store,
+        guards: { guestCap: 10, dailyBudget: HUGE },
+        startSession: okStartSession(),
+        mintToken: okMintToken(),
+        sendToInbox: okSendToInbox(),
+        now: () => new Date(),
+      });
+    }
+
+    it("Should_RefuseDelete_When_NotOwner: a cross-GUEST caller cannot delete another's conversation", async () => {
+      const owner = freshGuestId();
+      const attacker = freshGuestId();
+      await store.getOrCreateUser(owner);
+      await store.getOrCreateUser(attacker);
+      const conv = await store.createConversation(owner, "owner's thread");
+
+      expect(await svc().deleteConversation(conv.id, attacker)).toEqual({ ok: false, reason: "not_found" });
+      expect(await store.getConversationOwner(conv.id)).not.toBeNull(); // still there, unmoved
+    });
+
+    it("Should_RefuseDelete_When_NotOwner: a cross-ACCOUNT caller cannot delete another account's conversation", async () => {
+      const owner = freshGuestId();
+      await store.getOrCreateUser(owner);
+      await store.linkAuthUser(owner, `auth-${crypto.randomUUID()}`); // owner is an account
+      const conv = await store.createConversation(owner, "owner's account thread");
+      const attacker = freshGuestId();
+      await store.getOrCreateUser(attacker);
+      await store.linkAuthUser(attacker, `auth-${crypto.randomUUID()}`); // a DIFFERENT account
+
+      expect(await svc().deleteConversation(conv.id, attacker)).toEqual({ ok: false, reason: "not_found" });
+      expect(await store.getConversationOwner(conv.id)).not.toBeNull();
+    });
+
+    it("deletes the caller's OWN conversation (and its messages)", async () => {
+      const owner = freshGuestId();
+      await store.getOrCreateUser(owner);
+      const conv = await store.createConversation(owner, "owner's thread");
+      await store.appendMessage(conv.id, "user", "q", null);
+
+      expect(await svc().deleteConversation(conv.id, owner)).toEqual({ ok: true });
+      expect(await store.getConversation(conv.id)).toBeNull();
+    });
+
+    it("returns not_found for an unknown/malformed id (never a DB error)", async () => {
+      const g = freshGuestId();
+      expect(await svc().deleteConversation(crypto.randomUUID(), g)).toEqual({ ok: false, reason: "not_found" });
+      expect(await svc().deleteConversation("not-a-uuid", g)).toEqual({ ok: false, reason: "not_found" });
+    });
+  });
+
   // The sign-in reconciliation that resolves every request's chat identity (adoption). Runs against the
   // real store: the three branches the epic pins - stamp (first sign-in), no-op (returning same device),
   // adopt (returning new device).

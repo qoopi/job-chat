@@ -57,6 +57,9 @@ export type SendResult = SendOk | { ok: false; reason: RefusalReason };
 
 export type MintResult = { ok: true; token: string } | { ok: false; reason: "not_found" };
 
+/** A delete's outcome (AC-21): the row is gone, or the caller does not own it (treated as not_found). */
+export type DeleteResult = { ok: true } | { ok: false; reason: "not_found" };
+
 // Input bounds at the trust boundary (before any store write or trigger): a bounded question/text
 // keeps a hostile 100KB payload out of Bedrock (token cost) and the message store (DB bloat). The
 // bound (MAX_INPUT_CHARS) is shared with the agent-run ingress backstop (trigger/guard.ts) so the two
@@ -118,6 +121,12 @@ export interface SessionService {
   sendMessage(conversationId: string, text: string, callerUserId: string, kind?: CallerKind): Promise<SendResult>;
   /** Mint a session-scoped token, but only for the caller's own conversation (defense in depth). */
   mintChatToken(conversationId: string, callerUserId: string): Promise<MintResult>;
+  /**
+   * Delete a conversation (AC-21), but only the caller's OWN (same ownership check as sendMessage /
+   * mintChatToken - a non-owner, guest or account, reads as not_found so no one deletes another's
+   * thread). Messages cascade in the store.
+   */
+  deleteConversation(conversationId: string, callerUserId: string): Promise<DeleteResult>;
 }
 
 /** The caller's resolved chat identity: a stable `userId` (the chat identity key) + its `kind`. */
@@ -230,6 +239,16 @@ export function createSessionService(deps: SessionDeps): SessionService {
       const owner = await store.getConversationOwner(conversationId);
       if (!owner || owner.user_id !== callerUserId) return { ok: false, reason: "not_found" };
       return { ok: true, token: await mintToken(conversationId) };
+    },
+
+    async deleteConversation(conversationId, callerUserId) {
+      if (!ConversationIdSchema.safeParse(conversationId).success) return { ok: false, reason: "not_found" };
+      // Same ownership gate as sendMessage/mintChatToken: a conversation the caller does not own reads
+      // as not_found (never delete another user's thread), and the store cascades the messages.
+      const owner = await store.getConversationOwner(conversationId);
+      if (!owner || owner.user_id !== callerUserId) return { ok: false, reason: "not_found" };
+      await store.deleteConversation(conversationId);
+      return { ok: true };
     },
   };
 }

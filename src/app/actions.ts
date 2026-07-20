@@ -13,6 +13,7 @@ import {
   chatTokenScopes,
   createSessionService,
   resolveIdentity,
+  type DeleteResult,
   type Identity,
   type MintResult,
   type MintToken,
@@ -193,4 +194,15 @@ export async function listMyConversations(): Promise<
   const identity = await resolveCaller();
   if (!identity) return [];
   return createStore(sql()).listConversations(identity.userId);
+}
+
+/**
+ * AC-21: delete one of the caller's OWN conversations (messages cascade). Ownership is enforced here in
+ * the action via the resolved Identity + the session core's owner check - a non-owner (or a caller that
+ * owns nothing) reads as not_found, never deleting another user's thread.
+ */
+export async function deleteConversation(conversationId: string): Promise<DeleteResult> {
+  const identity = await resolveCaller();
+  if (!identity) return { ok: false, reason: "not_found" };
+  return service().deleteConversation(conversationId, identity.userId);
 }

@@ -86,6 +86,14 @@ export interface Store {
   adoptGuest(canonicalUserId: string, guestUserId: string): Promise<void>;
   /** A user's conversations, newest first (the signed-in sidebar history, AC-12). */
   listConversations(userId: string): Promise<Pick<Conversation, "id" | "title" | "created_at">[]>;
+  /**
+   * Delete a conversation and its messages (AC-21). Messages are removed first (the FK has no ON DELETE
+   * CASCADE), both in one transaction so a conversation never outlives a partial message delete. A
+   * malformed id is a no-op (the "null = not found" contract). Ownership is enforced by the CALLER (the
+   * action layer resolves the caller's Identity and refuses a non-owner as not_found) - this primitive
+   * deletes by id.
+   */
+  deleteConversation(conversationId: string): Promise<void>;
   /** Count user-turn messages since `sinceUtcMidnight`. No `userId` => global (the daily budget). */
   messageCounts(args: { userId?: string; sinceUtcMidnight: Date }): Promise<number>;
 }
@@ -202,6 +210,16 @@ export function createStore(sql: Sql): Store {
         WHERE user_id = ${userId}
         ORDER BY created_at DESC, id DESC`;
       return [...rows];
+    },
+
+    async deleteConversation(conversationId) {
+      // Malformed id: no-op (contract parity with getConversation - never surface a raw uuid cast error).
+      if (!UUID_RE.test(conversationId)) return;
+      // One transaction: messages first (no ON DELETE CASCADE on the FK), then the conversation row.
+      await sql.begin(async (tx) => {
+        await tx`DELETE FROM messages WHERE conversation_id = ${conversationId}`;
+        await tx`DELETE FROM conversations WHERE id = ${conversationId}`;
+      });
     },
 
     async messageCounts({ userId, sinceUtcMidnight }) {

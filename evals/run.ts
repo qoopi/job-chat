@@ -150,6 +150,9 @@ function createMemoryStore(): Store {
     async adoptGuest() {
       // unused by the eval run path
     },
+    async deleteConversation() {
+      // unused by the eval run path
+    },
     async listConversations(userId: string) {
       return [...conversations.values()]
         .filter((c) => c.user_id === userId)
