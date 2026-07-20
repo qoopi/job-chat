@@ -34,10 +34,11 @@ vi.mock("@/app/actions", () => ({
 const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
 
+// Google-only (017): the dialog's own onGoogle calls signIn.social; no email/password affordance is
+// wired anywhere, so the mock offers only what the real authClient surface exposes now.
 vi.mock("@/lib/auth-client", () => ({
   authClient: {
-    signIn: { email: vi.fn(), social: vi.fn() },
-    signUp: { email: vi.fn() },
+    signIn: { social: vi.fn() },
     signOut: vi.fn(),
     useSession: () => ({ data: null, isPending: false }),
   },

@@ -35,6 +35,13 @@ describe("auth config: google-only + reviewer should-fixes", () => {
     const linking = auth.options.account?.accountLinking as { requireLocalEmailVerified?: unknown } | undefined;
     expect(linking?.requireLocalEmailVerified).toBeUndefined();
   });
+
+  it("Should_NotSetAllowDifferentEmails_When_GoogleOnly", () => {
+    // CVE-2026-53516 checklist (gold standard s8): allowDifferentEmails must stay false/omitted - setting
+    // it true would let a Google login on a DIFFERENT email link onto an existing account.
+    const linking = auth.options.account?.accountLinking as { allowDifferentEmails?: unknown } | undefined;
+    expect(linking?.allowDifferentEmails).toBeUndefined();
+  });
 });
 
 describe("authPoolConfig SSL: no silent downgrade of verify-* (reviewer should-fix)", () => {

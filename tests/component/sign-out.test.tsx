@@ -89,6 +89,7 @@ describe("sign-out lands on the landing as a guest (017 strand 3)", () => {
     // back to guest state: the sidebar foot offers Sign in, the account name is gone
     await waitFor(() => expect(screen.getAllByRole("button", { name: "Sign in" }).length).toBeGreaterThan(0));
     expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
+    expect(screen.queryByText("Ada")).toBeNull(); // no stale account name lingers in the signed-out foot
     // no stale thread lingers after sign-out
     expect(screen.queryByText("unique-thread-body")).toBeNull();
   });

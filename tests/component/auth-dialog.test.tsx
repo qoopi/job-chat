@@ -26,11 +26,16 @@ vi.mock("@/lib/chat-transport", () => ({
 }));
 
 const sendMessageMock = vi.fn();
+const ensureGuestMock = vi.fn(async () => "guest-1");
+const startConversationMock = vi.fn();
 vi.mock("@/app/actions", () => ({
   sendMessage: (id: string, t: string) => sendMessageMock(id, t),
   mintChatToken: vi.fn(),
   listMyConversations: vi.fn(async () => []),
   clearGuestSession: vi.fn(async () => {}),
+  // LandingComposer's own boundary (used by the landing-host error-surfacing tests below).
+  ensureGuest: () => ensureGuestMock(),
+  startConversation: (t: string) => startConversationMock(t),
 }));
 
 const signInSocialMock = vi.fn();
@@ -45,6 +50,7 @@ vi.mock("@/lib/auth-client", () => ({
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 import { ChatClient } from "@/components/chat/ChatClient";
+import { LandingComposer } from "@/components/landing/LandingComposer";
 
 const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -122,6 +128,27 @@ describe("google redirect error surfacing (017 strand 2)", () => {
 
   test("Should_NotOpenDialog_When_NoErrorParam", () => {
     render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+// AUDIT (05-testing, independent pass): the task requires `?error=` surfacing on BOTH hosts (chat +
+// landing) - useOpenAuthDialogOnError is called from both ChatClient and LandingComposer, but only the
+// chat host had a test above. Close that gap here on the landing host (dynamic-imported AuthDialog).
+describe("google redirect error surfacing on the LANDING host (017 strand 2)", () => {
+  afterEach(() => window.history.replaceState(null, "", "/"));
+
+  test("Should_OpenDialogAndShowError_When_ErrorParamPresent_OnLanding", async () => {
+    window.history.replaceState(null, "", "/?error=account_not_linked");
+    render(<LandingComposer e2e={false} />);
+
+    expect(await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" })).toBeTruthy();
+    expect(screen.getByText(/can't be linked to an existing account/i)).toBeTruthy();
+    expect(window.location.search).not.toContain("error"); // stripped so a refresh does not re-surface it
+  });
+
+  test("Should_NotOpenDialog_When_NoErrorParam_OnLanding", () => {
+    render(<LandingComposer e2e={false} />);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
