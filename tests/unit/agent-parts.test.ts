@@ -122,6 +122,31 @@ describe("buildInsight produces a strict-valid data-insight with the headline va
     expect(() => DataInsightSchema.parse(insight)).not.toThrow();
     if (insight.kind === "chart") expect(insight.series).toEqual([]);
   });
+
+  // AC-3: the open-set flag threads from the analytics result through buildInsight into the insight
+  // meta, so InsightCard can render "N open postings" for a current-state read.
+  it("carries the openSet flag into the insight meta for a current-state result", () => {
+    const r: QueryResult = {
+      sql: "SELECT 1",
+      rows: [{ company: "Google", count: 4 }],
+      meta: { sampleN: 10, freshestAt: "2026-07-18 06:00:00", openSet: true },
+    };
+    const insight = buildInsight({ id: "os1", tool: "top_companies", params: {}, result: r });
+    expect(insight.meta.openSet).toBe(true);
+    expect(() => DataInsightSchema.parse(insight)).not.toThrow();
+  });
+
+  // A full-history result has no openSet on its meta - buildInsight must NOT default-inject the key
+  // (optionality is the compatibility contract for old persisted payloads).
+  it("omits openSet from the insight meta for a full-history result", () => {
+    const insight = buildInsight({
+      id: "os2",
+      tool: "postings_trend",
+      params: { days: 7 },
+      result: result([{ day: "2026-07-18", count: 3 }], 3),
+    });
+    expect(insight.meta).not.toHaveProperty("openSet");
+  });
 });
 
 describe("buildSkeleton is the loading part written before the tool returns", () => {

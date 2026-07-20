@@ -20,6 +20,10 @@ const MetaSchema = z
     sql: z.string(), // the exact executed ClickHouse SQL - Show query reveals this verbatim
     sampleN: z.number(),
     updatedAt: z.string(), // data freshness (max ingested_at), CH text form
+    // Present (true) only on a current-state read (open-set predicate applied) - the source line then
+    // reads "N open postings" (AC-3). OPTIONAL so every P1-persisted payload stays valid under strict;
+    // absent = full history. Never default-inject it.
+    openSet: z.boolean().optional(),
   })
   .strict();
 export type InsightMeta = z.infer<typeof MetaSchema>;

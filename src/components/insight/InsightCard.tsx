@@ -118,7 +118,7 @@ export function InsightCard({
         </div>
         {showSource ? (
           <span className="src">
-            {insight.meta.sampleN.toLocaleString()} postings
+            {insight.meta.sampleN.toLocaleString()} {insight.meta.openSet ? "open postings" : "postings"}
             {/* freshness is Date.now()-relative, so a server/client render straddling a minute boundary
                would mismatch on hydration - suppress the (benign) warning on just this text. */}
             <span suppressHydrationWarning>{rel ? ` — updated ${rel}` : ""}</span> ·{" "}

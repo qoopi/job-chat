@@ -12,7 +12,7 @@ vi.mock("@/components/insight/charts/InsightChart", () => ({
 
 import { InsightCard } from "@/components/insight/InsightCard";
 
-function insightWith(sampleN: number, updatedAt: string): DataInsight {
+function insightWith(sampleN: number, updatedAt: string, openSet?: boolean): DataInsight {
   return {
     id: "src-line",
     kind: "chart",
@@ -20,7 +20,7 @@ function insightWith(sampleN: number, updatedAt: string): DataInsight {
     verdict: "The median salary is 180000 here.",
     series: [{ bucket: 160000, count: 3, median: 180000 }],
     followups: [],
-    meta: { sql: "SELECT 1", sampleN, updatedAt },
+    meta: { sql: "SELECT 1", sampleN, updatedAt, ...(openSet ? { openSet: true } : {}) },
   };
 }
 
@@ -38,6 +38,27 @@ describe("InsightCard source line", () => {
     expect(screen.queryByText(/postings/)).toBeNull();
     expect(screen.queryByText(/updated/)).toBeNull();
     expect(screen.queryByText(/ago/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show query" })).toBeNull();
+  });
+});
+
+// AC-3: a current-state read (open-set predicate applied) reads "N open postings"; a full-history read
+// keeps the plain "N postings"; the sampleN=0 suppression is unchanged either way.
+describe("InsightCard open-set source-line copy", () => {
+  test("reads 'N open postings' when meta.openSet is set", () => {
+    render(<InsightCard insight={insightWith(412, "2026-07-18 19:12:00", true)} />);
+    expect(screen.getByText(/412 open postings/)).toBeTruthy();
+  });
+
+  test("reads plain 'N postings' when meta.openSet is absent", () => {
+    render(<InsightCard insight={insightWith(412, "2026-07-18 19:12:00")} />);
+    expect(screen.getByText(/412 postings/)).toBeTruthy();
+    expect(screen.queryByText(/open postings/)).toBeNull();
+  });
+
+  test("suppresses the source line entirely when sampleN is 0 even with openSet set", () => {
+    render(<InsightCard insight={insightWith(0, "1970-01-01 00:00:00", true)} />);
+    expect(screen.queryByText(/postings/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Show query" })).toBeNull();
   });
 });

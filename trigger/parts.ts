@@ -89,7 +89,13 @@ export function buildInsight({ id, tool, params, result }: BuildInsightArgs): Da
   const visual = chartTypeFor(tool);
   const verdict = verdictFor(tool, result.rows, params, result.meta.sampleN);
   const followups = FOLLOWUPS[tool];
-  const meta = { sql: result.sql, sampleN: result.meta.sampleN, updatedAt: result.meta.freshestAt };
+  // openSet threads through only when the predicate applied (AC-3); absent = full history, never injected.
+  const meta = {
+    sql: result.sql,
+    sampleN: result.meta.sampleN,
+    updatedAt: result.meta.freshestAt,
+    ...(result.meta.openSet ? { openSet: true } : {}),
+  };
   const data = result.rows as DataPoint[];
 
   const candidate =
