@@ -359,6 +359,57 @@ a:hover {
   font-size: var(--fs-sm);
   color: var(--shell-fg-dim);
 }
+/* AC-21: per-row delete affordance + inline confirm (never a modal). */
+.sb-item-row {
+  position: relative;
+}
+.sb-del {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--shell-fg-dim);
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  opacity: 0;
+}
+.sb-item-row:hover .sb-del,
+.sb-del:focus-visible {
+  opacity: 1;
+}
+.sb-del:hover {
+  color: var(--shell-strong);
+  background: var(--shell-hover);
+}
+.sb-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--shell-hover);
+}
+.sb-confirm-actions {
+  display: flex;
+  gap: 12px;
+}
+.sb-confirm-actions button {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+  padding: 0;
+}
+.sb-confirm-yes {
+  color: var(--danger);
+  font-weight: 600;
+}
+.sb-confirm-no {
+  color: var(--shell-fg-dim);
+}
 .sb-foot {
   margin-top: auto;
   border-top: 1px solid var(--shell-border);

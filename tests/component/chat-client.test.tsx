@@ -37,6 +37,8 @@ vi.mock("@/app/actions", () => ({
   mintChatToken: (conversationId: string) => mintChatTokenMock(conversationId),
 }));
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
 import { ChatClient } from "@/components/chat/ChatClient";
 import { closeAuthDialog } from "@/lib/auth-dialog";
 
@@ -84,6 +86,31 @@ test("action-refusal: an ok send does NOT render a notice (control case)", async
 
   await screen.findByText("A normal question"); // the optimistic user bubble renders
   expect(document.querySelector(".notice")).toBeNull();
+});
+
+// --- AC-22: optimistic echo (the user bubble renders at composer-clear time, not after the round trip) ---
+
+test("Should_EchoUserBubbleSynchronously_When_Sent: the user bubble renders before any transport round trip; the server echo reconciles to one", async () => {
+  // Hold the gate unresolved - the bubble must appear WITHOUT waiting for the server round trip (the
+  // ~6s run-wake floor). Nothing is hydrated on the transport yet either.
+  let release: (v: unknown) => void = () => {};
+  sendMessageMock.mockReturnValue(new Promise((res) => (release = res)));
+  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+
+  const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
+  fireEvent.change(box, { target: { value: "Median salary in Berlin?" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+
+  // Synchronously present, before the gate resolves and before the transport is hydrated.
+  expect(screen.getByText("Median salary in Berlin?")).toBeTruthy();
+  expect(screen.getByRole("status", { name: "Answering" })).toBeTruthy(); // indicator follows immediately
+  expect(setSessionMock).not.toHaveBeenCalled();
+
+  // The gate passes: the SDK's sendMessage({ messageId }) replaces the SAME optimistic id in place (and
+  // reconcileMessagesById is the backstop), so the server echo yields EXACTLY ONE bubble, no duplicate.
+  release({ ok: true, publicAccessToken: "tok" });
+  await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
+  expect(screen.getAllByText("Median salary in Berlin?")).toHaveLength(1);
 });
 
 // --- mechanism (a): a follow-up delivers + watches via sendMessages, hydrated first ---

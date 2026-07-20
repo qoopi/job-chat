@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import type { Conversation } from "@shared/store";
@@ -15,7 +16,13 @@ import { useJobChatTransport } from "@/lib/chat-transport";
 import { isStreaming, reconcileMessagesById, resolveInsightTarget, type LcpTarget } from "@/lib/chat-ui";
 import { isAuthDialogOpen } from "@/lib/layers";
 import { closeAuthDialog, openAuthDialog, useAuthDialogOpen } from "@/lib/auth-dialog";
-import { listMyConversations, mintChatToken, sendMessage as sendMessageAction } from "@/app/actions";
+import {
+  deleteConversation as deleteConversationAction,
+  listMyConversations,
+  mintChatToken,
+  sendMessage as sendMessageAction,
+  startConversation as startConversationAction,
+} from "@/app/actions";
 
 // The live chat surface (mock 2a): it swaps 005's static fixture for `useChat` message parts fed by the
 // Trigger transport, and wires every interaction the interaction-spec calls for - composer send / stop
@@ -52,6 +59,7 @@ export function ChatClient({
   accountName?: string;
   conversations?: Pick<Conversation, "id" | "title" | "created_at">[];
 }) {
+  const router = useRouter();
   const transport = useJobChatTransport({ e2e });
   const { messages, sendMessage, stop, status, regenerate, setMessages, resumeStream } = useChat({
     id: conversationId,
@@ -60,6 +68,15 @@ export function ChatClient({
   });
 
   const [draft, setDraft] = useState("");
+  // The title bar + guest active-row title follow client state so New chat / deleting the open
+  // conversation return them to the "New chat" empty state in place (AC-19/AC-21), seeded from the SSR title.
+  const [titleState, setTitleState] = useState(title);
+  // AC-19 New chat in place: after a client-side reset, the NEXT message starts a brand-new conversation
+  // (the landing handoff), not a follow-up on the reset thread. This ref arms that first send. A ref (not
+  // state) because it only steers the imperative send path - it never needs to re-render.
+  const freshChatRef = useRef(false);
+  // AC-19: bumped on New chat to move focus to the composer (Composer watches this).
+  const [focusNonce, setFocusNonce] = useState(0);
   const [used, setUsed] = useState<Set<string>>(new Set());
   const [failed, setFailed] = useState<string | null>(null);
   // Auth is client-driven after mount: `signedIn`/`conversations` seed from the SSR resolve, then an
@@ -91,6 +108,40 @@ export function ChatClient({
   const openLcp = useCallback((messageId: string, partId: string) => setLcpTarget({ messageId, partId }), []);
   const closeLcp = useCallback(() => setLcpTarget(null), []);
 
+  // AC-19: New chat starts fresh IN PLACE (interaction-spec s5) - clear the thread, close the LCP, clear
+  // and focus the composer, WITHOUT navigating to the landing. The signed-in user's current conversation
+  // simply stays in history (already persisted; nothing to save). `freshChatRef` arms the next send to
+  // create a brand-new conversation instead of following up on the (now-cleared) one.
+  const startNewChat = useCallback(() => {
+    freshChatRef.current = true;
+    setMessages([]);
+    setLcpTarget(null);
+    setDraft("");
+    setFailed(null);
+    setTitleState(undefined); // title bar returns to the "New chat" empty state
+    setFocusNonce((n) => n + 1);
+  }, [setMessages]);
+
+  // The polite cap/budget notice, rendered as a data-refusal turn so the one MessageList path shows it
+  // (decision 19 / 004 handoff), not a bespoke banner. A GUEST hitting the cap also queues the blocked
+  // draft and opens the lazy dialog for auto-send on sign-in (AC-10/AC-11); a signed-in cap or a
+  // post-sign-in re-send just shows the notice and keeps the draft. Shared by the follow-up and the
+  // fresh-chat send paths (DRY).
+  const showRefusal = useCallback(
+    (reason: "guest_cap" | "daily_budget", text: string, fromAuth?: boolean) => {
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", parts: [{ type: "data-refusal", data: { reason } }] } as UIMessage,
+      ]);
+      setDraft(text); // AC-11: the blocked draft stays in the composer (survives dialog / cancel)
+      if (reason === "guest_cap" && !signedIn && !fromAuth) {
+        queuedDraftRef.current = text;
+        openAuthDialog();
+      }
+    },
+    [signedIn, setMessages],
+  );
+
   const send = useCallback(
     async (raw: string, opts?: { fromAuth?: boolean }) => {
       const text = raw.trim();
@@ -98,11 +149,54 @@ export function ChatClient({
       setFailed(null);
       setAwaiting(true); // instant answering indicator + streaming composer through the run-wake gap
 
+      // AC-19: the first message after New chat starts a NEW conversation (the landing handoff), then
+      // soft-navigates to it (no full reload) - the new page attaches the stream on arrival. Mirrors
+      // LandingComposer's submit exactly. Awaiting stays set through the navigation (the component
+      // unmounts on push); a refusal clears it and shows the notice.
+      if (freshChatRef.current) {
+        try {
+          if (e2e) {
+            router.push(`/chat/${crypto.randomUUID()}?new=1&q=${encodeURIComponent(text)}`);
+            return;
+          }
+          const r = await startConversationAction(text);
+          if (r.ok) {
+            freshChatRef.current = false;
+            router.push(`/chat/${r.conversationId}?new=1`);
+            return;
+          }
+          if (r.reason === "guest_cap" || r.reason === "daily_budget") {
+            showRefusal(r.reason, text, opts?.fromAuth);
+          } else {
+            setFailed(text); // invalid_input -> send-failure toast
+            setDraft(text);
+          }
+        } catch {
+          setFailed(text);
+          setDraft(text);
+        } finally {
+          if (freshChatRef.current) setAwaiting(false); // only when we did NOT navigate away
+        }
+        return;
+      }
+
+      // AC-22 optimistic echo: the user's bubble enters the rendered view NOW, at composer-clear time,
+      // before the gate/transport round trip - the send never waits on the ~6s run-wake gap. On the happy
+      // path the SDK's `sendMessage({ messageId })` REPLACES this exact id in place (and `reconcileMessagesById`
+      // is the backstop, so no duplicate); a gate refusal or a send failure rolls it back (flow C: a
+      // blocked/failed message is not shown as sent).
+      const userMessageId = crypto.randomUUID();
+      setMessages((prev) => [
+        ...prev,
+        { id: userMessageId, role: "user", parts: [{ type: "text", text }] } as UIMessage,
+      ]);
+      const rollbackEcho = () => setMessages((prev) => prev.filter((m) => m.id !== userMessageId));
+
       try {
         if (e2e) {
           // Mock transport streams the scripted turn; a Stop-abort rejects here and is expected (no toast).
           try {
-            await sendMessage({ text });
+            await sendMessage({ text, messageId: userMessageId });
           } catch {
             /* stream aborted (Stop) or mock stream error - e2e only, no send-failure toast */
           }
@@ -112,21 +206,9 @@ export function ChatClient({
         try {
           const r = await sendMessageAction(conversationId, text);
           if (!r.ok) {
+            rollbackEcho(); // AC-22: a refused send is not shown as sent (flow C)
             if (r.reason === "guest_cap" || r.reason === "daily_budget") {
-              // Same polite notice as the agent-side backstop: append a data-refusal turn so the one
-              // MessageList path renders it (decision 19 / 004 handoff), not a bespoke banner.
-              setMessages((prev) => [
-                ...prev,
-                { id: crypto.randomUUID(), role: "assistant", parts: [{ type: "data-refusal", data: { reason: r.reason } }] } as UIMessage,
-              ]);
-              setDraft(text); // AC-11: the blocked draft stays in the composer (survives dialog / cancel)
-              // AC-10/AC-11: a GUEST hitting the cap presents the dialog and queues the draft for
-              // auto-send on sign-in. A signed-in cap (or the post-sign-in re-send) just shows the notice
-              // and keeps the draft - there is no sign-in remedy.
-              if (r.reason === "guest_cap" && !signedIn && !opts?.fromAuth) {
-                queuedDraftRef.current = text;
-                openAuthDialog();
-              }
+              showRefusal(r.reason, text, opts?.fromAuth);
               return;
             }
             setFailed(text); // invalid_input / not_found -> send-failure toast
@@ -139,7 +221,8 @@ export function ChatClient({
           // a freshly-triggered follow-up live. `resumeStream`/`reconnectToStream` forces peekSettled,
           // built for reload-resume: attaching to a run triggered milliseconds earlier it reads the
           // settled prior turn and never delivers the fresh chunks (006 diagnosis, routed to 004).
-          // `useChat.sendMessage` adds the optimistic user turn itself, so no manual setMessages here.
+          // Passing `messageId` makes the SDK reconcile with the optimistic bubble above (replace in place),
+          // so the user turn renders exactly once.
           //
           // Carry the prior turn's `.out` cursor forward. `sendMessages` subscribes with
           // `lastEventId: state.lastEventId` (SDK 4.5.4 chat.js); `setSession` REPLACES the cached session,
@@ -153,8 +236,9 @@ export function ChatClient({
             isStreaming: true,
             lastEventId: prior?.lastEventId,
           });
-          await sendMessage({ text });
+          await sendMessage({ text, messageId: userMessageId });
         } catch {
+          rollbackEcho(); // AC-22: a failed send returns to the composer (toast + draft), not a stuck bubble
           setFailed(text);
           setDraft(text);
         }
@@ -162,7 +246,7 @@ export function ChatClient({
         setAwaiting(false); // fallback clear for paths that never stream (refusal / invalid / abort)
       }
     },
-    [e2e, conversationId, sendMessage, setMessages, transport, signedIn],
+    [e2e, conversationId, router, sendMessage, setMessages, transport, showRefusal],
   );
 
   // AC-3 arrival attach: the landing action already created the conversation and triggered its run, but
@@ -258,6 +342,19 @@ export function ChatClient({
     setConversations([]);
   }, []);
 
+  // AC-21: delete a conversation from the sidebar (signed-in only; the action re-checks ownership). Drop
+  // it from the history list, and if it is the OPEN one, clear to the fresh-chat state (reuse AC-19's
+  // path). A refusal (someone else's id / transient error) leaves the list untouched.
+  const onDeleteConversation = useCallback(
+    async (id: string) => {
+      const r = await deleteConversationAction(id);
+      if (!r.ok) return;
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (id === conversationId) startNewChat();
+    },
+    [conversationId, startNewChat],
+  );
+
   // Reconcile by id at the merge seam: a hydrated conversation that reconnects to a live run re-receives
   // its already-present assistant tail from the SDK's session replay, which the AI SDK appends under the
   // same id. Fold those duplicates (replace in place, order preserved) so each turn renders exactly once
@@ -307,16 +404,17 @@ export function ChatClient({
         accountName={accountName}
         conversations={conversations}
         activeId={conversationId}
-        activeTitle={title}
-        onNewChat={closeLcp}
+        activeTitle={titleState}
+        onNewChat={startNewChat}
         onSignIn={openAuthDialog}
         onSignOut={() => void onSignOut()}
+        onDeleteConversation={(id) => void onDeleteConversation(id)}
       />
       <main className="main">
         {/* AC-8: the LCP takes the middle of the canvas while the chat docks to the 360px right rail. */}
         {lcpInsight ? <LcpPanel insight={lcpInsight} onClose={closeLcp} /> : null}
         <div className={lcpInsight ? "canvas docked" : "canvas"}>
-          <TitleBar title={title} />
+          <TitleBar title={titleState} />
           <div className="thread-scroll">
             <MessageList
               messages={view}
@@ -334,6 +432,7 @@ export function ChatClient({
             onChange={setDraft}
             onSend={onComposerSend}
             onStop={() => void stop()}
+            focusSignal={focusNonce}
           />
         </div>
       </main>

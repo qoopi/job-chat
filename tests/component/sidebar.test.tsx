@@ -55,15 +55,59 @@ describe("signed-in history (AC-12)", () => {
     );
   });
 
-  test("New chat starts a fresh conversation", () => {
-    render(<Sidebar signedIn conversations={convs} activeId={convs[0].id} />);
-    expect(screen.getByRole("link", { name: "New chat" }).getAttribute("href")).toBe("/");
+  // AC-19: New chat starts fresh IN PLACE - it is a button that calls onNewChat, NOT a link that bounces
+  // to the landing (the old signed-in `<Link href="/">` was the conformance bug).
+  test("New chat is an in-place button, not a landing link (AC-19)", () => {
+    const onNewChat = vi.fn();
+    render(<Sidebar signedIn conversations={convs} activeId={convs[0].id} onNewChat={onNewChat} />);
+    expect(screen.queryByRole("link", { name: "New chat" })).toBeNull(); // no bounce to "/"
+    const btn = screen.getByRole("button", { name: "New chat" });
+    fireEvent.click(btn);
+    expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
   test("an empty account reads 'No conversations yet'", () => {
     render(<Sidebar signedIn conversations={[]} />);
     expect(screen.getByText("No conversations yet")).toBeTruthy();
     expect(document.querySelector(".sb-item")).toBeNull();
+  });
+});
+
+// AC-20: the wordmark is a way home.
+describe("logo (AC-20)", () => {
+  test("the jobchat.dev wordmark links to the landing", () => {
+    render(<Sidebar signedIn conversations={convs} activeId={convs[0].id} />);
+    expect(screen.getByRole("link", { name: /jobchat\.dev/i }).getAttribute("href")).toBe("/");
+  });
+});
+
+// AC-21: signed-in rows carry a delete affordance behind an inline confirm (never a modal); guests get none.
+describe("delete conversation (AC-21)", () => {
+  test("a signed-in row deletes via an inline confirm - onDeleteConversation fires only on confirm", () => {
+    const onDeleteConversation = vi.fn();
+    render(
+      <Sidebar signedIn conversations={convs} activeId={convs[0].id} onDeleteConversation={onDeleteConversation} />,
+    );
+
+    // The affordance opens an inline confirm - not a modal, and nothing deletes yet.
+    fireEvent.click(screen.getByRole("button", { name: "Delete Top companies hiring" }));
+    expect(screen.getByText("Delete this chat?")).toBeTruthy();
+    expect(onDeleteConversation).not.toHaveBeenCalled();
+
+    // Cancel backs out with no delete.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Delete this chat?")).toBeNull();
+    expect(onDeleteConversation).not.toHaveBeenCalled();
+
+    // Re-open and confirm -> the delete fires with the row's id.
+    fireEvent.click(screen.getByRole("button", { name: "Delete Top companies hiring" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onDeleteConversation).toHaveBeenCalledWith(convs[0].id);
+  });
+
+  test("a guest sidebar has no delete affordance", () => {
+    render(<Sidebar signedIn={false} />);
+    expect(screen.queryByRole("button", { name: /^Delete / })).toBeNull();
   });
 });
 

@@ -42,6 +42,8 @@ vi.mock("@/lib/auth-client", () => ({
   },
 }));
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
 import { ChatClient } from "@/components/chat/ChatClient";
 
 const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";

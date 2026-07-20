@@ -26,9 +26,10 @@ const footLinkStyle: CSSProperties = {
 function BrandCredit() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 8px" }}>
-      <div className="sb-brand" style={{ padding: 0 }}>
+      {/* AC-20: the wordmark is a way home - it links to the landing. */}
+      <Link className="sb-brand" href="/" style={{ padding: 0, textDecoration: "none" }}>
         jobchat.dev
-      </div>
+      </Link>
       <div style={{ fontSize: "10.5px", color: "var(--shell-fg-dim)" }}>
         built for <span style={{ color: "var(--clickhouse)", fontWeight: 600 }}>ClickHouse</span>{" "}
         &times; <span style={{ color: "var(--triggerdev)", fontWeight: 600 }}>Trigger.dev</span>
@@ -52,6 +53,7 @@ export function Sidebar({
   onNewChat,
   onSignIn,
   onSignOut,
+  onDeleteConversation,
 }: {
   signedIn?: boolean;
   accountName?: string;
@@ -61,13 +63,20 @@ export function Sidebar({
   onNewChat?: () => void;
   onSignIn?: () => void;
   onSignOut?: () => void;
+  /** AC-21: delete a signed-in conversation (guarded server-side). Absent (guest) => no affordance. */
+  onDeleteConversation?: (conversationId: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  // AC-21: which row is showing its inline "Delete this chat?" confirm (never a modal). Local UI state.
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   if (collapsed) {
     return (
       <aside className="sidebar collapsed">
-        <div style={{ fontSize: "15px", fontWeight: 700, color: "var(--shell-strong)" }}>j.</div>
+        {/* AC-20: the collapsed wordmark is a way home too. */}
+        <Link href="/" style={{ fontSize: "15px", fontWeight: 700, color: "var(--shell-strong)", textDecoration: "none" }}>
+          j.
+        </Link>
         <button
           className="sb-icon"
           type="button"
@@ -120,18 +129,11 @@ export function Sidebar({
         </button>
       </div>
 
-      {/* New chat on top. Guest keeps the P1 button (closes the LCP); signed-in starts a fresh chat. */}
-      {signedIn ? (
-        <Link className="btn btn-primary btn-block" href="/">
-          <PlusIcon />
-          New chat
-        </Link>
-      ) : (
-        <button className="btn btn-primary btn-block" type="button" onClick={() => onNewChat?.()}>
-          <PlusIcon />
-          New chat
-        </button>
-      )}
+      {/* New chat on top (AC-19): always starts a fresh chat IN PLACE (never a bounce to the landing). */}
+      <button className="btn btn-primary btn-block" type="button" onClick={() => onNewChat?.()}>
+        <PlusIcon />
+        New chat
+      </button>
 
       <div className="sb-section">History</div>
       {signedIn ? (
@@ -139,16 +141,44 @@ export function Sidebar({
           {conversations.length === 0 ? (
             <div className="sb-empty">No conversations yet</div>
           ) : (
-            conversations.map((c) => (
-              <Link
-                key={c.id}
-                className={c.id === activeId ? "sb-item active" : "sb-item"}
-                href={`/chat/${c.id}`}
-              >
-                {c.title}
-                <time>{relativeDate(c.created_at)}</time>
-              </Link>
-            ))
+            conversations.map((c) =>
+              confirmingId === c.id ? (
+                // AC-21: inline confirm (interaction-spec s1 pattern - never a modal).
+                <div key={c.id} className="sb-item sb-confirm">
+                  <span>Delete this chat?</span>
+                  <div className="sb-confirm-actions">
+                    <button
+                      type="button"
+                      className="sb-confirm-yes"
+                      onClick={() => {
+                        setConfirmingId(null);
+                        onDeleteConversation?.(c.id);
+                      }}
+                    >
+                      Delete
+                    </button>
+                    <button type="button" className="sb-confirm-no" onClick={() => setConfirmingId(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div key={c.id} className="sb-item-row">
+                  <Link className={c.id === activeId ? "sb-item active" : "sb-item"} href={`/chat/${c.id}`}>
+                    {c.title}
+                    <time>{relativeDate(c.created_at)}</time>
+                  </Link>
+                  <button
+                    type="button"
+                    className="sb-del"
+                    aria-label={`Delete ${c.title}`}
+                    onClick={() => setConfirmingId(c.id)}
+                  >
+                    &times;
+                  </button>
+                </div>
+              ),
+            )
           )}
         </div>
       ) : (

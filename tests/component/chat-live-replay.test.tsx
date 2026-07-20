@@ -46,6 +46,8 @@ vi.mock("@/app/actions", () => ({
   mintChatToken: (conversationId: string) => mintChatTokenMock(conversationId),
 }));
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
 import { ChatClient } from "@/components/chat/ChatClient";
 
 const CONVERSATION_ID = "44444444-4444-4444-8444-444444444444";

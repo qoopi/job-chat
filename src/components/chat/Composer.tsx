@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import { SendIcon, StopIcon } from "@/components/icons";
 
 // The message composer, all five design states (interaction-spec section 4). 005 shipped the markup;
@@ -22,18 +22,31 @@ export function Composer({
   onChange,
   onSend,
   onStop,
+  focusSignal,
 }: {
   state?: ComposerState;
   value?: string;
   onChange?: (value: string) => void;
   onSend?: () => void;
   onStop?: () => void;
+  /** AC-19: New chat focuses the composer in place. Bumping this counter (from the parent) moves focus
+   *  to the textarea; the first render never steals focus (a resumed thread must not grab it on mount). */
+  focusSignal?: number;
 }) {
   const barClass =
     state === "focused" ? "input-bar focused" : state === "disabled" ? "input-bar disabled" : "input-bar";
   const streaming = state === "streaming";
   const inputDisabled = streaming || state === "disabled";
   const ref = useRef<HTMLTextAreaElement>(null);
+  const firstFocus = useRef(true);
+
+  useEffect(() => {
+    if (firstFocus.current) {
+      firstFocus.current = false;
+      return; // skip the initial mount - only a bumped signal (New chat) moves focus here
+    }
+    ref.current?.focus();
+  }, [focusSignal]);
 
   // Enter sends, Shift+Enter inserts a newline (interaction-spec section 4). The default textarea
   // newline on plain Enter is suppressed so a send never leaves a stray line break behind.
