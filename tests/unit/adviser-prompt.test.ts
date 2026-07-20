@@ -99,6 +99,24 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toContain("bad:");
     expect(p).toContain("good:");
   });
+
+  // 010-polish round (v1-Q5 double-card fix): exactly one data tool per answer - one question, one card.
+  // The strict eval scorer fails a right tool called beside a second data tool; the prompt now forbids it.
+  it("pins the single-data-tool rule: exactly one data tool per answer, never a second card", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toMatch(/exactly one data tool/);
+    expect(p).toMatch(/never call a second data tool|no second data tool/);
+  });
+
+  // 010-polish round (U1-U3 out-of-scope miss): clearly out-of-domain questions (weather, sports, stock)
+  // MUST route to report_unanswerable, not a prose-only refusal - so the escape hatch actually fires.
+  it("routes clearly out-of-scope questions (weather/sports/stock) to report_unanswerable, not prose", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toContain("report_unanswerable");
+    expect(p).toContain("weather");
+    expect(p).toMatch(/sports|stock/);
+    expect(p).toMatch(/must call report_unanswerable|report_unanswerable[^.]*required|do not refuse in prose/);
+  });
 });
 
 // Gap fill (05-testing audit): the cutover itself (task requirement 4 - "Cut trigger/chat.ts over to
