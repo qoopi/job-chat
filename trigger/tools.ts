@@ -1,13 +1,18 @@
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import {
+  ComposedQueryParams,
   TEMPLATE_PARAM_SCHEMAS,
   type Analytics,
   type TemplateName,
 } from "@shared/analytics";
+import { ChartTypeSchema, type ChartType } from "@shared/insight";
 import {
+  buildComposedInsight,
+  buildComposedSkeleton,
   buildInsight,
   buildSkeleton,
+  chartTypeForShape,
   emptyModelOutput,
   emptyPart,
   errorPart,
@@ -94,9 +99,66 @@ function catalogTool(name: TemplateName, deps: CatalogDeps) {
   });
 }
 
+// The seventh tool: query_postings composes a whitelisted aggregate (008's buildComposedSql) for any
+// question the six fixed templates do not fit, and lets the agent pick the chart type behind the
+// deterministic chartTypeForShape fallback. Its own parallel parts path - it is NOT a TemplateName.
+const COMPOSED_DESCRIPTION =
+  "Compose a custom aggregate over the postings when none of the six fixed tools fit. Pick 1-2 measures " +
+  "(count, median_salary, p25_salary, p75_salary), group by up to two dimensions (company, city, region, " +
+  "country, experience_level, employment_type, location_kind, title) and/or one time bucket (day/week/month), " +
+  "filter (role, company, city, region, country, experience_level, employment_type, location_kind, days, " +
+  "min_salary, max_salary), and choose a chartType. Use for questions like 'top companies in the US', " +
+  "'median salary by experience level in Berlin', or 'which roles are hiring most'.";
+
+// The composed tool input: the shared strict composed schema (008) plus the agent's chartType pick.
+const ComposedToolInput = ComposedQueryParams.extend({
+  chartType: ChartTypeSchema.or(z.literal("table")),
+});
+
+function composedTool(deps: CatalogDeps) {
+  // Cast to one concrete Zod type so tool()'s input inference does not collapse (as with the templates);
+  // runComposedQuery re-validates, and the tool re-parses below, so runtime safety is unaffected.
+  const inputSchema = ComposedToolInput as unknown as z.ZodType<Record<string, unknown>>;
+  return tool({
+    description: COMPOSED_DESCRIPTION,
+    inputSchema,
+    execute: async (input, { toolCallId }) => {
+      const id = toolCallId;
+      const { chartType: rawPick, ...queryParams } = input as {
+        chartType: ChartType | "table";
+      } & Record<string, unknown>;
+      // Skeleton from the agent's RAW pick (known at call time); the filled insight reconciles it in
+      // place under the same id once the served (shape-fit) type is known from the actual rows.
+      deps.emit({ type: "data-insight", id, data: buildComposedSkeleton(id, rawPick) });
+      try {
+        // Re-validate + apply the schema defaults (dimensions/limit), then run the 008 composed path (the
+        // ONLY route to ClickHouse for query_postings). The composed schema is strict, so chartType was
+        // stripped above; runComposedQuery re-parses too (idempotent).
+        const params = ComposedQueryParams.parse(queryParams);
+        const result = await deps.analytics.runComposedQuery(params);
+        if (result.rows.length === 0) {
+          deps.emit(emptyPart(id));
+          return { ...emptyModelOutput("query_postings"), rawChartType: rawPick };
+        }
+        const served = chartTypeForShape(params, rawPick, result.rows.length);
+        const insight = buildComposedInsight({ id, params, chartType: served, result });
+        deps.emit({ type: "data-insight", id, data: insight });
+        // Record the RAW chartType pick on the tool result: AC-4 scores the pick BEFORE any fallback (the
+        // 010 harness reads it here); the served chart may differ where the fallback corrected an unfit pick.
+        return { ...toModelOutput(insight), rawChartType: rawPick };
+      } catch (err) {
+        console.error(`[catalog:query_postings] query failed`, err);
+        deps.emit(errorPart(id, "system"));
+        return { error: "The query failed - tell the user something went wrong and to try again." };
+      }
+    },
+  });
+}
+
 export function buildCatalogTools(deps: CatalogDeps): ToolSet {
   const tools: ToolSet = {};
   for (const name of CATALOG_TOOL_NAMES) tools[name] = catalogTool(name, deps);
+  tools.query_postings = composedTool(deps);
 
   tools.report_unanswerable = tool({
     description:

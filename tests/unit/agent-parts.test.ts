@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import { DataInsightSchema } from "@shared/insight";
 import type { QueryResult } from "@shared/analytics";
 import {
+  buildComposedInsight,
+  buildComposedSkeleton,
   buildInsight,
   buildSkeleton,
   chartTypeFor,
+  chartTypeForShape,
+  composedFollowups,
   emptyModelOutput,
   emptyPart,
   errorPart,
@@ -348,5 +352,178 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
       parts: [{ type: "data-refusal", id: "r1", data: { reason: "too_long" } }],
     };
     expect(extractAssistantPersistence(message).parts).toEqual({ reason: "too_long" });
+  });
+});
+
+// ---- query_postings composed path (parallel to the TemplateName-keyed template path) --------------
+
+// AC-4: chartTypeForShape is the deterministic server-side fallback. The agent proposes a chartType
+// (the RAW pick, recorded by the tool); this returns the SERVED type - the agent's pick when it fits
+// the data shape, else the shape's fit type. Case table + override behavior.
+describe("Should_FallBackToFitChartType_When_RawPickUnfit (chartTypeForShape, AC-4)", () => {
+  it("a time bucket is always a trend (any non-trend pick is overridden)", () => {
+    expect(chartTypeForShape({ dimensions: [], bucket: "week" }, "bars", 5)).toBe("trend");
+    expect(chartTypeForShape({ dimensions: [], bucket: "day" }, "donut", 3)).toBe("trend");
+    expect(chartTypeForShape({ dimensions: [], bucket: "month" }, "trend", 12)).toBe("trend");
+  });
+
+  it("a single categorical dimension + count is bars by default", () => {
+    expect(chartTypeForShape({ dimensions: ["company"] }, "bars", 10)).toBe("bars");
+    expect(chartTypeForShape({ dimensions: ["title"] }, "bars", 20)).toBe("bars");
+  });
+
+  it("honors a donut pick only for a readable share-of-whole (<= 6 slices)", () => {
+    expect(chartTypeForShape({ dimensions: ["experience_level"] }, "donut", 4)).toBe("donut");
+    expect(chartTypeForShape({ dimensions: ["location_kind"] }, "donut", 6)).toBe("donut");
+    // > 6 slices: a donut is unreadable, so the unfit pick is corrected to bars.
+    expect(chartTypeForShape({ dimensions: ["company"] }, "donut", 7)).toBe("bars");
+    expect(chartTypeForShape({ dimensions: ["company"] }, "donut", 12)).toBe("bars");
+  });
+
+  it("corrects an unfit pick on a single-dimension shape to bars", () => {
+    expect(chartTypeForShape({ dimensions: ["company"] }, "trend", 5)).toBe("bars");
+    expect(chartTypeForShape({ dimensions: ["title"] }, "histogram", 5)).toBe("bars");
+    expect(chartTypeForShape({ dimensions: ["company"] }, "table", 5)).toBe("bars");
+  });
+
+  it("two grouping keys (2 dims, or a dim + bucket) are an entity-ish table", () => {
+    expect(chartTypeForShape({ dimensions: ["company", "city"] }, "bars", 5)).toBe("table");
+    expect(chartTypeForShape({ dimensions: ["company"], bucket: "month" }, "trend", 5)).toBe("table");
+  });
+
+  it("a bare aggregate (no dimension, no bucket) is a single-row table", () => {
+    expect(chartTypeForShape({ dimensions: [] }, "bars", 1)).toBe("table");
+  });
+});
+
+describe("buildComposedSkeleton builds the loading part from the agent's chartType pick", () => {
+  it("a chart pick -> chart skeleton with that chartType", () => {
+    expect(buildComposedSkeleton("c1", "bars")).toEqual({
+      id: "c1",
+      kind: "chart",
+      chartType: "bars",
+      status: "loading",
+    });
+    expect(buildComposedSkeleton("c2", "donut")).toMatchObject({ kind: "chart", chartType: "donut" });
+  });
+
+  it("a table pick -> table skeleton, no chartType", () => {
+    expect(buildComposedSkeleton("c3", "table")).toEqual({ id: "c3", kind: "table", status: "loading" });
+  });
+});
+
+describe("buildComposedInsight builds a strict-valid insight for the seventh tool (no faked template)", () => {
+  const composedResult = (
+    rows: Record<string, unknown>[],
+    sampleN: number,
+    openSet = true,
+  ): QueryResult => ({
+    sql: "SELECT company, count() AS count FROM postings FINAL WHERE ...",
+    rows,
+    meta: { sampleN, freshestAt: "2026-07-18 06:00:00", ...(openSet ? { openSet: true } : {}) },
+  });
+
+  it("count by company (bars): leads with the top company + its count, threads meta + openSet", () => {
+    const result = composedResult(
+      [
+        { company: "Google", count: 4 },
+        { company: "Meta", count: 2 },
+        { company: "Amazon", count: 2 },
+      ],
+      8,
+    );
+    const insight = buildComposedInsight({
+      id: "q1",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      result,
+    });
+    expect(() => DataInsightSchema.parse(insight)).not.toThrow();
+    expect(insight.kind).toBe("chart");
+    if (insight.kind === "chart") {
+      expect(insight.chartType).toBe("bars");
+      expect(insight.series).toEqual(result.rows);
+    }
+    expect(insight.verdict).toContain("Google");
+    expect(insight.verdict).toContain("4");
+    expect(insight.meta).toMatchObject({ sampleN: 8, updatedAt: "2026-07-18 06:00:00", openSet: true });
+  });
+
+  it("a share-of-whole served as a donut is a strict-valid chart insight", () => {
+    const insight = buildComposedInsight({
+      id: "q2",
+      params: { measures: ["count"], dimensions: ["experience_level"] },
+      chartType: "donut",
+      result: composedResult([{ experience_level: "Senior", count: 5 }, { experience_level: "Junior", count: 3 }], 8),
+    });
+    expect(insight.kind).toBe("chart");
+    if (insight.kind === "chart") expect(insight.chartType).toBe("donut");
+    expect(() => DataInsightSchema.parse(insight)).not.toThrow();
+  });
+
+  it("an entity-ish two-dimension result served as a table carries rows, not a series", () => {
+    const insight = buildComposedInsight({
+      id: "q3",
+      params: { measures: ["count"], dimensions: ["company", "city"] },
+      chartType: "table",
+      result: composedResult([{ company: "Google", city: "San Francisco", count: 3 }], 3),
+    });
+    expect(insight.kind).toBe("table");
+    if (insight.kind === "table") expect(insight.rows).toHaveLength(1);
+    expect(() => DataInsightSchema.parse(insight)).not.toThrow();
+  });
+
+  it("a salary measure by dimension names the leader with its value", () => {
+    const insight = buildComposedInsight({
+      id: "q4",
+      params: { measures: ["median_salary"], dimensions: ["experience_level"] },
+      chartType: "bars",
+      result: composedResult([{ experience_level: "Staff", median_salary: 200000 }, { experience_level: "Senior", median_salary: 175000 }], 8),
+    });
+    expect(insight.verdict).toContain("Staff");
+    expect(insight.verdict).toContain("200000");
+  });
+
+  it("omits openSet from meta for a full-history (windowed) composed result", () => {
+    const insight = buildComposedInsight({
+      id: "q5",
+      params: { measures: ["count"], bucket: "week", days: 30 },
+      chartType: "trend",
+      result: composedResult([{ bucket: "2026-07-06", count: 4 }, { bucket: "2026-07-13", count: 6 }], 10, false),
+    });
+    expect(insight.meta).not.toHaveProperty("openSet");
+    // A trend leads with the total, the honest headline for a time series.
+    expect(insight.verdict).toContain("10");
+  });
+});
+
+describe("composedFollowups derives two deterministic chips from the params (no LLM)", () => {
+  it("widens by dropping the most-selective filter and pivots to an unused dimension", () => {
+    const chips = composedFollowups({ measures: ["count"], dimensions: ["company"], country: "United States" });
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toBe("How does this look worldwide?"); // drop the country filter
+    expect(chips[1]).toBe("Break this down by experience level."); // an unused, unpinned dimension
+  });
+
+  it("respects the most-selective precedence (role beats company beats country)", () => {
+    const chips = composedFollowups({
+      measures: ["count"],
+      dimensions: ["city"],
+      role: "engineer",
+      company: "Google",
+      country: "United States",
+    });
+    expect(chips[0]).toBe("How does this look across all roles?");
+  });
+
+  it("falls back to a time pivot when there is no filter to widen, and stays at two chips", () => {
+    const chips = composedFollowups({ measures: ["count"], dimensions: ["title"] });
+    expect(chips).toHaveLength(2);
+    expect(chips).toContain("How has this changed over time?");
+  });
+
+  it("is deterministic - the same params yield the same chips", () => {
+    const params = { measures: ["median_salary"], dimensions: ["experience_level"], city: "Berlin" };
+    expect(composedFollowups(params)).toEqual(composedFollowups(params));
   });
 });

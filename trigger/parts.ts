@@ -23,6 +23,49 @@ export function chartTypeFor(tool: TemplateName): ChartType | "table" {
   return CHART_TYPE[tool];
 }
 
+/** How many slices a donut stays readable at; a donut pick beyond this is corrected to bars (AC-4). */
+const DONUT_MAX_SLICES = 6;
+
+/** The subset of the composed params (@shared/analytics ComposedQuery) the parts path reads. */
+export interface ComposedShape {
+  measures: readonly string[];
+  dimensions?: readonly string[];
+  bucket?: string;
+  role?: string;
+  company?: string;
+  city?: string;
+  region?: string;
+  country?: string;
+  experience_level?: string;
+  employment_type?: string;
+  location_kind?: string;
+  days?: number;
+  min_salary?: number;
+  max_salary?: number;
+}
+
+/**
+ * The deterministic server-side chart fallback for query_postings (AC-4). The agent proposes a
+ * chartType (the RAW pick, recorded by the tool BEFORE this runs); this returns the SERVED type: the
+ * pick when it fits the data shape, else the shape's fit type. Shapes: a time bucket is a trend; a
+ * single categorical dimension is a comparison (bars), or a share-of-whole donut when the agent asked
+ * for one AND it stays readable (<= DONUT_MAX_SLICES slices); two grouping keys (2 dims, or a dim + a
+ * bucket) or a bare aggregate are an entity-ish table. No histogram branch - the value-bucket histogram
+ * shape is unreachable in the composed param space (v1 salary_distribution owns it).
+ */
+export function chartTypeForShape(
+  shape: { dimensions?: readonly string[]; bucket?: string },
+  rawPick: ChartType | "table",
+  rowCount: number,
+): ChartType | "table" {
+  const dims = shape.dimensions?.length ?? 0;
+  const keys = dims + (shape.bucket ? 1 : 0);
+  if (keys >= 2) return "table"; // a cross-tab / entity-ish result
+  if (shape.bucket) return "trend"; // exactly one grouping key, the time bucket
+  if (dims === 1) return rawPick === "donut" && rowCount <= DONUT_MAX_SLICES ? "donut" : "bars";
+  return "table"; // no grouping key: a single-row aggregate
+}
+
 const FOLLOWUPS: Record<TemplateName, string[]> = {
   salary_distribution: ["How does this compare between cities?", "Which companies pay the most?"],
   salary_compare: ["What is the salary distribution here?", "Who is hiring the most?"],
@@ -73,6 +116,123 @@ function verdictFor(tool: TemplateName, rows: Record<string, unknown>[], params:
   }
 }
 
+// ---- query_postings composed parts (a parallel path; NOT keyed by TemplateName) -------------------
+
+/** Human labels for the composed measures - used in the generic verdict. */
+const COMPOSED_MEASURE_LABEL: Record<string, string> = {
+  count: "postings",
+  median_salary: "median salary",
+  p25_salary: "25th-percentile salary",
+  p75_salary: "75th-percentile salary",
+};
+
+/**
+ * The generic composed verdict - leads with the key number (honesty), like the per-template verdicts.
+ * Count is summable into a headline total; salary quantiles are not. A single-dimension, non-bucketed
+ * result is a ranking (the default sort is measure-descending), so the top row genuinely leads and is
+ * named; a trend / cross-tab / bare aggregate leads with the total (count) or the observed range
+ * (salary) instead, so no false superlative is ever claimed.
+ */
+function verdictForComposed(
+  params: ComposedShape,
+  _served: ChartType | "table",
+  rows: Record<string, unknown>[],
+): string {
+  const measure = params.measures[0];
+  const top = rows[0];
+  const dimKey = params.dimensions?.[0];
+  const ranked = dimKey !== undefined && !params.bucket; // single-dimension ranking: top row is the extreme
+
+  if (measure === "count") {
+    const total = rows.reduce((sum, r) => sum + num(r.count), 0);
+    return ranked
+      ? `${String(top[dimKey!])} leads with ${num(top.count)} of ${total} postings.`
+      : `${total} postings in total.`;
+  }
+
+  const label = COMPOSED_MEASURE_LABEL[measure] ?? measure;
+  if (ranked) return `${String(top[dimKey!])} has the highest ${label} at ${num(top[measure])}.`;
+  if (dimKey === undefined && !params.bucket) return `The ${label} is ${num(top[measure])}.`;
+  const values = rows.map((r) => num(r[measure]));
+  return `The ${label} ranges from ${Math.min(...values)} to ${Math.max(...values)}.`;
+}
+
+// The "widen" chip drops the most-selective active filter. Precedence RECORDED in the epic decision
+// log (2026-07-20): role > company > city > region > country > experience_level > employment_type >
+// location_kind > days.
+const WIDEN_PRECEDENCE = [
+  "role", "company", "city", "region", "country",
+  "experience_level", "employment_type", "location_kind", "days",
+] as const;
+const WIDEN_PHRASE: Record<string, string> = {
+  role: "across all roles",
+  company: "across all companies",
+  city: "across all cities",
+  region: "across all regions",
+  country: "worldwide",
+  experience_level: "across all experience levels",
+  employment_type: "across all employment types",
+  location_kind: "across all work arrangements",
+  days: "over all time",
+};
+
+// The "pivot" chip swaps to an unused dimension - the first by this preference that is neither already
+// a dimension nor pinned to a single value by an equality filter.
+const PIVOT_PREFERENCE = [
+  "company", "experience_level", "location_kind", "country", "city", "region", "employment_type", "title",
+] as const;
+const DIM_LABEL: Record<string, string> = {
+  company: "company", city: "city", region: "region", country: "country",
+  experience_level: "experience level", employment_type: "employment type",
+  location_kind: "work arrangement", title: "role",
+};
+// Which dimension each equality filter pins (so a pivot never lands on an already-fixed value).
+const FILTER_PINS_DIM: Record<string, string> = {
+  role: "title", company: "company", city: "city", region: "region", country: "country",
+  experience_level: "experience_level", employment_type: "employment_type", location_kind: "location_kind",
+};
+
+function widenChip(params: ComposedShape): string | null {
+  const p = params as unknown as Record<string, unknown>;
+  for (const f of WIDEN_PRECEDENCE) {
+    if (p[f] !== undefined) return `How does this look ${WIDEN_PHRASE[f]}?`;
+  }
+  return null;
+}
+
+function pivotChip(params: ComposedShape): string | null {
+  const p = params as unknown as Record<string, unknown>;
+  const used = new Set<string>(params.dimensions ?? []);
+  for (const [filter, dim] of Object.entries(FILTER_PINS_DIM)) {
+    if (p[filter] !== undefined) used.add(dim);
+  }
+  for (const d of PIVOT_PREFERENCE) {
+    if (!used.has(d)) return `Break this down by ${DIM_LABEL[d]}.`;
+  }
+  return null;
+}
+
+/**
+ * Two deterministic follow-up chips for a composed answer (no LLM): widen (drop the most-selective
+ * filter) and pivot (swap to an unused dimension). Generic time / exploration chips backfill so a slice
+ * with nothing to widen or no free dimension still yields exactly two distinct chips.
+ */
+export function composedFollowups(params: ComposedShape): string[] {
+  const candidates = [
+    widenChip(params),
+    pivotChip(params),
+    params.bucket ? null : "How has this changed over time?",
+    "Which companies are hiring the most?",
+    "What is the experience-level mix?",
+  ];
+  const chips: string[] = [];
+  for (const c of candidates) {
+    if (c && !chips.includes(c)) chips.push(c);
+    if (chips.length === 2) break;
+  }
+  return chips;
+}
+
 export interface BuildInsightArgs {
   id: string;
   tool: TemplateName;
@@ -85,10 +245,18 @@ export interface BuildInsightArgs {
  * the rows + follow-up chips + meta. Returned value is validated against the STRICT shared schema, so
  * an invalid shape fails loudly here (a test) rather than at persist/render time.
  */
-export function buildInsight({ id, tool, params, result }: BuildInsightArgs): DataInsight {
-  const visual = chartTypeFor(tool);
-  const verdict = verdictFor(tool, result.rows, params, result.meta.sampleN);
-  const followups = FOLLOWUPS[tool];
+/**
+ * Assemble + strict-validate a data-insight from its already-chosen visual, verdict, and follow-ups.
+ * Shared by the template path (buildInsight) and the composed path (buildComposedInsight) so the meta
+ * threading (incl. the AC-3 openSet flag) and the chart/table discrimination have ONE home.
+ */
+function assembleInsight(
+  id: string,
+  visual: ChartType | "table",
+  verdict: string,
+  followups: string[],
+  result: QueryResult,
+): DataInsight {
   // openSet threads through only when the predicate applied (AC-3); absent = full history, never injected.
   const meta = {
     sql: result.sql,
@@ -97,13 +265,49 @@ export function buildInsight({ id, tool, params, result }: BuildInsightArgs): Da
     ...(result.meta.openSet ? { openSet: true } : {}),
   };
   const data = result.rows as DataPoint[];
-
   const candidate =
     visual === "table"
       ? { id, kind: "table" as const, verdict, rows: data, followups, meta }
       : { id, kind: "chart" as const, chartType: visual, verdict, series: data, followups, meta };
-
   return DataInsightSchema.parse(candidate);
+}
+
+export function buildInsight({ id, tool, params, result }: BuildInsightArgs): DataInsight {
+  return assembleInsight(
+    id,
+    chartTypeFor(tool),
+    verdictFor(tool, result.rows, params, result.meta.sampleN),
+    FOLLOWUPS[tool],
+    result,
+  );
+}
+
+export interface BuildComposedInsightArgs {
+  id: string;
+  params: ComposedShape;
+  /** The SERVED chart type (already shape-corrected via chartTypeForShape). */
+  chartType: ChartType | "table";
+  result: QueryResult;
+}
+
+/**
+ * Build the single data-insight for a query_postings answer: the generic composed verdict + the served
+ * chart type + the rows + deterministic follow-ups + meta. The parallel of buildInsight for the seventh
+ * tool - it does NOT go through the TemplateName-keyed maps, so no faked template entry is required.
+ */
+export function buildComposedInsight({
+  id,
+  params,
+  chartType,
+  result,
+}: BuildComposedInsightArgs): DataInsight {
+  return assembleInsight(
+    id,
+    chartType,
+    verdictForComposed(params, chartType, result.rows),
+    composedFollowups(params),
+    result,
+  );
 }
 
 /** The loading part written first (same id as the filled insight, so the UI reconciles in place). */
@@ -114,11 +318,19 @@ export interface SkeletonPart {
   status: "loading";
 }
 
-export function buildSkeleton(id: string, tool: TemplateName): SkeletonPart {
-  const visual = chartTypeFor(tool);
+function skeletonFor(id: string, visual: ChartType | "table"): SkeletonPart {
   return visual === "table"
     ? { id, kind: "table", status: "loading" }
     : { id, kind: "chart", chartType: visual, status: "loading" };
+}
+
+export function buildSkeleton(id: string, tool: TemplateName): SkeletonPart {
+  return skeletonFor(id, chartTypeFor(tool));
+}
+
+/** The composed tool's loading skeleton, built from the agent's chartType pick (known at call time). */
+export function buildComposedSkeleton(id: string, chartType: ChartType | "table"): SkeletonPart {
+  return skeletonFor(id, chartType);
 }
 
 /**
@@ -142,7 +354,7 @@ export function emptyPart(id: string): EmptyPart {
  * The compact model-facing signal for an empty (0-row) tool result: no postings matched, so the model
  * must answer in plain prose (no chart, no invented numbers) rather than narrate a retry or emit a card.
  */
-export function emptyModelOutput(tool: TemplateName): { empty: true; tool: TemplateName; note: string } {
+export function emptyModelOutput(tool: string): { empty: true; tool: string; note: string } {
   return {
     empty: true,
     tool,
