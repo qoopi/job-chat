@@ -61,3 +61,133 @@ describe("eval harness (offline smoke)", () => {
     expect(CHART_BEARING.every((c) => c.expect.tool === "query_postings")).toBe(true);
   });
 });
+
+// Adversarial audit (05-testing, 2026-07-20): hand-built WRONG transcripts, checking that scoreCase
+// actually fails them rather than silently passing. Confirms the reported 90%/100% gates mean something
+// for tool identity + mode + raw chart pick, and pins two things that are informational-only by design
+// (params-subset, formatRules never gate toolModePass) plus one real scorer leniency found while auditing
+// the saved v1 report (tracker/research/eval-baseline-v1-2026-07-21.txt, case Q5): the tool check is
+// set-membership, not an exact single-call match. See the Test Report for the full writeup.
+describe("scoreCase adversarial probes (is the reported gate strict enough?)", () => {
+  it("right tool, but no insight rendered (mode mismatch) fails toolModePass - a correct tool never masks a mode miss", () => {
+    const dataCase = EVAL_SET.find((c) => c.id === "Q1")!; // expect: mode=data, tool=salary_distribution
+    const observed: Observed = {
+      toolCalls: [{ name: dataCase.expect.tool!, input: dataCase.expect.params ?? {} }],
+      text: "No matching postings for that filter.",
+      hasInsight: false, // e.g. an empty result - the tool ran, but no card was emitted
+    };
+    const scored = scoreCase(dataCase, observed);
+    expect(scored.toolPass).toBe(true);
+    expect(scored.modePass).toBe(false);
+    expect(scored.toolModePass).toBe(false);
+  });
+
+  it("tool check is set-membership, not an exact single-call match: an extra tool call alongside the right one still passes (real v1 Q5 hit this)", () => {
+    const dataCase = EVAL_SET.find((c) => c.id === "Q5")!; // expect: mode=data, tool=share_split
+    const observed: Observed = {
+      toolCalls: [
+        { name: dataCase.expect.tool!, input: dataCase.expect.params ?? {} },
+        {
+          name: "query_postings",
+          input: { measures: ["count"], dimensions: ["experience_level"], chartType: "donut" },
+        },
+      ],
+      text: "Senior roles make up about 40% of postings.",
+      hasInsight: true,
+    };
+    const scored = scoreCase(dataCase, observed);
+    expect(scored.toolPass).toBe(true); // observedTools.includes(expect.tool) - the extra call is invisible to the score
+    expect(scored.toolModePass).toBe(true);
+  });
+
+  it("params-subset check bites: a MISSING expected key fails paramsPass, it is not silently treated as a match", () => {
+    const composed = EVAL_SET.find((c) => c.id === "C1")!; // expect params: measures, dimensions, country
+    const observed: Observed = {
+      toolCalls: [
+        { name: "query_postings", input: { measures: ["count"], dimensions: ["company"], chartType: "bars" } }, // country dropped
+      ],
+      text: "Google leads US hiring.",
+      hasInsight: true,
+    };
+    const scored = scoreCase(composed, observed);
+    expect(scored.paramsChecked).toBe(true);
+    expect(scored.paramsPass).toBe(false);
+  });
+
+  it("params-subset check bites: a WRONG value for an expected key fails paramsPass", () => {
+    const composed = EVAL_SET.find((c) => c.id === "C1")!;
+    const observed: Observed = {
+      toolCalls: [
+        {
+          name: "query_postings",
+          input: { measures: ["count"], dimensions: ["company"], country: "Germany", chartType: "bars" },
+        },
+      ],
+      text: "Google leads US hiring.",
+      hasInsight: true,
+    };
+    const scored = scoreCase(composed, observed);
+    expect(scored.paramsPass).toBe(false);
+  });
+
+  it("a chart-bearing case where the tool call never records a chartType fails the chart pick - it does not silently pass", () => {
+    const composed = EVAL_SET.find((c) => c.id === "C1")!;
+    const observed: Observed = {
+      toolCalls: [
+        { name: "query_postings", input: { measures: ["count"], dimensions: ["company"], country: "United States" } }, // no chartType key
+      ],
+      text: "Google leads US hiring.",
+      hasInsight: true,
+    };
+    const scored = scoreCase(composed, observed);
+    expect(scored.chartBearing).toBe(true);
+    expect(scored.rawChartType).toBeUndefined();
+    expect(scored.chartPass).toBe(false);
+  });
+
+  it("a chart-bearing case with the WRONG raw chartType fails the chart pick", () => {
+    const composed = EVAL_SET.find((c) => c.id === "C6")!; // expect chartType "trend"
+    const observed: Observed = {
+      toolCalls: [
+        { name: "query_postings", input: { measures: ["median_salary"], bucket: "month", chartType: "bars" } },
+      ],
+      text: "Median salary rose steadily.",
+      hasInsight: true,
+    };
+    const scored = scoreCase(composed, observed);
+    expect(scored.rawChartType).toBe("bars");
+    expect(scored.chartPass).toBe(false);
+  });
+
+  it("formatRules fires on an over-length plain answer or a banned opener - but never gates toolModePass (informational only, matching the printed report)", () => {
+    const plain = EVAL_SET.find((c) => c.id === "P2-1")!; // plain, no tool, formatRules: true
+    const tooLong = scoreCase(plain, {
+      toolCalls: [],
+      hasInsight: false,
+      text: "I can show hiring data. I can also show salary data. Just ask me a question.",
+    });
+    expect(tooLong.formatPass).toBe(false); // 3 sentences
+    expect(tooLong.toolModePass).toBe(true); // format never gates the AC-7 unit
+
+    const bannedOpener = scoreCase(plain, {
+      toolCalls: [],
+      hasInsight: false,
+      text: "Great question! I can show salary data from the postings.",
+    });
+    expect(bannedOpener.formatPass).toBe(false); // banned opener + "!"
+    expect(bannedOpener.toolModePass).toBe(true);
+  });
+
+  it("an unanswerable case answered with a data card fails on BOTH tool and mode", () => {
+    const unanswerable = EVAL_SET.find((c) => c.id === "U1")!; // expect: report_unanswerable, plain mode
+    const observed: Observed = {
+      toolCalls: [{ name: "top_companies", input: { days: 30 } }], // guessed a tool instead of refusing
+      text: "Some companies post more during certain seasons.",
+      hasInsight: true,
+    };
+    const scored = scoreCase(unanswerable, observed);
+    expect(scored.toolPass).toBe(false);
+    expect(scored.modePass).toBe(false);
+    expect(scored.toolModePass).toBe(false);
+  });
+});
