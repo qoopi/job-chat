@@ -133,11 +133,7 @@ const COMPOSED_MEASURE_LABEL: Record<string, string> = {
  * named; a trend / cross-tab / bare aggregate leads with the total (count) or the observed range
  * (salary) instead, so no false superlative is ever claimed.
  */
-function verdictForComposed(
-  params: ComposedShape,
-  _served: ChartType | "table",
-  rows: Record<string, unknown>[],
-): string {
+function verdictForComposed(params: ComposedShape, rows: Record<string, unknown>[]): string {
   const measure = params.measures[0];
   const top = rows[0];
   const dimKey = params.dimensions?.[0];
@@ -307,7 +303,7 @@ export function buildComposedInsight({
   return assembleInsight(
     id,
     chartType,
-    verdictForComposed(params, chartType, result.rows),
+    verdictForComposed(params, result.rows),
     composedFollowups(params),
     result,
   );
