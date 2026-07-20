@@ -141,7 +141,10 @@ function verdictForComposed(
   const measure = params.measures[0];
   const top = rows[0];
   const dimKey = params.dimensions?.[0];
-  const ranked = dimKey !== undefined && !params.bucket; // single-dimension ranking: top row is the extreme
+  // A ranking only when there is EXACTLY one dimension and no bucket: then the measure-desc sort makes
+  // the top row the genuine extreme. A 2-dim cross-tab's top row is one cell, NOT the group leader (its
+  // group's other rows can sum higher), so it must NOT take the leader branch - it aggregates instead.
+  const ranked = params.dimensions?.length === 1 && !params.bucket;
 
   if (measure === "count") {
     const total = rows.reduce((sum, r) => sum + num(r.count), 0);
