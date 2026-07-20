@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { UIMessage } from "ai";
 
 // ChatClient.send() has TWO distinct paths that can produce a cap/budget refusal (decision 19 / 004
@@ -155,14 +155,19 @@ test("Should_RollbackOptimisticBubble_When_SendThrows: a thrown/failed send remo
   expect(document.querySelectorAll(".msg.user")).toHaveLength(0);
 });
 
-// --- concurrent-send guard: a follow-up chip clicked mid-stream must not fire a 2nd send ---
+// --- concurrent-send: TWO independent protections, verified by TWO tests ---
 // Regression for the code-review should-fix: `send` had NO reentrancy guard and follow-up chips were
 // `disabled={used}` ONLY (not gated by streaming/pending). A chip clicked while a turn is in flight
 // fired a second concurrent `sendMessage({messageId})` which truncates-after-id (dropping the other
 // send's optimistic bubble -> spurious "Could not send" + an orphan persisted turn + a duplicate run,
-// the AC-16 class). The fix is BOTH a `sendingRef` guard at the top of `send` AND pending-gated chips,
-// consistent with the composer's own streaming-disabled state. Contract: exactly one send proceeds.
-test("Should_IgnoreConcurrentSend_When_TurnInFlight: a follow-up chip clicked while a turn streams fires no 2nd send (guard + pending-gated chip)", async () => {
+// the AC-16 class). The fix is BOTH pending-gated chips (the chip is `disabled` while a turn streams,
+// matching the composer's own streaming-disabled state) AND a `sendingRef` reentrancy guard at the top
+// of `send`. These are DISTINCT protections that need distinct tests: the disabled chip is proven here
+// (jsdom never dispatches a click to a disabled button, so this path never even reaches `send`), and the
+// `sendingRef` guard - which bites only a same-tick reentrant call before the control re-renders to its
+// disabled state - is proven separately in the next test. Do NOT merge them: a single chip-click test
+// leaves the guard un-exercised (reverting the guard line stays green), which overstates its coverage.
+test("Should_DisableFollowupChip_When_TurnInFlight: a follow-up chip is pending-disabled mid-stream, so clicking it fires no 2nd send (the chip pending-gate; the reentrancy guard is proven separately)", async () => {
   // A settled prior turn with a follow-up chip is on screen.
   const initial: UIMessage[] = [
     { id: "u0", role: "user", parts: [{ type: "text", text: "Top companies?" }] },
@@ -203,7 +208,9 @@ test("Should_IgnoreConcurrentSend_When_TurnInFlight: a follow-up chip clicked wh
   const chip = screen.getByRole("button", { name: /Only remote roles/ });
   expect((chip as HTMLButtonElement).disabled).toBe(true);
 
-  // Even so, clicking it must not fire a second concurrent send (the guard is the belt-and-suspenders).
+  // Clicking a disabled button is a no-op in jsdom (matching real browsers): the event never dispatches,
+  // so `onFollowup`/`send` are never reached. This proves the chip pending-gate holds - it is NOT a test
+  // of the `sendingRef` guard (that path is unreachable here). See the reentrancy test below for the guard.
   fireEvent.click(chip);
 
   // Exactly one send proceeded: no 2nd action call, no orphan chip-text bubble, first bubble intact.
@@ -211,6 +218,41 @@ test("Should_IgnoreConcurrentSend_When_TurnInFlight: a follow-up chip clicked wh
   expect(sendMessageMock).toHaveBeenCalledWith(CONVERSATION_ID, "First question");
   expect(screen.queryByText("Only remote roles", { selector: ".bubble.user" })).toBeNull();
   expect(screen.getByText("First question", { selector: ".bubble.user" })).toBeTruthy();
+
+  // Settle cleanly (avoid a dangling act warning): the held gate resolves ok, the turn finishes.
+  release({ ok: true, publicAccessToken: "tok" });
+  await waitFor(() => expect(setSessionMock).toHaveBeenCalled());
+});
+
+// The `sendingRef` guard in isolation, independent of any `disabled` gating. Two Send-button clicks are
+// dispatched inside ONE `act()` batch, so React has not committed the first send's `pending` state
+// between them: the Composer's Send button has not swapped to Stop, its onClick closure still sees
+// `streaming === false` on BOTH clicks, and both therefore reach `send`. The disabled/pending gating
+// cannot cover this same-tick double-submit race (the control flips only on the next render); the ONLY
+// thing between one send and two here is `send`'s `sendingRef` reentrancy guard. Verified adversarially:
+// reverting just the `if (sendingRef.current) return;` line turns this RED (two action calls, two
+// bubbles), so it pins the guard mechanism the chip-gate test above cannot.
+test("Should_IgnoreReenteredSend_When_SendAlreadyInFlight: two same-tick composer submits reach send, but the sendingRef guard lets exactly one proceed", async () => {
+  // Hold the gate unresolved so the first send stays in flight (sendingRef stays armed) across both clicks.
+  let release: (v: unknown) => void = () => {};
+  sendMessageMock.mockReturnValue(new Promise((res) => (release = res)));
+  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+
+  const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
+  fireEvent.change(box, { target: { value: "First question" } });
+
+  // Same-tick double submit: both native clicks dispatch inside one act(), before React re-renders the
+  // composer into its streaming (Send -> Stop) state, so both onClick closures still call `onSend`.
+  const sendBtn = screen.getByRole("button", { name: "Send" });
+  act(() => {
+    sendBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    sendBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+
+  // Exactly one send proceeded: the reentrant second call returned at the guard before touching the
+  // action or appending a second optimistic bubble. Without the guard both assertions read 2.
+  expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  expect(screen.getAllByText("First question", { selector: ".bubble.user" })).toHaveLength(1);
 
   // Settle cleanly (avoid a dangling act warning): the held gate resolves ok, the turn finishes.
   release({ ok: true, publicAccessToken: "tok" });

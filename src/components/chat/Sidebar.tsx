@@ -172,7 +172,7 @@ export function Sidebar({
                     type="button"
                     className="sb-del"
                     // Two conversations can share a title, which makes a title-only accessible name (and
-                    // a getByRole lookup) ambiguous. A short id prefix keeps each delete label unique.
+                    // a getByRole lookup) ambiguous. A short id suffix keeps each delete label unique.
                     aria-label={`Delete ${c.title} (${c.id.slice(0, 8)})`}
                     onClick={() => setConfirmingId(c.id)}
                   >
