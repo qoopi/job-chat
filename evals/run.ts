@@ -14,7 +14,7 @@ import {
 } from "@shared/store";
 import { getAgentLimits } from "@shared/env";
 import { createChatRun, type StreamModelArgs } from "../trigger/run";
-import { buildCatalogTools, type EmitPart } from "../trigger/tools";
+import { buildCatalogTools, CATALOG_TOOL_NAMES, type EmitPart } from "../trigger/tools";
 import { ADVISER_V1 } from "../trigger/prompts/adviser-v1";
 import { ADVISER_V2 } from "../trigger/prompts/adviser-v2";
 import { FIXTURE_INGESTED_AT } from "../tests/fixtures/postings.fixture";
@@ -33,7 +33,9 @@ import { CHART_BEARING, EVAL_SET, type EvalCase, type EvalExpect, type EvalMode 
 
 // The shipped model - kept in step with trigger/chat.ts (the production seam). Redefined here rather than
 // imported because importing trigger/chat.ts would register the chat.agent() task outside the Trigger
-// runtime; this string is the only coupling.
+// runtime; this string is the only coupling. DRIFT RISK: if chat.ts's MODEL_ID changes and this does not,
+// the eval silently scores a DIFFERENT model than prod and the gate loses meaning (backlog:
+// eval-model-id-shared-const - a shared leaf-module const both import, a product-code change out of scope).
 const MODEL_ID = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0";
 
 function buildModel() {
@@ -58,6 +60,10 @@ export function assertEvalEnabled(env: Record<string, string | undefined> = proc
       "refusing to run: this harness makes live Bedrock calls (cost). Set JOBCHAT_EVAL=1 to enable.",
     );
   }
+  // CAUTION: Bun auto-loads Job.Chat/.env into child processes, so `env -u AWS_REGION ...` (or any shell
+  // cred-stripping) CANNOT prove this missing-creds refusal live - .env repopulates AWS_* before the guard
+  // runs. This branch is covered offline (tests/unit/eval-harness.test.ts); do NOT re-probe it live (it
+  // spends real credits on a full run - see the 010 Test Report credits incident).
   const hasKeys = Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY);
   const hasProfile = Boolean(env.AWS_PROFILE);
   if (!env.AWS_REGION || (!hasKeys && !hasProfile)) {
@@ -288,9 +294,22 @@ function paramsSubsetMatch(expected: Record<string, unknown>, actual: Record<str
   });
 }
 
+// The data tools whose call renders an insight card: the 6 fixed templates + the composed query_postings.
+// A second data tool means a second card - a defect under P1's "one answer, one card" contract - so a
+// data-tool expectation must be met by EXACTLY that tool, called once, with no other data tool alongside.
+const DATA_TOOLS = new Set<string>([...CATALOG_TOOL_NAMES, "query_postings"]);
+
+// AC-7 asks the agent to "select THE expected tool and mode" (definite article, singular). For a data tool
+// that means the expected tool called EXACTLY once and NO other data tool: a right tool called beside an
+// extra data tool emits a second card - a defect, not a pass (the saved v1 Q5 hit this: share_split +
+// query_postings). The pure-plain (no-tool) and report_unanswerable cases are excepted - plain expects
+// zero tools, and report_unanswerable (not a data tool) keeps the lenient membership check as before.
 function toolMatches(expect: EvalExpect, observedTools: string[]): boolean {
   if (expect.tool === undefined) return observedTools.length === 0; // a pure plain answer calls no tool
-  return observedTools.includes(expect.tool);
+  if (!DATA_TOOLS.has(expect.tool)) return observedTools.includes(expect.tool); // report_unanswerable
+  const expectedCalls = observedTools.filter((t) => t === expect.tool).length;
+  const extraDataTool = observedTools.some((t) => t !== expect.tool && DATA_TOOLS.has(t));
+  return expectedCalls === 1 && !extraDataTool;
 }
 
 function formatOk(text: string): boolean {

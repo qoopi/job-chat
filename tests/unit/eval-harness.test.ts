@@ -65,9 +65,10 @@ describe("eval harness (offline smoke)", () => {
 // Adversarial audit (05-testing, 2026-07-20): hand-built WRONG transcripts, checking that scoreCase
 // actually fails them rather than silently passing. Confirms the reported 90%/100% gates mean something
 // for tool identity + mode + raw chart pick, and pins two things that are informational-only by design
-// (params-subset, formatRules never gate toolModePass) plus one real scorer leniency found while auditing
-// the saved v1 report (tracker/research/eval-baseline-v1-2026-07-21.txt, case Q5): the tool check is
-// set-membership, not an exact single-call match. See the Test Report for the full writeup.
+// (params-subset, formatRules never gate toolModePass). The extra-tool case below asserts the STRICT rule
+// (010 review round): the tool check is an exact single-call match - the expected data tool called once,
+// with no other data tool - so the saved v1 Q5 double-call (share_split + query_postings) FAILS, not
+// passes (that leniency is now closed). See the Test Report + review-fixes doc for the full writeup.
 describe("scoreCase adversarial probes (is the reported gate strict enough?)", () => {
   it("right tool, but no insight rendered (mode mismatch) fails toolModePass - a correct tool never masks a mode miss", () => {
     const dataCase = EVAL_SET.find((c) => c.id === "Q1")!; // expect: mode=data, tool=salary_distribution
@@ -82,7 +83,7 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
     expect(scored.toolModePass).toBe(false);
   });
 
-  it("tool check is set-membership, not an exact single-call match: an extra tool call alongside the right one still passes (real v1 Q5 hit this)", () => {
+  it("tool check is an exact single-call match: an extra data tool alongside the right one FAILS (real v1 Q5 hit this)", () => {
     const dataCase = EVAL_SET.find((c) => c.id === "Q5")!; // expect: mode=data, tool=share_split
     const observed: Observed = {
       toolCalls: [
@@ -96,8 +97,8 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
       hasInsight: true,
     };
     const scored = scoreCase(dataCase, observed);
-    expect(scored.toolPass).toBe(true); // observedTools.includes(expect.tool) - the extra call is invisible to the score
-    expect(scored.toolModePass).toBe(true);
+    expect(scored.toolPass).toBe(false); // a second data tool = a second card; the strict rule fails it
+    expect(scored.toolModePass).toBe(false);
   });
 
   it("params-subset check bites: a MISSING expected key fails paramsPass, it is not silently treated as a match", () => {
