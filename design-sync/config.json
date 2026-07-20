@@ -1,0 +1,8 @@
+{
+  "claudeDesignProject": {
+    "name": "Job.Chat",
+    "projectId": "487e9a55-9a6c-4526-8022-3a5cd590e423",
+    "url": "https://claude.ai/design/p/487e9a55-9a6c-4526-8022-3a5cd590e423"
+  },
+  "loop": "Claude Code writes requests to design-sync/inbox.md (+ assets alongside); the operator pings Claude Design ('check design-sync'); Design reads the repo + responds in its chat or drops revised specs into the design project for download back into .claude/design-spec/."
+}
