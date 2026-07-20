@@ -37,7 +37,7 @@ export function ChatClient({
   autoStream = false,
   e2e = false,
   signedIn: signedInInitial = false,
-  accountName,
+  accountName: accountNameInitial,
   conversations: conversationsInitial = [],
 }: {
   conversationId: string;
@@ -66,6 +66,10 @@ export function ChatClient({
   // in-page sign-in / sign-out flips them (the sidebar updates without a full-page refresh). `dialogOpen`
   // comes from the shared open-store (interaction-spec s6; one dialog at a time).
   const [signedIn, setSignedIn] = useState(signedInInitial);
+  // `accountName` seeds from the SSR resolve (guest -> undefined); an in-page sign-in flips it to the
+  // account's display name (returned by completeSignIn) so the sidebar foot reads the real name/avatar
+  // without waiting for a full-page reload.
+  const [accountName, setAccountName] = useState(accountNameInitial);
   const [conversations, setConversations] = useState(conversationsInitial);
   // AC-11 queued draft: the blocked message held across the dialog for auto-send. It is never rendered,
   // so it lives in a ref (not state) - that makes the read-then-clear in `onAuthSuccess` synchronous, so
@@ -215,9 +219,10 @@ export function ChatClient({
   // dialog, flip to signed-in, auto-send the queued blocked draft through the NORMAL guarded path
   // (fromAuth, so a still-refusing signed-in cap shows the notice and keeps the draft rather than
   // re-opening the dialog), and refresh the sidebar history now that we are an account.
-  const onAuthSuccess = useCallback(async () => {
+  const onAuthSuccess = useCallback(async (name?: string) => {
     closeAuthDialog();
     setSignedIn(true);
+    if (name) setAccountName(name); // fresh sidebar foot (name/avatar) without a full-page reload
     // Take-once: read-and-clear the ref synchronously so a double-fired `onSuccess` (or a re-render
     // mid-send) sees `null` on the second pass - the queued draft auto-sends exactly once, never twice.
     const q = queuedDraftRef.current;
@@ -265,9 +270,10 @@ export function ChatClient({
   );
 
   // AC-9 close-on-Esc, honoring the layer priority (interaction-spec): the open auth dialog sits above
-  // the LCP and takes Esc first. This handler yields while `isAuthDialogOpen()` is true (the dialog's own
-  // listener - registered after this one when it mounts, so it runs second - closes the dialog and leaves
-  // the LCP); otherwise Esc closes the LCP. Bound once; the functional setState reads current.
+  // the LCP and takes Esc first. This handler yields while `isAuthDialogOpen()` is true; independently,
+  // the dialog's own Esc handler calls `stopImmediatePropagation`, so if it happens to run first this
+  // handler never fires at all - order-independent either way. Otherwise Esc closes the LCP. Bound once;
+  // the functional setState reads current.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
@@ -360,7 +366,7 @@ export function ChatClient({
         </div>
       ) : null}
       {/* Topmost layer (interaction-spec "Priority of layers": auth dialog > LCP > thread). */}
-      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} onSuccess={() => void onAuthSuccess()} /> : null}
+      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} onSuccess={(name) => void onAuthSuccess(name)} /> : null}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { AuthDialog } from "@/components/auth/AuthDialog";
 import type { UIMessage } from "ai";
 import type { DataInsight } from "@shared/insight";
 import { closeAuthDialog } from "@/lib/auth-dialog";
@@ -135,5 +136,70 @@ describe("Esc layer priority: real dialog above the LCP (AC-9)", () => {
     // with the dialog gone, Esc now closes the LCP
     pressEsc();
     expect(document.querySelector(".lcp")).toBeNull();
+  });
+
+  test("Should_NotDisturbLowerLayer_When_DialogEscHandlerRegisteredFirst", () => {
+    // Order-independence (should-fix 1): register the dialog's Esc listener BEFORE a lower-layer window
+    // handler - the REVERSE of the app's natural mount order (where the LCP binds first). Even so, the
+    // dialog's `stopImmediatePropagation` suppresses the lower handler, so a single Esc never falls
+    // through the dialog to the layer beneath it, whichever listener happens to be registered first.
+    const onClose = vi.fn();
+    const lowerLayer = vi.fn();
+    render(<AuthDialog onClose={onClose} />);
+    window.addEventListener("keydown", lowerLayer); // registered AFTER -> the dialog's listener runs first
+    try {
+      pressEsc();
+    } finally {
+      window.removeEventListener("keydown", lowerLayer);
+    }
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(lowerLayer).not.toHaveBeenCalled(); // suppressed even though the dialog's handler ran first
+  });
+});
+
+describe("modal focus a11y (AC-10)", () => {
+  const FOCUSABLE =
+    'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+  test("Should_FocusIntoDialog_When_Opened", () => {
+    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    clickSidebarSignIn();
+    const dialog = screen.getByRole("dialog");
+    // focus moved off the background shell and into the dialog (the email input) on open
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect((document.activeElement as HTMLElement).id).toBe("auth-email");
+  });
+
+  test("Should_ContainTab_When_TabbingPastDialogEdges", () => {
+    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    clickSidebarSignIn();
+    const dialog = screen.getByRole("dialog");
+    const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    expect(focusables.length).toBeGreaterThan(1);
+
+    // Tab off the last focusable wraps to the first (focus never leaves the dialog)
+    last.focus();
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    // Shift+Tab off the first wraps back to the last
+    first.focus();
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  test("Should_RestoreFocusToOpener_When_DialogCloses", () => {
+    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    const opener = screen.getAllByRole("button", { name: "Sign in" })[0];
+    opener.focus();
+    fireEvent.click(opener);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(document.activeElement).not.toBe(opener); // focus moved INTO the dialog on open
+
+    pressEsc(); // close via Esc
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener); // focus returned to the trigger, not lost to <body>
   });
 });

@@ -128,3 +128,30 @@ test("Should_KeepQueuedDraftAndDialogOpen_When_AdoptionFails", async () => {
   expect(screen.getByRole("dialog")).toBeTruthy();
   expect(composer().value).toBe("Median DE salary in SF?");
 });
+
+// Nit (review): completeSignIn returning `{ok:false}` (the session is not yet visible server-side) must
+// NOT be treated as success - `succeed()` now consumes `{ok}`, so it shows an inline error and does not
+// fire onSuccess. The dialog stays open, no auto-send fires, and the queued draft stays intact - the same
+// stay-open guarantee as the throw path above, just for the non-throwing `{ok:false}` return.
+test("Should_KeepDialogOpenWithError_When_CompleteSignInReturnsNotOk", async () => {
+  sendMessageMock.mockResolvedValueOnce({ ok: false, reason: "guest_cap" });
+  signInEmailMock.mockResolvedValue({ error: null });
+  completeSignInMock.mockResolvedValueOnce({ ok: false }); // session not yet visible server-side
+
+  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  const box = composer();
+  fireEvent.change(box, { target: { value: "Median DE salary in SF?" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+
+  await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" });
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "a@b.com" } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw123456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+  await waitFor(() => expect(completeSignInMock).toHaveBeenCalled());
+  await screen.findByText(/couldn't finish signing you in/i); // inline error, dialog stays open
+
+  expect(sendMessageMock).toHaveBeenCalledTimes(1); // only the cap-hit - no auto-send
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(composer().value).toBe("Median DE salary in SF?");
+});

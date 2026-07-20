@@ -1,13 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { SendIcon } from "@/components/icons";
 import { RefusalNotice } from "@/components/insight/ErrorCard";
-import { AuthDialog } from "@/components/auth/AuthDialog";
 import { closeAuthDialog, openAuthDialog, useAuthDialogOpen } from "@/lib/auth-dialog";
 import { ensureGuest, startConversation } from "@/app/actions";
 import type { RefusalReason } from "@/lib/insight-format";
+
+// The landing is the first-paint / marketing route where the dialog is rarely opened, so defer the
+// AuthDialog (and the Better Auth `authClient` it pulls) off the landing's initial JS - it loads only
+// when the dialog first opens. Client-only: the dialog never renders on the server.
+const AuthDialog = dynamic(() => import("@/components/auth/AuthDialog").then((m) => m.AuthDialog), {
+  ssr: false,
+});
 
 // The landing hero's interactive part (mock 4b): the ask box + intent chips that hand off to the chat
 // with the stream already attached on arrival (AC-3, interaction-spec section 7). On first paint it

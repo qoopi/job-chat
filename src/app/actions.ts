@@ -78,18 +78,24 @@ async function guestIdFromCookie(): Promise<string | undefined> {
 }
 
 /**
- * The signed-in Better Auth user id, or undefined for a guest. Auth is lazy and additive: a read
- * failure (misconfig / no session) degrades to guest - it must never break the guest-open chat. E2E
- * runs without auth (no Postgres), so short-circuit it.
+ * The signed-in Better Auth user (id + display name), or undefined for a guest. Auth is lazy and
+ * additive: a read failure (misconfig / no session) degrades to guest - it must never break the
+ * guest-open chat. E2E runs without auth (no Postgres), so short-circuit it.
  */
-async function currentAuthUserId(): Promise<string | undefined> {
+async function currentAuthUser(): Promise<{ id: string; name?: string } | undefined> {
   if (isE2E()) return undefined;
   try {
     const session = await authServer.api.getSession({ headers: await headers() });
-    return session?.user?.id;
+    if (!session?.user?.id) return undefined;
+    return { id: session.user.id, name: session.user.name ?? undefined };
   } catch {
     return undefined;
   }
+}
+
+/** The signed-in Better Auth user id, or undefined for a guest (the common case; see currentAuthUser). */
+async function currentAuthUserId(): Promise<string | undefined> {
+  return (await currentAuthUser())?.id;
 }
 
 /**
@@ -164,13 +170,16 @@ export async function mintChatToken(conversationId: string): Promise<MintResult>
  * cookie so the per-request path stops seeing it and never re-adopts. A no-op when no verified session
  * exists yet (or E2E). Adoption is bound to THIS transition, not to per-request resolution.
  */
-export async function completeSignIn(): Promise<{ ok: boolean }> {
-  const authUserId = await currentAuthUserId();
-  if (!authUserId) return { ok: false };
+export async function completeSignIn(): Promise<{ ok: boolean; name?: string }> {
+  const user = await currentAuthUser();
+  if (!user) return { ok: false };
   const guestId = await guestIdFromCookie();
-  await resolveIdentity(createStore(sql()), { authUserId, guestId });
-  if (guestId) (await cookies()).delete(GUEST_COOKIE); // stop the per-request path from re-adopting
-  return { ok: true };
+  await resolveIdentity(createStore(sql()), { authUserId: user.id, guestId });
+  // Delete with the SAME path the cookie was SET with (ensureGuest uses `path:"/"`); a name-only delete
+  // whose Set-Cookie path does not match can leave the browser cookie in place.
+  if (guestId) (await cookies()).delete({ name: GUEST_COOKIE, path: "/" });
+  // The account's display name lets the client refresh the sidebar foot without a full reload.
+  return { ok: true, name: user.name };
 }
 
 /**

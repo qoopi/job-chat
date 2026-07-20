@@ -9,11 +9,11 @@ import type { Store, User } from "@shared/store";
 // boundaries (next/headers, postgres, Trigger.dev SDK, Better Auth) actions.ts wires at module scope.
 
 const cookieStore = new Map<string, string>();
-const deleteCookieMock = vi.fn((name: string) => cookieStore.delete(name));
+const deleteCookieMock = vi.fn((opts: { name: string; path?: string }) => cookieStore.delete(opts.name));
 vi.mock("next/headers", () => ({
   cookies: async () => ({
     get: (name: string) => (cookieStore.has(name) ? { value: cookieStore.get(name)! } : undefined),
-    delete: (name: string) => deleteCookieMock(name),
+    delete: (opts: { name: string; path?: string }) => deleteCookieMock(opts),
   }),
   headers: async () => new Headers(),
 }));
@@ -82,7 +82,8 @@ describe("completeSignIn cookie-clear sequencing (AC-11 ruling 1)", () => {
 
     expect(result).toEqual({ ok: true });
     expect(adoptGuest).toHaveBeenCalledWith("account-1", GUEST_ID); // adoption ran BEFORE the assertion below
-    expect(deleteCookieMock).toHaveBeenCalledWith("jobchat_guest"); // cleared only after it succeeded
+    // cleared only after adoption succeeded, and with the SAME path ensureGuest set it (path:"/")
+    expect(deleteCookieMock).toHaveBeenCalledWith({ name: "jobchat_guest", path: "/" });
     expect(cookieStore.has("jobchat_guest")).toBe(false);
   });
 
