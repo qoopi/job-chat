@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "eval": "bun run evals/run.ts",
     "ch:migrate": "bun run scripts/ch-migrate.ts",
     "pg:migrate": "bun run scripts/pg-migrate.ts",
     "typecheck": "tsc --noEmit",
