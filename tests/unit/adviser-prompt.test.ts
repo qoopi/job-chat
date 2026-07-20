@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { ADVISER_V1, ADVISER_VERSION } from "../../trigger/prompts/adviser-v1";
 import { ADVISER_V2, ADVISER_V2_VERSION } from "../../trigger/prompts/adviser-v2";
 
@@ -96,5 +98,18 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toMatch(/filler|great question/);
     expect(p).toContain("bad:");
     expect(p).toContain("good:");
+  });
+});
+
+// Gap fill (05-testing audit): the cutover itself (task requirement 4 - "Cut trigger/chat.ts over to
+// v2") had no regression test. createChatRun treats `system` as an opaque string (its own tests wire a
+// placeholder "SYS"), and chat.agent()'s returned object does not expose its config for inspection, so a
+// silent revert to ADVISER_V1 would pass every other test in the suite. A static source-content check
+// (precedent: tests/unit/chat-resume-boundary.test.ts) is the cheap, deterministic seam available here.
+describe("trigger/chat.ts is cut over to adviser-v2 (the shipped system prompt)", () => {
+  it("wires ADVISER_V2, not the frozen ADVISER_V1, as the agent's system prompt", () => {
+    const src = readFileSync(resolve(process.cwd(), "trigger/chat.ts"), "utf8");
+    expect(src).toMatch(/system:\s*ADVISER_V2\b/);
+    expect(src).not.toMatch(/system:\s*ADVISER_V1\b/);
   });
 });

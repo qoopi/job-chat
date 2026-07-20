@@ -495,6 +495,64 @@ describe("buildComposedInsight builds a strict-valid insight for the seventh too
     // A trend leads with the total, the honest headline for a time series.
     expect(insight.verdict).toContain("10");
   });
+
+  // Gap fill (05-testing audit): a bare salary aggregate (no dimension, no bucket) was untested - the
+  // branch distinct from both the ranked-leader and the bucketed-range phrasing.
+  it("a bare salary aggregate (no dimension, no bucket) states the single value plainly", () => {
+    const insight = buildComposedInsight({
+      id: "q7",
+      params: { measures: ["median_salary"] },
+      chartType: "table",
+      result: composedResult([{ median_salary: 165000 }], 40),
+    });
+    expect(insight.verdict).toContain("165000");
+    expect(insight.verdict.toLowerCase()).toContain("median salary");
+  });
+
+  // Gap fill (05-testing audit): a bucketed (time-series) salary measure was untested - it must report
+  // the observed range, never a single leader (there is no dimension to rank by).
+  it("a bucketed salary measure reports the observed range, not a leader", () => {
+    const insight = buildComposedInsight({
+      id: "q8",
+      params: { measures: ["median_salary"], bucket: "month" },
+      chartType: "trend",
+      result: composedResult(
+        [{ bucket: "2026-05-01", median_salary: 150000 }, { bucket: "2026-06-01", median_salary: 170000 }],
+        20,
+      ),
+    });
+    expect(insight.verdict).toContain("150000");
+    expect(insight.verdict).toContain("170000");
+  });
+
+  // PRODUCTION BUG (05-testing audit, loops back to developing): verdictForComposed's `ranked` check
+  // only tests whether the FIRST dimension is defined, not whether there is EXACTLY ONE - so a
+  // 2-dimension cross-tab (e.g. company x city) still takes the "leader" branch and names the top ROW's
+  // first-dimension value as if it led the whole breakdown. The Completion Report's own deviation (2)
+  // states "a trend / cross-tab / bare aggregate leads with the total or the observed range, so no false
+  // superlative is ever claimed" - the code does not match that stated design for the cross-tab case.
+  // Repro: Meta's single row (6) outranks Google's individual rows (5, 3), but Google's true total across
+  // both its rows (8) exceeds Meta's (6) - the verdict wrongly says "Meta leads" instead of reporting the
+  // total (as the bucketed/bare-aggregate branches correctly do). This test intentionally FAILS against
+  // the current code; do not patch trigger/parts.ts here (testing owns test completeness, not product
+  // code) - route the fix to developing.
+  it("does NOT name a false leader for a 2-dimension cross-tab (honesty: no superlative across a group-by pair)", () => {
+    const insight = buildComposedInsight({
+      id: "q6",
+      params: { measures: ["count"], dimensions: ["company", "city"] },
+      chartType: "table",
+      result: composedResult(
+        [
+          { company: "Meta", city: "San Francisco", count: 6 },
+          { company: "Google", city: "New York", count: 5 },
+          { company: "Google", city: "San Francisco", count: 3 },
+        ],
+        14,
+      ),
+    });
+    expect(insight.verdict).not.toContain("Meta leads");
+    expect(insight.verdict).toContain("14");
+  });
 });
 
 describe("composedFollowups derives two deterministic chips from the params (no LLM)", () => {
