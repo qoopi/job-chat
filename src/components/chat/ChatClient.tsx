@@ -18,7 +18,6 @@ import { isAuthDialogOpen } from "@/lib/layers";
 import { closeAuthDialog, openAuthDialog, useAuthDialogOpen } from "@/lib/auth-dialog";
 import {
   deleteConversation as deleteConversationAction,
-  listMyConversations,
   mintChatToken,
   sendMessage as sendMessageAction,
   startConversation as startConversationAction,
@@ -83,15 +82,10 @@ export function ChatClient({
   // in-page sign-in / sign-out flips them (the sidebar updates without a full-page refresh). `dialogOpen`
   // comes from the shared open-store (interaction-spec s6; one dialog at a time).
   const [signedIn, setSignedIn] = useState(signedInInitial);
-  // `accountName` seeds from the SSR resolve (guest -> undefined); an in-page sign-in flips it to the
-  // account's display name (returned by completeSignIn) so the sidebar foot reads the real name/avatar
-  // without waiting for a full-page reload.
-  const [accountName, setAccountName] = useState(accountNameInitial);
+  // `accountName` comes from the SSR resolve (guest -> undefined). Under Google-only sign-in the account
+  // arrives via a full-page redirect, so the server re-render carries the real name - no client flip.
+  const accountName = accountNameInitial;
   const [conversations, setConversations] = useState(conversationsInitial);
-  // AC-11 queued draft: the blocked message held across the dialog for auto-send. It is never rendered,
-  // so it lives in a ref (not state) - that makes the read-then-clear in `onAuthSuccess` synchronous, so
-  // a double-fired `onSuccess` sees `null` on the second pass and cannot double-send (take-once).
-  const queuedDraftRef = useRef<string | null>(null);
   // Reentrancy guard: while a turn is in flight (`send` between its start and its finally), a second
   // `send` is ignored. Without it a follow-up chip clicked mid-stream fires a concurrent
   // `sendMessage({ messageId })`, which truncates-after-id and can drop the in-flight send's optimistic
@@ -136,16 +130,16 @@ export function ChatClient({
   // post-sign-in re-send just shows the notice and keeps the draft. Shared by the follow-up and the
   // fresh-chat send paths (DRY).
   const showRefusal = useCallback(
-    (reason: "guest_cap" | "daily_budget", text: string, fromAuth?: boolean) => {
+    (reason: "guest_cap" | "daily_budget", text: string) => {
       setMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "assistant", parts: [{ type: "data-refusal", data: { reason } }] } as UIMessage,
       ]);
-      setDraft(text); // AC-11: the blocked draft stays in the composer (survives dialog / cancel)
-      if (reason === "guest_cap" && !signedIn && !fromAuth) {
-        queuedDraftRef.current = text;
-        openAuthDialog();
-      }
+      setDraft(text); // the blocked draft stays in the composer (survives the dialog / cancel)
+      // A guest hitting the cap gets the sign-in dialog. Google is a full-page redirect, so there is no
+      // in-page auto-send of the blocked draft (that path was email-only, now removed) - the notice and
+      // the draft remain for the user to retry after signing in.
+      if (reason === "guest_cap" && !signedIn) openAuthDialog();
     },
     [signedIn, setMessages],
   );
@@ -159,7 +153,7 @@ export function ChatClient({
   }, []);
 
   const send = useCallback(
-    async (raw: string, opts?: { fromAuth?: boolean }) => {
+    async (raw: string) => {
       const text = raw.trim();
       if (!text) return;
       if (sendingRef.current) return; // a turn is already in flight - ignore the concurrent send
@@ -184,7 +178,7 @@ export function ChatClient({
             return;
           }
           if (r.reason === "guest_cap" || r.reason === "daily_budget") {
-            showRefusal(r.reason, text, opts?.fromAuth);
+            showRefusal(r.reason, text);
           } else {
             failSend(text); // invalid_input -> send-failure toast, draft preserved
           }
@@ -225,7 +219,7 @@ export function ChatClient({
           if (!r.ok) {
             rollbackEcho(); // AC-22: a refused send is not shown as sent (flow C)
             if (r.reason === "guest_cap" || r.reason === "daily_budget") {
-              showRefusal(r.reason, text, opts?.fromAuth);
+              showRefusal(r.reason, text);
               return;
             }
             failSend(text); // invalid_input / not_found -> toast + preserved draft (interaction-spec section 4)
@@ -314,38 +308,6 @@ export function ChatClient({
   // Ref-stable so `React.memo(AssistantMessage)` can bail on settled turns: an inline lambda here would
   // be a fresh ref every ChatClient render and defeat the memo (regenerate is stable across renders).
   const onRetry = useCallback(() => void regenerate(), [regenerate]);
-
-  // AC-11: the sign-in dialog succeeded (adoption + guest-cookie clear already ran inside it). Close the
-  // dialog, flip to signed-in, auto-send the queued blocked draft through the NORMAL guarded path
-  // (fromAuth, so a still-refusing signed-in cap shows the notice and keeps the draft rather than
-  // re-opening the dialog), and refresh the sidebar history now that we are an account.
-  const onAuthSuccess = useCallback(async (name?: string) => {
-    closeAuthDialog();
-    setSignedIn(true);
-    if (name) setAccountName(name); // fresh sidebar foot (name/avatar) without a full-page reload
-    // Take-once: read-and-clear the ref synchronously so a double-fired `onSuccess` (or a re-render
-    // mid-send) sees `null` on the second pass - the queued draft auto-sends exactly once, never twice.
-    const q = queuedDraftRef.current;
-    queuedDraftRef.current = null;
-    if (q) {
-      setDraft("");
-      await send(q, { fromAuth: true });
-    }
-    try {
-      setConversations(await listMyConversations());
-    } catch {
-      /* keep the prior list on a transient list failure */
-    }
-  }, [send]);
-
-  // AC-11: dismissing the dialog (cancel / Esc / backdrop) DISARMS the queued auto-send. The queue is
-  // armed at the cap moment for a sign-in that follows directly from the cap prompt; a guest who cancels
-  // instead must not have a much-later, unrelated sidebar sign-in auto-fire the stale blocked question.
-  // The draft itself stays in the composer (setDraft already ran) - only the armed auto-send is cleared.
-  const onAuthDismiss = useCallback(() => {
-    queuedDraftRef.current = null;
-    closeAuthDialog();
-  }, []);
 
   // Sign out: drop the Better Auth session and return the sidebar to its guest state.
   const onSignOut = useCallback(async () => {
@@ -490,7 +452,7 @@ export function ChatClient({
         </div>
       ) : null}
       {/* Topmost layer (interaction-spec "Priority of layers": auth dialog > LCP > thread). */}
-      {dialogOpen ? <AuthDialog onClose={onAuthDismiss} onSuccess={(name) => void onAuthSuccess(name)} /> : null}
+      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} /> : null}
     </div>
   );
 }

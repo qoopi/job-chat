@@ -114,7 +114,11 @@ async function resolveCaller(): Promise<Identity | null> {
   return resolveIdentity(createStore(sql()), { authUserId, guestId });
 }
 
-/** AC-12: first visit mints an httpOnly cookie guest id with a users row; returns the guest id. */
+/**
+ * AC-12: first visit mints an httpOnly cookie guest id with a users row; returns the guest id.
+ * NOTE: the guest id is an UNSIGNED bearer cookie (forgeable). Hardening (signing / the Better Auth
+ * anonymous plugin) was dropped by operator ruling 2026-07-21 - accepted residual for the hackathon.
+ */
 export async function ensureGuest(): Promise<string> {
   const jar = await cookies();
   let guestId = jar.get(GUEST_COOKIE)?.value;

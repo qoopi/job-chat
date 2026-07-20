@@ -7,11 +7,11 @@ import type { DataInsight } from "@shared/insight";
 import { closeAuthDialog } from "@/lib/auth-dialog";
 import { setAuthDialogOpen } from "@/lib/layers";
 
-// AC-10: the lazy auth dialog opens on a Sign-in tap AND at the guest cap moment, and every dismiss
-// (cancel / Esc / backdrop) returns to the chat untouched. AC-9 (partial): with the REAL dialog above an
-// open LCP, Esc closes the dialog only and leaves the LCP (this supersedes 011's forced-flag stub as the
-// integration truth - interaction-spec "Priority of layers"). All external boundaries are mocked exactly
-// as chat-client.test.tsx does; here no turn streams, so the transport is inert.
+// 017: Google-ONLY sign-in (email/password removed). The lazy auth dialog opens on a Sign-in tap AND at
+// the guest cap moment, offers ONLY "Continue with Google", and every dismiss (cancel / Esc / backdrop)
+// returns to the chat untouched. AC-9 (partial): with the REAL dialog above an open LCP, Esc closes the
+// dialog only and leaves the LCP (interaction-spec "Priority of layers"). External boundaries mocked as
+// chat-client.test.tsx does; here no turn streams, so the transport is inert.
 const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(async () => new ReadableStream({ start: (c) => c.close() }));
@@ -29,14 +29,14 @@ const sendMessageMock = vi.fn();
 vi.mock("@/app/actions", () => ({
   sendMessage: (id: string, t: string) => sendMessageMock(id, t),
   mintChatToken: vi.fn(),
-  completeSignIn: vi.fn(async () => ({ ok: true })),
   listMyConversations: vi.fn(async () => []),
+  clearGuestSession: vi.fn(async () => {}),
 }));
 
+const signInSocialMock = vi.fn();
 vi.mock("@/lib/auth-client", () => ({
   authClient: {
-    signIn: { email: vi.fn(), social: vi.fn() },
-    signUp: { email: vi.fn() },
+    signIn: { social: (a: unknown) => signInSocialMock(a) },
     signOut: vi.fn(),
     useSession: () => ({ data: null, isPending: false }),
   },
@@ -74,6 +74,29 @@ afterEach(() => {
   closeAuthDialog();
   setAuthDialogOpen(false);
   sendMessageMock.mockReset();
+  signInSocialMock.mockReset();
+  window.history.replaceState(null, "", "/");
+});
+
+describe("google-only auth dialog (017)", () => {
+  test("Should_OfferOnlyGoogle_When_Opened", () => {
+    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    clickSidebarSignIn();
+
+    expect(screen.getByRole("dialog", { name: "Sign in to jobchat.dev" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Continue with Google/i })).toBeTruthy();
+    // no email/password affordances remain
+    expect(screen.queryByLabelText("Email")).toBeNull();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create account" })).toBeNull();
+  });
+
+  test("Should_StartClientGoogleRedirect_When_ContinueTapped", () => {
+    render(<AuthDialog onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
+    expect(signInSocialMock).toHaveBeenCalledTimes(1);
+    expect(signInSocialMock.mock.calls[0][0]).toMatchObject({ provider: "google" });
+  });
 });
 
 describe("auth dialog open (AC-10)", () => {
@@ -167,9 +190,9 @@ describe("modal focus a11y (AC-10)", () => {
     render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
     clickSidebarSignIn();
     const dialog = screen.getByRole("dialog");
-    // focus moved off the background shell and into the dialog (the email input) on open
+    // focus moved off the background shell and into the dialog (the Google button) on open
     expect(dialog.contains(document.activeElement)).toBe(true);
-    expect((document.activeElement as HTMLElement).id).toBe("auth-email");
+    expect((document.activeElement as HTMLElement).id).toBe("auth-google");
   });
 
   test("Should_ContainTab_When_TabbingPastDialogEdges", () => {

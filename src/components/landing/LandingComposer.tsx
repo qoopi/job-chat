@@ -34,7 +34,6 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<Extract<RefusalReason, "guest_cap" | "daily_budget"> | null>(null);
-  const [queued, setQueued] = useState<string | null>(null);
   const dialogOpen = useAuthDialogOpen();
 
   // AC-12: a first-time visitor gets a guest cookie (+ users row in prod) as soon as they arrive.
@@ -42,7 +41,7 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
     void ensureGuest();
   }, []);
 
-  async function submit(question: string, opts?: { fromAuth?: boolean }) {
+  async function submit(question: string) {
     const text = question.trim();
     if (!text || busy) return;
     setBusy(true);
@@ -60,32 +59,14 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
       if (r.reason === "guest_cap" || r.reason === "daily_budget") {
         setRefusal(r.reason);
         setDraft(text); // the blocked question stays in the box (survives the dialog / cancel)
-        if (r.reason === "guest_cap" && !opts?.fromAuth) {
-          setQueued(text); // queue for auto-continuation once sign-in succeeds
-          openAuthDialog();
-        }
+        // A guest hitting the cap gets the sign-in dialog. Google is a full-page redirect, so there is no
+        // in-page auto-continuation of the blocked question (that path was email-only, now removed).
+        if (r.reason === "guest_cap") openAuthDialog();
       }
       setBusy(false); // refusal / invalid - let the visitor edit and retry
     } catch {
       setBusy(false);
     }
-  }
-
-  // AC-11: sign-in succeeded (adoption + guest-cookie clear ran in the dialog). Continue the queued
-  // question through the normal path (fromAuth, so a still-refusing signed-in cap just shows the notice).
-  function onAuthSuccess() {
-    closeAuthDialog();
-    const q = queued;
-    setQueued(null);
-    if (q) void submit(q, { fromAuth: true });
-  }
-
-  // AC-11: dismissing the dialog (cancel / Esc / backdrop) DISARMS the queued auto-continuation - a
-  // visitor who cancels the cap prompt must not have a later, unrelated header sign-in auto-fire the
-  // stale blocked question. The draft stays in the box (setDraft already ran); only the queue is cleared.
-  function onAuthDismiss() {
-    setQueued(null);
-    closeAuthDialog();
   }
 
   const inputDisabled = busy || dialogOpen;
@@ -138,7 +119,7 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
           </button>
         ))}
       </div>
-      {dialogOpen ? <AuthDialog onClose={onAuthDismiss} onSuccess={onAuthSuccess} /> : null}
+      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} /> : null}
     </>
   );
 }
