@@ -375,7 +375,7 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 3)}...`;
 }
 
-function printCase(index: number, evalCase: EvalCase, s: ScoredCase, observed: Observed): void {
+function printCase(index: number, evalCase: EvalCase, s: ScoredCase): void {
   const idx = String(index).padStart(2, "0");
   const headline = s.toolModePass ? "PASS" : "FAIL";
   const chartCol = s.chartBearing ? ` chart=${flag(s.chartPass)}` : "";
@@ -395,7 +395,7 @@ function printCase(index: number, evalCase: EvalCase, s: ScoredCase, observed: O
     s.rawChartType ? `chart=${s.rawChartType}` : "",
     `params=${flag(s.paramsPass)}`,
     `format=${flag(s.formatPass)}`,
-    observed.error ? `ERROR=${truncate(observed.error, 60)}` : "",
+    s.error ? `ERROR=${truncate(s.error, 60)}` : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -464,7 +464,7 @@ async function main(): Promise<void> {
     const observed = await runCase(model, system, EVAL_SET[i]);
     const s = scoreCase(EVAL_SET[i], observed);
     scored.push(s);
-    printCase(i + 1, EVAL_SET[i], s, observed);
+    printCase(i + 1, EVAL_SET[i], s);
   }
   printReport(prompt, scored);
 }
