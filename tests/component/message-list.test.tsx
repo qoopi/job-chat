@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { UIMessage } from "ai";
 import type { DataInsight } from "@shared/insight";
+import { storeToUiMessages, type StoredMessage } from "@/lib/chat-ui";
 
 // MessageList maps `useChat` messages to the 005 components. Recharts needs real layout, so we stub the
 // chart subtree (same device as the memo probe test) and assert the mapping: bubbles, insight card +
@@ -168,6 +169,37 @@ describe("MessageList", () => {
     expect(container.querySelector(".err-card")).toBeTruthy(); // the single surface
     expect(container.querySelector(".bubble.ai")).toBeNull(); // the prose bubble is suppressed
     expect(container.textContent).not.toContain("Something went wrong on my side - please try again.");
+  });
+
+  // 05-testing gap fill: the AC-25 test above proves the render-layer suppression on a LIVE-shaped
+  // message. This proves the RESUMED path too, via the real hydration function (storeToUiMessages),
+  // for a row persisted BEFORE this fix shipped (extractAssistantPersistence used to persist the prose
+  // alongside the error kind) - the exact backward-compat case the render-layer fix exists for.
+  test("AC-25 resume: a legacy-persisted error turn (prose + error kind stored together) still renders one surface", () => {
+    const stored: StoredMessage[] = [
+      { id: "a1", role: "assistant", content: "Something went wrong on my side - please try again.", parts: { kind: "system" } },
+    ];
+    const messages = storeToUiMessages(stored);
+    // Hydration itself is agnostic to the error kind: it carries both the legacy prose and the card.
+    expect(messages[0].parts).toEqual([
+      { type: "text", text: "Something went wrong on my side - please try again." },
+      { type: "data-error", id: "a1-card-0", data: { kind: "system" } },
+    ]);
+    const { container } = render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />);
+    expect(container.querySelector(".err-card")).toBeTruthy();
+    expect(container.querySelector(".bubble.ai")).toBeNull();
+    expect(container.textContent).not.toContain("Something went wrong on my side - please try again.");
+  });
+
+  // The post-fix shape: extractAssistantPersistence now persists content "" for an error turn, so a
+  // freshly-fixed row never even hydrates a text part - belt and suspenders with the render-layer guard.
+  test("AC-25 resume: a post-fix error turn (content already dropped at persistence) hydrates with no prose part", () => {
+    const stored: StoredMessage[] = [{ id: "a2", role: "assistant", content: "", parts: { kind: "system" } }];
+    const messages = storeToUiMessages(stored);
+    expect(messages[0].parts).toEqual([{ type: "data-error", id: "a2-card-0", data: { kind: "system" } }]);
+    const { container } = render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />);
+    expect(container.querySelector(".err-card")).toBeTruthy();
+    expect(container.querySelector(".bubble.ai")).toBeNull();
   });
 
   test("AC-15: a refusal part renders the polite limit notice (not the error card)", () => {
