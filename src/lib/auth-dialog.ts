@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { setAuthDialogOpen } from "@/lib/layers";
 
 // The single source of truth for the lazy auth dialog's open state (interaction-spec s6). A module
@@ -48,4 +48,16 @@ export function useAuthDialogOpen(): boolean {
     () => open,
     () => false,
   );
+}
+
+/**
+ * Open the dialog on mount when the URL carries an OAuth `?error=` (the Google callback bounced back
+ * with a failure via errorCallbackURL). The dialog itself reads the code and shows the message, then
+ * strips the param. Client-only, runs once; no-op on the server / when there is no error. Both hosts
+ * (ChatClient, LandingComposer) call this so a redirect error surfaces wherever the user lands.
+ */
+export function useOpenAuthDialogOnError(): void {
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("error")) openAuthDialog();
+  }, []);
 }

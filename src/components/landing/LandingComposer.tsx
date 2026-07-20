@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { SendIcon } from "@/components/icons";
 import { RefusalNotice } from "@/components/insight/ErrorCard";
-import { closeAuthDialog, openAuthDialog, useAuthDialogOpen } from "@/lib/auth-dialog";
+import { closeAuthDialog, openAuthDialog, useAuthDialogOpen, useOpenAuthDialogOnError } from "@/lib/auth-dialog";
 import { ensureGuest, startConversation } from "@/app/actions";
 import type { RefusalReason } from "@/lib/insight-format";
 
@@ -35,6 +35,7 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<Extract<RefusalReason, "guest_cap" | "daily_budget"> | null>(null);
   const dialogOpen = useAuthDialogOpen();
+  useOpenAuthDialogOnError(); // a Google redirect error (?error=) opens the dialog so it can be surfaced
 
   // AC-12: a first-time visitor gets a guest cookie (+ users row in prod) as soon as they arrive.
   useEffect(() => {

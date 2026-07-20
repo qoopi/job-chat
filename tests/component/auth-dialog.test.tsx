@@ -99,6 +99,33 @@ describe("google-only auth dialog (017)", () => {
   });
 });
 
+describe("google redirect error surfacing (017 strand 2)", () => {
+  test("Should_OpenDialogAndShowError_When_ErrorParamPresent", async () => {
+    // Better Auth's errorCallbackURL bounced the browser back with ?error=<code> (not a silent reload).
+    window.history.replaceState(null, "", "/chat/x?error=account_not_linked");
+    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+
+    // the host opened the dialog on the ?error param, and the dialog surfaced the mapped message
+    expect(await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" })).toBeTruthy();
+    expect(screen.getByText(/can't be linked to an existing account/i)).toBeTruthy();
+    // the param is stripped so a refresh does not re-surface a stale error
+    expect(window.location.search).not.toContain("error");
+  });
+
+  test("Should_ShowGenericMessage_When_UnknownErrorCode", async () => {
+    window.history.replaceState(null, "", "/chat/x?error=some_unexpected_code");
+    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+
+    expect(await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" })).toBeTruthy();
+    expect(screen.getByText(/didn't complete/i)).toBeTruthy();
+  });
+
+  test("Should_NotOpenDialog_When_NoErrorParam", () => {
+    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
 describe("auth dialog open (AC-10)", () => {
   test("Should_OpenAuthDialog_When_SignInTapped", () => {
     render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);

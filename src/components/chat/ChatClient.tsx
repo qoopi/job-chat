@@ -15,7 +15,7 @@ import { authClient } from "@/lib/auth-client";
 import { useJobChatTransport } from "@/lib/chat-transport";
 import { isStreaming, reconcileMessagesById, resolveInsightTarget, type LcpTarget } from "@/lib/chat-ui";
 import { isAuthDialogOpen } from "@/lib/layers";
-import { closeAuthDialog, openAuthDialog, useAuthDialogOpen } from "@/lib/auth-dialog";
+import { closeAuthDialog, openAuthDialog, useAuthDialogOpen, useOpenAuthDialogOnError } from "@/lib/auth-dialog";
 import {
   deleteConversation as deleteConversationAction,
   mintChatToken,
@@ -95,6 +95,7 @@ export function ChatClient({
   // duplicate mid-stream send mirrors the composer's own streaming-disabled state.
   const sendingRef = useRef(false);
   const dialogOpen = useAuthDialogOpen();
+  useOpenAuthDialogOnError(); // a Google redirect error (?error=) opens the dialog so it can be surfaced
   // Instant "answering" feedback (006 ruling): set the moment a turn is sent or the arrival attach
   // begins, so the indicator + streaming composer appear AT ONCE and bridge the run-wake gap before the
   // SDK moves `status` off "ready". `pending` is `isStreaming(status) || awaiting`, so once the stream is
