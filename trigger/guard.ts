@@ -1,14 +1,12 @@
 import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
+import type { GuardRefusal } from "@shared/insight";
 
 // The message guards (cap AC-15 + global daily budget AC-20), counted via the store so the same
 // backstop holds on BOTH paths: the "use server" actions (early typed refusal, UX) and the durable
 // agent run (the hard backstop on the write-token's real path to Bedrock). One home for the count
-// logic so the two layers can never drift.
-
-// `guest_cap` is the per-user message-cap refusal (whichever cap applied - the reason name is the UI
-// contract 013 owns; the cap VALUE differs by kind). `daily_budget` is the global kill switch.
-export type GuardRefusal = "guest_cap" | "daily_budget";
+// logic so the two layers can never drift. The refusal taxonomy (`GuardRefusal`) lives in
+// `@shared/insight`, the single home the UI copy layer reads too.
 
 /**
  * Which per-user cap applies: a signed-in account gets the higher `signedInCap`, a guest the lower

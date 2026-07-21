@@ -2,13 +2,9 @@ import type { ToolSet } from "ai";
 import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
 import type { CoverageProfile } from "@shared/analytics";
+import type { RefusalReason } from "@shared/insight";
 import { checkConversationGuards } from "./guard";
-import {
-  buildModelHistory,
-  refusalPart,
-  type ModelMessage,
-  type RefusalPartReason,
-} from "./parts";
+import { buildModelHistory, refusalPart, type ModelMessage } from "./parts";
 import { persistIncomingUserTurns, type RunMessage } from "./persistence";
 import type { EmitPart } from "./tools";
 
@@ -33,10 +29,15 @@ export interface StreamModelArgs {
 /** The model seam: given the rebuilt history, produce the streamed response (real: `streamText`). */
 export type StreamModel<R> = (args: StreamModelArgs) => R;
 
+/** The wire trigger for a run (SDK `ChatTaskRunPayload.trigger`). The gate keys Retry off this, never
+ *  guessing from the persisted tail. Only `submit-message` / `regenerate-message` reach a turn run. */
+export type ChatTrigger = "submit-message" | "regenerate-message" | "preload" | "action" | "close";
+
 /** The subset of the SDK's chat-agent run payload this orchestrator consumes. */
 export interface ChatRunArgs {
   chatId: string;
   messages: RunMessage[];
+  trigger: ChatTrigger;
   tools: ToolSet;
   signal: AbortSignal;
 }
@@ -54,7 +55,10 @@ export interface ChatRunDeps<R> {
   streamModel: StreamModel<R>;
 }
 
-type Gate = { kind: "refuse"; reason: RefusalPartReason } | { kind: "run"; history: ModelMessage[] };
+type Gate =
+  | { kind: "refuse"; reason: RefusalReason }
+  | { kind: "skip" }
+  | { kind: "run"; history: ModelMessage[] };
 
 /** The one-line DATA SCOPE note appended to the system prompt from the corpus profile (018 strand 5). */
 function dataScopeNote(p: CoverageProfile): string {
@@ -72,24 +76,53 @@ function dataScopeNote(p: CoverageProfile): string {
 
 export function createChatRun<R>(deps: ChatRunDeps<R>) {
   return async (args: ChatRunArgs): Promise<R | undefined> => {
-    const { chatId, messages, tools, signal } = args;
+    const { chatId, messages, trigger, tools, signal } = args;
 
-    // Persist the newly-arrived user turn(s) BEFORE the guard counts them, then apply the backstop,
-    // then rebuild the model input from the now-current store - all on ONE connection so persist ->
-    // count -> rebuild is atomic and reads the same history.
+    // Gate order (all on ONE connection so the reads are consistent): guards FIRST, then persist the
+    // incoming turn(s), then the already-answered dedup. Guards-first means a refused turn persists
+    // nothing - not even its own user row - and the cap counts the PRIOR rows only, exactly like the
+    // action gate (never one message stricter). The dedup runs AFTER persist so the tail reflects the
+    // new turn, and it keys Retry off the WIRE trigger, not the tail role: a failed turn now leaves a
+    // trailing assistant error row, so a tail-role guess would wrongly skip a legitimate Retry.
     const gate = await deps.withStore<Gate>(async (store) => {
-      const tooLong = await persistIncomingUserTurns(store, chatId, messages);
-      if (tooLong) return { kind: "refuse", reason: tooLong };
-
+      // Cap / daily-budget backstop (counts prior rows only - the new turn is not yet persisted).
       const refusal = await checkConversationGuards(
         { store, guards: deps.guards, now: deps.now },
         chatId,
       );
       if (refusal) return { kind: "refuse", reason: refusal };
 
+      // Persist the newly-arrived user turn(s) (count-based, so a redelivery is a no-op). The input-size
+      // backstop refuses an over-length turn here, before it reaches Postgres or Bedrock - still nothing
+      // persisted.
+      const tooLong = await persistIncomingUserTurns(store, chatId, messages);
+      if (tooLong) return { kind: "refuse", reason: tooLong };
+
+      // A regenerate (Retry) supersedes the row it re-answers: mirror the SDK's trailing-assistant pop
+      // (it trims trailing assistant messages from its accumulator until the tail is a user, then
+      // re-runs) in the DURABLE store, BEFORE the read below - so the superseded error card (or a prior
+      // answer) is gone, and both the rebuilt history and a later reload show exactly ONE assistant reply
+      // per user turn (I4/AC-6/AC-8). A no-op on submit (nothing trails the just-persisted user turn).
+      if (trigger === "regenerate-message") await store.deleteTrailingAssistant(chatId);
+
       const loaded = await store.getConversation(chatId);
-      return { kind: "run", history: buildModelHistory(loaded?.messages ?? []) };
+      const persisted = loaded?.messages ?? [];
+
+      // The LOAD-BEARING dedup. Crash-continuation re-dispatch re-EXECUTES a turn with a NEW assistant id
+      // (the 021 upsert only stops SAME-id replays), so only this gate stops that duplicate. A regenerate
+      // (Retry) always runs (its superseded tail was popped above). A submit whose turn is already
+      // answered (a non-user tail) is a redelivery - skip.
+      const tail = persisted[persisted.length - 1];
+      const alreadyAnswered = tail !== undefined && tail.role !== "user";
+      if (trigger !== "regenerate-message" && alreadyAnswered) return { kind: "skip" };
+
+      return { kind: "run", history: buildModelHistory(persisted) };
     });
+
+    if (gate.kind === "skip") {
+      console.log("[turn] already answered - skipped redelivered submit envelope");
+      return undefined;
+    }
 
     if (gate.kind === "refuse") {
       deps.emit(refusalPart(crypto.randomUUID(), gate.reason));

@@ -1,4 +1,8 @@
-import type { DataInsight, DataPoint } from "@shared/insight";
+import type { DataInsight, DataPoint, ErrorKind, RefusalReason } from "@shared/insight";
+
+// The error / refusal taxonomy lives in `@shared/insight` (its one home); re-exported here so the UI copy
+// helpers and their callers keep importing the kinds from the insight-format layer.
+export type { ErrorKind, RefusalReason };
 
 // Pure presentation helpers for the insight surfaces. Kept free of React/"use client" so the copy
 // contracts (AC-10) and the chart series-reading conventions are unit-testable in isolation.
@@ -25,12 +29,6 @@ export function barsChartCapsAt(insight: DataInsight): number | null {
   if (valueKeysOf(insight.series, labelKey).length > 1) return null; // grouped bars are not capped
   return insight.series.length > BARS_CAP ? BARS_CAP : null;
 }
-
-/** The error taxonomy the agent tags (mirrors trigger/parts.ts AgentErrorKind - UI copy layer). */
-export type ErrorKind = "system" | "unanswerable";
-/** The refusal taxonomy (mirrors trigger/parts.ts RefusalPartReason - UI copy layer): the cap/budget
- *  guard plus `too_long` for an over-length turn refused at the agent-run ingress. */
-export type RefusalReason = "guest_cap" | "daily_budget" | "too_long";
 
 /** AC-10: distinct copy for a system failure vs an unanswerable question. Never a raw error. */
 export function errorCopy(kind: ErrorKind): string {

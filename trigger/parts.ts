@@ -1,7 +1,13 @@
-import { DataInsightSchema, type ChartType, type DataInsight, type DataPoint } from "@shared/insight";
+import {
+  DataInsightSchema,
+  type ChartType,
+  type DataInsight,
+  type DataPoint,
+  type ErrorKind,
+  type RefusalReason,
+} from "@shared/insight";
 import type { QueryResult, TemplateName } from "@shared/analytics";
 import type { MessageRole } from "@shared/store";
-import type { GuardRefusal } from "./guard";
 
 // The agent's part vocabulary: turning an analytics QueryResult into the ONE `data-insight` part per
 // answer (built via the strict shared insight schema), the loading skeleton written before the tool
@@ -499,47 +505,55 @@ export function toModelOutput(insight: DataInsight): {
   };
 }
 
-export type AgentErrorKind = "system" | "unanswerable";
-
 export interface ErrorPart {
   type: "data-error";
   id: string;
-  data: { kind: AgentErrorKind };
+  data: { kind: ErrorKind };
 }
 
 /**
  * The error part (AC-10). `system` = a tool/infra failure ("something went wrong on my side");
  * `unanswerable` = a question the data cannot answer. The user-facing copy lives in the UI (005/006);
- * the agent only tags the kind so retry/copy can branch.
+ * the agent only tags the kind so retry/copy can branch. `ErrorKind` is defined in `@shared/insight`.
  */
-export function errorPart(id: string, kind: AgentErrorKind): ErrorPart {
+export function errorPart(id: string, kind: ErrorKind): ErrorPart {
   return { type: "data-error", id, data: { kind } };
 }
-
-// The reasons the agent streams as a data-refusal part: the cap/budget guard backstop (GuardRefusal)
-// plus the input-size backstop (`too_long`) refused at the run() ingress before persist/model. The UI
-// renders every one of these as a polite RefusalNotice (src/lib/chat-ui.ts classifier + refusalCopy),
-// so this union must stay in step with that handling.
-export type RefusalPartReason = GuardRefusal | "too_long";
 
 export interface RefusalPart {
   type: "data-refusal";
   id: string;
-  data: { reason: RefusalPartReason };
+  data: { reason: RefusalReason };
 }
 
 /**
  * The refusal part (AC-15 cap / AC-20 daily budget, plus `too_long` for an over-length turn), streamed
  * by the agent-side backstop when a turn is refused before the model. A DISTINCT taxonomy from
  * `data-error`: not a failure, but a polite limit - the client renders it like the server action's
- * typed refusal, not the error card.
+ * typed refusal, not the error card. `RefusalReason` is defined in `@shared/insight`.
  */
-export function refusalPart(id: string, reason: RefusalPartReason): RefusalPart {
+export function refusalPart(id: string, reason: RefusalReason): RefusalPart {
   return { type: "data-refusal", id, data: { reason } };
 }
 
 /** A model-input message: role + text content - the alternating history the model replays each turn. */
 export type ModelMessage = { role: MessageRole; content: string };
+
+/** The text the MODEL sees for a persisted turn (F8, prose rule one home each): for an assistant CARD
+ *  turn the code-derived VERDICT read off the persisted card (the honest headline, never the model's own
+ *  possibly-fabricated prose), or "" when the card carries no verdict (an error/refusal card - the card
+ *  itself is the surface); a user turn or a card-less assistant turn keeps its stored content verbatim. */
+function modelFacingContent(m: { role: MessageRole; content: string; parts?: unknown }): string {
+  if (m.role !== "assistant" || m.parts == null) return m.content;
+  const payloads = Array.isArray(m.parts) ? m.parts : [m.parts];
+  const verdicts = payloads
+    .map((p) => {
+      const parsed = DataInsightSchema.safeParse(p);
+      return parsed.success ? parsed.data.verdict : null;
+    })
+    .filter((v): v is string => v !== null);
+  return verdicts.length > 0 ? verdicts.join(" ") : "";
+}
 
 /**
  * Rebuild the model-input history for a turn from the store's persisted conversation - the SOURCE OF
@@ -551,24 +565,28 @@ export type ModelMessage = { role: MessageRole; content: string };
  * SDK replay - turn N gets the full alternating user+assistant history with the newest user message as
  * the sole trailing turn.
  *
- * Only role + text `content` reach the model (the card payload is a UI artifact, and each assistant
- * verdict already carries its headline number in prose, so plain text is a faithful, compact record of
- * what the assistant said). Empty-content rows are dropped so a refused/errored turn - persisted with
- * empty content - never emits an invalid empty model message.
+ * F8: the model-facing content is derived per turn (`modelFacingContent`) - a card turn contributes its
+ * code-derived VERDICT (the card payload is a UI artifact; the honest headline is what the model should
+ * see, never the model's own prose), an error/refusal card contributes "", and a plain turn its verbatim
+ * text. Empty-derived rows are then dropped so an errored/refused turn never emits an invalid empty model
+ * message.
  *
  * Dropping an empty error/refusal row can leave two SAME-ROLE rows adjacent - e.g. an errored turn
  * between two user questions rebuilds as user,user - which Bedrock's strict role-alternation rejects
  * (018 review-fix). So after the empty-drop, consecutive same-role rows are COALESCED into one (their
- * text joined). This heals only the rebuilt model input; persistence is untouched (the store still holds
- * the empty error row), so no schema/migration change - and a normally-alternating history is unaffected.
+ * text joined). This heals only the rebuilt model input; persistence is untouched, so no schema/migration
+ * change - and a normally-alternating history is unaffected.
  */
-export function buildModelHistory(messages: { role: MessageRole; content: string }[]): ModelMessage[] {
-  const kept = messages.filter((m) => m.content.trim().length > 0);
+export function buildModelHistory(
+  messages: { role: MessageRole; content: string; parts?: unknown }[],
+): ModelMessage[] {
   const merged: ModelMessage[] = [];
-  for (const m of kept) {
+  for (const m of messages) {
+    const content = modelFacingContent(m);
+    if (content.trim().length === 0) continue;
     const prev = merged[merged.length - 1];
-    if (prev && prev.role === m.role) prev.content = `${prev.content}\n${m.content}`;
-    else merged.push({ role: m.role, content: m.content });
+    if (prev && prev.role === m.role) prev.content = `${prev.content}\n${content}`;
+    else merged.push({ role: m.role, content });
   }
   return merged;
 }

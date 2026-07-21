@@ -95,6 +95,7 @@ describe.skipIf(!hasCreds)("agent history reconstruction against real Postgres",
     // ASSISTANT answers MISSING, the newest turn appended. This is exactly what re-answered everything.
     const result = await run({
       chatId: conv.id,
+      trigger: "submit-message",
       messages: [
         { role: "user", content: "q1" },
         { role: "user", content: "q2" },
@@ -182,6 +183,7 @@ describe.skipIf(!hasCreds)("agent history reconstruction against real Postgres",
 
     await run({
       chatId: conv.id,
+      trigger: "submit-message",
       messages: [
         { role: "user", content: "Who is hiring the most?" },
         { role: "user", content: "How much in SF?" },
@@ -202,7 +204,7 @@ describe.skipIf(!hasCreds)("agent history reconstruction against real Postgres",
     expect(captured[0][1].content).not.toContain("Apple"); // the fabricated prose never reaches the model
   });
 
-  it("refuses at the cap backstop without ever calling the model seam", async () => {
+  it("refuses at the cap backstop BEFORE persisting the incoming turn (guards-first, D6)", async () => {
     const userId = freshGuestId();
     const conv = await seedTwoTurns(userId);
 
@@ -211,8 +213,10 @@ describe.skipIf(!hasCreds)("agent history reconstruction against real Postgres",
 
     const run = createChatRun({
       withStore: (fn) => fn(store),
-      // Cap = 3: after the new turn persists (3 user messages) the backstop bites.
-      guards: { guestCap: 3, dailyBudget: HUGE },
+      // Cap = 2: the guard runs FIRST and counts the PRIOR rows only (the 2 seeded user turns), matching
+      // the action gate exactly (never one message stricter). So the over-cap follow-up is refused before
+      // it ever persists.
+      guards: { guestCap: 2, dailyBudget: HUGE },
       emit: (p) => emitted.push(p),
       now,
       system: "SYS",
@@ -224,6 +228,7 @@ describe.skipIf(!hasCreds)("agent history reconstruction against real Postgres",
 
     const result = await run({
       chatId: conv.id,
+      trigger: "submit-message",
       messages: [
         { role: "user", content: "q1" },
         { role: "user", content: "q2" },
@@ -238,5 +243,9 @@ describe.skipIf(!hasCreds)("agent history reconstruction against real Postgres",
     const refusals = emitted.filter((p) => p.type === "data-refusal");
     expect(refusals).toHaveLength(1);
     expect((refusals[0] as { data: { reason: string } }).data.reason).toBe("guest_cap");
+
+    // D6: a refused turn persists NOTHING - not even its own user row. q3 never entered the thread.
+    const reloaded = await store.getConversation(conv.id);
+    expect(reloaded!.messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["q1", "q2"]);
   });
 });

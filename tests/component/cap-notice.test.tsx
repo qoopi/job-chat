@@ -98,6 +98,30 @@ test("Should_ShowRegisterCardAndKeepComposerEnabled_When_Capped: chat composer",
   expect(box.placeholder).toBe("Create an account to keep asking…");
 });
 
+// AC-9 (R3): a cap refusal persists NOTHING (the refused message never enters the thread); the capped
+// state re-derives on the NEXT send attempt from the one refusal notice already in the thread. So a
+// capped guest who sends again is re-refused with the SAME notice - no second server round trip, no
+// second refusal turn appended, the composer still usable.
+test("Should_Rerefuse_When_CappedUserSendsAgain", async () => {
+  sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
+  render(
+    <ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />,
+  );
+  const box = screen.getByRole("textbox", { name: "Ask a follow-up" }) as HTMLTextAreaElement;
+
+  fireEvent.change(box, { target: { value: "One more question" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+  await screen.findByText(/reached the guest limit/i);
+  expect(sendMessageMock).toHaveBeenCalledTimes(1);
+
+  // send again while capped: the SAME notice is still shown, re-refused WITHOUT a second server call
+  fireEvent.keyDown(box, { key: "Enter" });
+  await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+  expect(screen.getByText(/reached the guest limit/i)).toBeTruthy();
+  expect(sendMessageMock).toHaveBeenCalledTimes(1); // no second refusal round trip
+  expect(document.querySelectorAll(".register-card")).toHaveLength(1); // exactly one notice, not doubled
+});
+
 test("Should_OpenDialogWithDraftQueued_When_SendWhileCapped: chat composer", async () => {
   sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
   render(

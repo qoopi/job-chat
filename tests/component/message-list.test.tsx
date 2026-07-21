@@ -240,15 +240,34 @@ describe("MessageList", () => {
     expect(container.textContent).not.toContain("Something went wrong on my side - please try again.");
   });
 
-  // The post-fix shape: extractAssistantPersistence now persists content "" for an error turn, so a
-  // freshly-fixed row never even hydrates a text part - belt and suspenders with the render-layer guard.
-  test("AC-25 resume: a post-fix error turn (content already dropped at persistence) hydrates with no prose part", () => {
+  // A SYNTHESIZED failed turn (the errored turn had no response message) persists content "", so the row
+  // hydrates no text part at all - belt and suspenders with the render-layer suppression. (A tool-failure
+  // that DID narrate persists the prose verbatim under F8; the render layer suppresses it - covered above.)
+  test("AC-25 resume: a synthesized error turn (empty content) hydrates with no prose part", () => {
     const stored: StoredMessage[] = [{ id: "a2", role: "assistant", content: "", parts: { kind: "system" } }];
     const messages = storeToUiMessages(stored);
     expect(messages[0].parts).toEqual([{ type: "data-error", id: "a2-card-0", data: { kind: "system" } }]);
     const { container } = render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />);
     expect(container.querySelector(".err-card")).toBeTruthy();
     expect(container.querySelector(".bubble.ai")).toBeNull();
+  });
+
+  // AC-6/7 (R3): a FAILED turn now persists as a turn (a synthesized system error card, content ""), so a
+  // reload resumes it as the error card WITH Retry - not a bare unanswered question. Drives the real
+  // hydration function (storeToUiMessages), the resume path onTurnComplete's error branch feeds.
+  test("Should_ResumeErrorCard_When_FailedTurnReloaded", () => {
+    const onRetry = vi.fn();
+    const stored: StoredMessage[] = [
+      { id: "u1", role: "user", content: "Who is hiring the most?", parts: null },
+      { id: "a1", role: "assistant", content: "", parts: { kind: "system" } }, // the persisted failed turn
+    ];
+    const messages = storeToUiMessages(stored);
+    render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={onRetry} onOpenLcp={noop} />);
+    // the question survives, and its failed answer resumes as the error card with a working Retry
+    expect(screen.getByText("Who is hiring the most?")).toBeTruthy();
+    expect(screen.getByText("Something went wrong on my side - try again")).toBeTruthy();
+    fireEvent.click(btn("Retry"));
+    expect(onRetry).toHaveBeenCalledOnce();
   });
 
   test("AC-15: a refusal part renders the polite limit notice (not the error card)", () => {
