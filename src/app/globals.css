@@ -601,6 +601,17 @@ a:hover {
   font-size: var(--fs-2xs);
   color: var(--text-3);
 }
+/* AC-D26: the resume dropzone - a dashed box (ported verbatim from the mirror _shared/components.css). */
+.dropzone {
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  padding: var(--sp-5);
+  text-align: center;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  background: var(--surface-2);
+  cursor: pointer;
+}
 /* the dropzone is a quiet "coming soon" affordance for now - the resume-parse backend is P2 (s7). */
 .dropzone.disabled {
   cursor: default;

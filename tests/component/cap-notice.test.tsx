@@ -129,7 +129,8 @@ test("Should_OpenDialogWithDraftQueued_When_SendWhileCapped: chat composer", asy
 });
 
 // AC-D32: on the signed-in return (a full-page reload after the Google redirect), ChatClient takes the
-// sessionStorage-carried draft and auto-sends it exactly once, then clears it.
+// sessionStorage-carried draft and auto-sends it exactly once, then clears it. `fromAuth` marks the
+// genuine post-auth arrival (set by /auth/complete) - the only navigation that may replay a queued draft.
 test("Should_AutoSendQueuedDraft_When_SignInSucceedsAfterCap", async () => {
   sessionStorage.setItem(
     `jobchat_queued_draft:${CONVERSATION_ID}`,
@@ -143,6 +144,7 @@ test("Should_AutoSendQueuedDraft_When_SignInSucceedsAfterCap", async () => {
       e2e={false}
       signedIn
       accountName="Ada"
+      fromAuth
     />,
   );
 
@@ -175,6 +177,7 @@ test("Should_NotDoubleSend_When_TheSameConversationMountsASecondTime", async () 
       e2e={false}
       signedIn
       accountName="Ada"
+      fromAuth
     />,
   );
   await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
@@ -187,6 +190,7 @@ test("Should_NotDoubleSend_When_TheSameConversationMountsASecondTime", async () 
       e2e={false}
       signedIn
       accountName="Ada"
+      fromAuth
     />,
   );
   // give the second mount's microtask a turn to run, then confirm it did NOT re-send: the storage key
@@ -211,6 +215,7 @@ test("Should_KeepTextInComposer_When_AutoSentQueuedDraftIsRefused", async () => 
       e2e={false}
       signedIn
       accountName="Ada"
+      fromAuth
     />,
   );
   await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
@@ -223,6 +228,74 @@ test("Should_KeepTextInComposer_When_AutoSentQueuedDraftIsRefused", async () => 
   expect(
     sessionStorage.getItem(`jobchat_queued_draft:${CONVERSATION_ID}`),
   ).toBeNull();
+});
+
+// Fix round, item 2: the "/chat/new" key is SHARED (conversationId "new"), unlike a real conversation's
+// UUID. A capped guest stashes under "new" then ABANDONS the sign-in; LATER they arrive at /chat/new
+// signed-in via an ORDINARY navigation (landing "Your profile" / "Open your chats"), NOT a post-auth
+// return - so `fromAuth` is absent. That stale draft must NOT auto-send (no unintended conversation /
+// budget burn); it is garbage-collected so it can never misfire on a subsequent real post-auth arrival.
+test("Should_NotAutoSendStaleNewDraft_When_OrdinarySignedInMountFindsIt", async () => {
+  sessionStorage.setItem(`jobchat_queued_draft:new`, "Abandoned question");
+  render(
+    <ChatClient
+      conversationId="new"
+      newChat
+      initialMessages={[]}
+      e2e={false}
+      signedIn
+      accountName="Ada"
+    />,
+  );
+  // let the mount microtask run
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(sendMessageMock).not.toHaveBeenCalled();
+  expect(startConversationMock).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(`jobchat_queued_draft:new`)).toBeNull();
+});
+
+// Fix round, master ruling (arrival side): a genuine "/chat/new" post-auth arrival (fromAuth) with a
+// landing-stashed draft auto-sends it once via the fresh-chat path (startConversation), exactly like the
+// chat path replays its queued draft. This is the landing cap moment carried across sign-in.
+test("Should_AutoSendQueuedNewDraft_When_PostAuthArrivalAtChatNew", async () => {
+  sessionStorage.setItem(`jobchat_queued_draft:new`, "Median salary in SF");
+  startConversationMock.mockResolvedValue({ ok: true, conversationId: "co-1" });
+  render(
+    <ChatClient
+      conversationId="new"
+      newChat
+      initialMessages={[]}
+      e2e={false}
+      signedIn
+      accountName="Ada"
+      fromAuth
+    />,
+  );
+  await waitFor(() =>
+    expect(startConversationMock).toHaveBeenCalledWith("Median salary in SF"),
+  );
+  expect(startConversationMock).toHaveBeenCalledTimes(1);
+  expect(sessionStorage.getItem(`jobchat_queued_draft:new`)).toBeNull();
+});
+
+// Fix round, master ruling (stash side): the LANDING cap carries the blocked question across sign-in
+// exactly like the chat path - a guest_cap on the landing stashes the draft under the "/chat/new"
+// destination key so the post-auth arrival replays it (same sessionStorage mechanism as the chat path).
+test("Should_QueueLandingDraftUnderNewKey_When_CappedOnLanding", async () => {
+  startConversationMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
+  render(<LandingComposer e2e={false} />);
+  const box = screen.getByRole("textbox", {
+    name: "What are you looking for",
+  }) as HTMLTextAreaElement;
+  fireEvent.change(box, { target: { value: "Median salary in SF" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+  await screen.findByText(/reached the guest limit/i);
+  await waitFor(() =>
+    expect(sessionStorage.getItem(`jobchat_queued_draft:new`)).toBe(
+      "Median salary in SF",
+    ),
+  );
 });
 
 test("Should_ShowRegisterCardAndKeepComposerEnabled_When_Capped: landing composer", async () => {

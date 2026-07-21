@@ -12,6 +12,7 @@ import {
   useOpenAuthDialogOnError,
 } from "@/lib/auth-dialog";
 import { ensureGuest, startConversation } from "@/app/actions";
+import { queueDraft } from "@/lib/queued-draft";
 import type { RefusalReason } from "@/lib/insight-format";
 
 // The landing is the first-paint / marketing route where the dialog is rarely opened, so defer the
@@ -75,6 +76,11 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
         setDraft(text); // the blocked question stays in the box (survives the dialog / cancel)
         // refresh #2 s8: a guest cap renders the warm register card (RefusalNotice) with a "Create
         // account" button that opens the dialog - no auto-open, so the composer stays usable.
+        // Fix round (master ruling): carry the blocked question across Google sign-in exactly like the
+        // chat path - stash under the landing dialog's "/chat/new" destination so the post-auth arrival
+        // (fromAuth) replays it once. Only guest_cap (the register moment); daily_budget is a hard stop
+        // that signing in cannot lift, matching the chat path's guest_cap-only `capped` carry.
+        if (r.reason === "guest_cap") queueDraft("new", text);
       }
       setBusy(false); // refusal / invalid - let the visitor edit and retry
     } catch {

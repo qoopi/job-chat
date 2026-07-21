@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DataInsight } from "@shared/insight";
 import {
   barsChartCapsAt,
@@ -66,9 +66,21 @@ export function InsightCard({
   const topN = barsChartCapsAt(insight);
   const showTopN = isChart && tab === "chart" && topN !== null;
 
-  // A stable element reference (keyed on the insight identity, not on tab/sqlOpen) so React bails out
-  // of re-rendering the Recharts subtree when only the Show-query reveal toggles. `onOpenTable` is the
-  // capped bars chart's "+ N more" target (open the full series in the LCP); it is ChatClient-stable.
+  // Ref-stabilize `onOpenTable` (ruling s2): MessageList hands a FRESH inline `onOpenTable` on every
+  // render and flips `pending` at each turn boundary, so a settled card re-renders per turn. Depending the
+  // chartEl memo on that ref-unstable prop would recompute (and re-render) the whole Recharts subtree for
+  // every prior card at each turn boundary. Keep the latest callback in a ref (updated in an effect, not
+  // during render) behind a stable wrapper, so the memo depends only on the insight identity while
+  // `openTable` still invokes the current onOpenTable (it only fires from user events, post-commit).
+  const openTableRef = useRef(onOpenTable);
+  useEffect(() => {
+    openTableRef.current = onOpenTable;
+  }, [onOpenTable]);
+  const openTable = useCallback(() => openTableRef.current?.(), []);
+
+  // A stable element reference (keyed on the insight identity, not on tab/sqlOpen/onOpenTable) so React
+  // bails out of re-rendering the Recharts subtree when only the Show-query reveal or `pending` toggles.
+  // `openTable` is the capped bars chart's "+ N more" target (open the full series in the LCP).
   const chartEl = useMemo(
     () =>
       insight.kind === "chart" ? (
@@ -76,10 +88,10 @@ export function InsightCard({
           chartType={insight.chartType}
           series={insight.series}
           currency={insight.meta.currency}
-          onShowAll={onOpenTable}
+          onShowAll={openTable}
         />
       ) : null,
-    [insight, onOpenTable],
+    [insight, openTable],
   );
 
   // The tabs are an ARIA tablist so a screen reader announces the selected view. A table-only insight
@@ -136,7 +148,7 @@ export function InsightCard({
             <button
               className="btn btn-outline btn-sm open-full-table"
               type="button"
-              onClick={() => onOpenTable?.()}
+              onClick={openTable}
             >
               Open full table ({rows.length.toLocaleString()} rows)
             </button>

@@ -53,7 +53,12 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
   if (!ok) return failSafe();
 
-  const res = NextResponse.redirect(new URL(next, url.origin));
+  // Mark the destination as a genuine post-auth arrival (fix round, item 2): ChatClient replays a queued
+  // capped draft ONLY when it sees `?fromAuth=1`, so a later ordinary signed-in mount that finds a stale
+  // shared-key ("/chat/new") draft can never auto-send it. Set on the resolved same-origin `next`.
+  const dest = new URL(next, url.origin);
+  dest.searchParams.set("fromAuth", "1");
+  const res = NextResponse.redirect(dest);
   // Belt-and-suspenders: guarantee the guest cookie is dropped on THIS redirect response, regardless of
   // how Next merges completeSignIn's next/headers cookie mutation (idempotent with it).
   res.cookies.delete(GUEST_COOKIE);

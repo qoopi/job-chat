@@ -59,10 +59,13 @@ export function ChatClient({
   newChat = false,
   e2e = false,
   signedIn: signedInInitial = false,
-  accountName: accountNameInitial,
+  // `accountName` needs no client flip - Google-only sign-in is a full-page redirect, so the server
+  // re-render already carries the real name (only `signedIn` becomes client state, below).
+  accountName,
   accountEmail,
   conversations: conversationsInitial = [],
   profileOnArrival = false,
+  fromAuth = false,
 }: {
   conversationId: string;
   title?: string;
@@ -85,6 +88,11 @@ export function ChatClient({
   /** refresh #2 s10: arriving from the landing's account menu "Your profile" (`/chat/new?profile=1`)
    *  opens the profile LCP on mount (the landing has no LCP of its own). */
   profileOnArrival?: boolean;
+  /** Fix round (item 2): this mount is a genuine post-auth return - `/auth/complete` set `?fromAuth=1`
+   *  on the destination after finalizing the sign-in. ONLY such an arrival may replay a queued draft; a
+   *  later ordinary signed-in mount that happens to find a stale key (the shared "/chat/new" key) must
+   *  not auto-send it. */
+  fromAuth?: boolean;
 }) {
   const router = useRouter();
   const transport = useJobChatTransport({ e2e });
@@ -119,9 +127,6 @@ export function ChatClient({
   // in-page sign-in / sign-out flips them (the sidebar updates without a full-page refresh). `dialogOpen`
   // comes from the shared open-store (interaction-spec s6; one dialog at a time).
   const [signedIn, setSignedIn] = useState(signedInInitial);
-  // `accountName` comes from the SSR resolve (guest -> undefined). Under Google-only sign-in the account
-  // arrives via a full-page redirect, so the server re-render carries the real name - no client flip.
-  const accountName = accountNameInitial;
   const [conversations, setConversations] = useState(conversationsInitial);
   // Reentrancy guard: while a turn is in flight (`send` between its start and its finally), a second
   // `send` is ignored. Without it a follow-up chip clicked mid-stream fires a concurrent
@@ -383,11 +388,15 @@ export function ChatClient({
       if (e2e && pendingQuestion) void send(pendingQuestion);
       else if (!e2e && autoStream) void attachOnArrival();
       // refresh #2 s8 (AC-D32): a capped guest's draft queued before the Google sign-in redirect carries
-      // across via sessionStorage; on return - now signed in - auto-send it exactly once (takeQueuedDraft
-      // clears it). Only when signed in, so a guest reload never loops back into the capped guard.
+      // across via sessionStorage; on the genuine post-auth return (fromAuth) - now signed in - auto-send
+      // it exactly once. Fix round (item 2): the "/chat/new" key is SHARED, so a later ORDINARY signed-in
+      // mount (landing "Your profile" / "Open your chats") could otherwise pick up a stale abandoned-
+      // sign-in draft and fire an unintended send. We take-and-clear on any signed-in mount (a signed-in
+      // user never legitimately owns a queued draft - `capped` requires !signedIn - so a found key is
+      // stale) but only SEND when this is a post-auth arrival.
       else if (signedIn) {
         const queued = takeQueuedDraft(conversationId);
-        if (queued) void send(queued);
+        if (queued && fromAuth) void send(queued);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

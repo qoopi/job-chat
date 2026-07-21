@@ -21,7 +21,10 @@ describe("/auth/complete Google callback finalize", () => {
 
     expect(completeSignInMock).toHaveBeenCalledTimes(1); // adoption + guest-cookie clear ran
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe("http://localhost:3000/chat/abc");
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.pathname).toBe("/chat/abc");
+    // fix round (item 2): a genuine post-auth arrival is marked so ChatClient may replay a queued draft
+    expect(loc.searchParams.get("fromAuth")).toBe("1");
     // the guest cookie is dropped on the redirect response (session recognized -> guest id retired)
     expect(res.headers.get("set-cookie")).toMatch(/jobchat_guest=;/);
   });
@@ -42,13 +45,17 @@ describe("/auth/complete Google callback finalize", () => {
   it("Should_FallBackToLanding_When_NextIsOpenRedirect", async () => {
     for (const bad of ["//evil.com", "https://evil.com", "http://evil.com/x"]) {
       const res = await GET(req(`/auth/complete?next=${encodeURIComponent(bad)}`));
-      expect(res.headers.get("location")).toBe("http://localhost:3000/");
+      const loc = new URL(res.headers.get("location")!);
+      expect(loc.host).toBe("localhost:3000"); // never a foreign origin
+      expect(loc.pathname).toBe("/"); // fell back to the landing (marker is inert there)
     }
   });
 
   it("Should_FallBackToLanding_When_NextMissing", async () => {
     const res = await GET(req("/auth/complete"));
-    expect(res.headers.get("location")).toBe("http://localhost:3000/");
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.host).toBe("localhost:3000");
+    expect(loc.pathname).toBe("/");
   });
 
   // AUDIT (05-testing, independent pass): safeNext()'s guard is a string-prefix check
@@ -102,7 +109,9 @@ describe("/auth/complete Google callback finalize", () => {
     expect(completeSignInMock).toHaveBeenCalledTimes(2);
     for (const res of [first, second]) {
       expect(res.status).toBe(307);
-      expect(res.headers.get("location")).toBe("http://localhost:3000/chat/abc");
+      const loc = new URL(res.headers.get("location")!);
+      expect(loc.pathname).toBe("/chat/abc");
+      expect(loc.searchParams.get("fromAuth")).toBe("1");
       expect(res.headers.get("set-cookie")).toMatch(/jobchat_guest=;/);
     }
   });

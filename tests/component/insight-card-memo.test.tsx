@@ -46,3 +46,28 @@ test("Should_NotReRenderChartSubtree_When_ShowQueryToggled", () => {
   // sqlOpen toggled on and off; the memoized chart element was reused both times.
   expect(probe.chartRenders).toBe(1);
 });
+
+// Ruling s2 regression guard (fix round): MessageList hands InsightCard a FRESH inline `onOpenTable`
+// (`() => onOpenLcp(message.id, id)`) on every render AND flips `pending` at each turn boundary, so a
+// SETTLED card re-renders whenever a later turn starts/ends. The chart-subtree memo must survive that -
+// a ref-unstable onOpenTable must NOT recompute the Recharts element. We keep the insight ref stable (a
+// settled card) but pass a new onOpenTable closure and flip `pending` on each rerender, exactly as
+// MessageList does. Before the fix the chartEl memo depended on onOpenTable, so its counter climbed.
+test("Should_NotReRenderChartSubtree_When_PendingFlipsWithFreshCallback", () => {
+  const { rerender } = render(
+    <InsightCard insight={chartInsight} onOpenTable={() => {}} pending={false} />,
+  );
+  expect(probe.chartRenders).toBe(1);
+
+  // a later turn begins: pending -> true, and MessageList re-creates the inline callback (new ref)
+  rerender(
+    <InsightCard insight={chartInsight} onOpenTable={() => {}} pending={true} />,
+  );
+  // ...and settles: pending -> false, the callback ref changes again
+  rerender(
+    <InsightCard insight={chartInsight} onOpenTable={() => {}} pending={false} />,
+  );
+
+  // the settled card's chart subtree was memoized across both turn-boundary re-renders
+  expect(probe.chartRenders).toBe(1);
+});
