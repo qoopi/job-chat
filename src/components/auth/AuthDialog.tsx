@@ -34,7 +34,13 @@ function googleErrorMessage(code: string): string {
 // `/chat/new` (sign-in takes the user INTO the app), a chat host passes its own conversation path (sign-in
 // returns to that chat). It flows through /auth/complete's resolve-then-compare-origin safeNext guard, so
 // it must stay a same-origin path. Falls back to the current page for any host that omits it.
-export function AuthDialog({ onClose, next }: { onClose: () => void; next?: string }) {
+export function AuthDialog({
+  onClose,
+  next,
+}: {
+  onClose: () => void;
+  next?: string;
+}) {
   // Seed the error from a Google redirect's `?error=<code>` (Better Auth's errorCallbackURL bounced the
   // browser back here). Read in the initializer, not an effect: the dialog only ever mounts client-side
   // (dialogOpen is false on the server), so `window` is defined and there is no SSR flash. The param is
@@ -68,7 +74,8 @@ export function AuthDialog({ onClose, next }: { onClose: () => void; next?: stri
     const opener = document.activeElement as HTMLElement | null;
     const node = dialogRef.current;
     if (!node) return;
-    const focusables = () => Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+    const focusables = () =>
+      Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
     node.querySelector<HTMLElement>("#auth-google")?.focus(); // initial focus lands inside the dialog
 
     function onTab(e: KeyboardEvent) {
@@ -99,7 +106,11 @@ export function AuthDialog({ onClose, next }: { onClose: () => void; next?: stri
     if (!params.has("error")) return;
     params.delete("error");
     const qs = params.toString();
-    window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash,
+    );
   }, []);
 
   async function onGoogle() {
@@ -129,11 +140,11 @@ export function AuthDialog({ onClose, next }: { onClose: () => void; next?: stri
         className="dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Sign in to jobchat.dev"
+        aria-label="Create your free account"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3>Sign in to jobchat.dev</h3>
-        <p className="sub">Keep your profile, matches and history.</p>
+        <h3>Create your free account</h3>
+        <p className="sub">Keep this conversation, your history and profile.</p>
 
         <button
           id="auth-google"
@@ -147,14 +158,22 @@ export function AuthDialog({ onClose, next }: { onClose: () => void; next?: stri
         </button>
 
         {error ? (
-          <p className="field-error" role="alert" style={{ marginTop: "var(--sp-3)" }}>
+          <p
+            className="field-error"
+            role="alert"
+            style={{ marginTop: "var(--sp-3)" }}
+          >
             {error}
           </p>
         ) : null}
 
+        <p className="dialog-note">
+          Your guest conversation is saved to the new account.
+        </p>
+
         <div className="dialog-note">
           <button type="button" onClick={onClose}>
-            Cancel
+            Not now
           </button>
         </div>
       </div>

@@ -4,7 +4,7 @@ import { cookies, headers } from "next/headers";
 import postgres, { type Sql } from "postgres";
 import { auth, sessions } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
-import { createStore, type Conversation } from "@shared/store";
+import { createStore, type ConversationSummary } from "@shared/store";
 import { getGuardConfig } from "@shared/env";
 import { isE2E } from "@/lib/e2e";
 import { auth as authServer } from "@/lib/auth";
@@ -44,19 +44,28 @@ function sql(): Sql {
 // Start (or resume) the durable session and mint its browser token, server-side so the secret key
 // never reaches the browser. `mintToken` is the re-mint the transport reconnects with; both are
 // gated by the session core's ownership check.
-const startSessionAction = chat.createStartSessionAction<typeof jobChatAgent>(AGENT_ID);
+const startSessionAction =
+  chat.createStartSessionAction<typeof jobChatAgent>(AGENT_ID);
 const startSession: StartSession = async ({ chatId }) => {
   const r = await startSessionAction({ chatId });
-  return { publicAccessToken: r.publicAccessToken, runId: r.runId, sessionId: r.sessionId };
+  return {
+    publicAccessToken: r.publicAccessToken,
+    runId: r.runId,
+    sessionId: r.sessionId,
+  };
 };
 const mintToken: MintToken = (conversationId) =>
-  auth.createPublicToken({ scopes: chatTokenScopes(conversationId), expirationTime: "1h" });
+  auth.createPublicToken({
+    scopes: chatTokenScopes(conversationId),
+    expirationTime: "1h",
+  });
 
 // Deliver the user turn to the durable session inbox after the run is triggered. This is the only
 // server-side writer of `.in`; the preloaded agent run waits here for its first message (the browser
 // transport never sends one in our server-mediated flow). The session-scoped secret-key client
 // addresses the session by its externalId (= our conversation id).
-const sendToInbox: SendToInbox = (chatId, chunk) => sessions.open(chatId).in.send(chunk);
+const sendToInbox: SendToInbox = (chatId, chunk) =>
+  sessions.open(chatId).in.send(chunk);
 
 function service() {
   return createSessionService({
@@ -85,10 +94,14 @@ async function guestIdFromCookie(): Promise<string | undefined> {
  * additive: a read failure (misconfig / no session) degrades to guest - it must never break the
  * guest-open chat. E2E runs without auth (no Postgres), so short-circuit it.
  */
-async function currentAuthUser(): Promise<{ id: string; name?: string } | undefined> {
+async function currentAuthUser(): Promise<
+  { id: string; name?: string } | undefined
+> {
   if (isE2E()) return undefined;
   try {
-    const session = await authServer.api.getSession({ headers: await headers() });
+    const session = await authServer.api.getSession({
+      headers: await headers(),
+    });
     if (!session?.user?.id) return undefined;
     return { id: session.user.id, name: session.user.name ?? undefined };
   } catch {
@@ -140,10 +153,15 @@ export async function ensureGuest(): Promise<string> {
 }
 
 /** AC-3 landing handoff: create the conversation + user message #1 and trigger the run. */
-export async function startConversation(question: string): Promise<SessionResult> {
+export async function startConversation(
+  question: string,
+): Promise<SessionResult> {
   const guestId = await ensureGuest();
   const authUserId = await currentAuthUserId();
-  const identity = await resolveIdentity(createStore(sql()), { authUserId, guestId });
+  const identity = await resolveIdentity(createStore(sql()), {
+    authUserId,
+    guestId,
+  });
   return service().startConversation(identity.userId, question, identity.kind);
 }
 
@@ -154,17 +172,27 @@ export async function startConversation(question: string): Promise<SessionResult
  * subscribes with wait (the only SDK path that streams a freshly-triggered follow-up live), and the
  * agent's `run()` persists the user turn before the backstop counts it.
  */
-export async function sendMessage(conversationId: string, text: string): Promise<SendResult> {
+export async function sendMessage(
+  conversationId: string,
+  text: string,
+): Promise<SendResult> {
   const identity = await resolveCaller();
   if (!identity) return { ok: false, reason: "not_found" };
-  return service().sendMessage(conversationId, text, identity.userId, identity.kind);
+  return service().sendMessage(
+    conversationId,
+    text,
+    identity.userId,
+    identity.kind,
+  );
 }
 
 /**
  * Re-mint a session-scoped public token for the transport to reconnect - but only for the caller's
  * OWN conversation (typed `not_found` otherwise, so one guest's token never grants another's session).
  */
-export async function mintChatToken(conversationId: string): Promise<MintResult> {
+export async function mintChatToken(
+  conversationId: string,
+): Promise<MintResult> {
   const identity = await resolveCaller();
   if (!identity) return { ok: false, reason: "not_found" };
   return service().mintChatToken(conversationId, identity.userId);
@@ -177,7 +205,10 @@ export async function mintChatToken(conversationId: string): Promise<MintResult>
  * cookie so the per-request path stops seeing it and never re-adopts. A no-op when no verified session
  * exists yet (or E2E). Adoption is bound to THIS transition, not to per-request resolution.
  */
-export async function completeSignIn(): Promise<{ ok: boolean; name?: string }> {
+export async function completeSignIn(): Promise<{
+  ok: boolean;
+  name?: string;
+}> {
   const user = await currentAuthUser();
   if (!user) return { ok: false };
   const guestId = await guestIdFromCookie();
@@ -203,9 +234,7 @@ export async function clearGuestSession(): Promise<void> {
  * client refetches this after an in-page sign-in (the initial list is server-rendered by the chat
  * page). Empty for a caller that owns nothing.
  */
-export async function listMyConversations(): Promise<
-  Pick<Conversation, "id" | "title" | "created_at">[]
-> {
+export async function listMyConversations(): Promise<ConversationSummary[]> {
   const identity = await resolveCaller();
   if (!identity) return [];
   return createStore(sql()).listConversations(identity.userId);
@@ -216,7 +245,9 @@ export async function listMyConversations(): Promise<
  * the action via the resolved Identity + the session core's owner check - a non-owner (or a caller that
  * owns nothing) reads as not_found, never deleting another user's thread.
  */
-export async function deleteConversation(conversationId: string): Promise<DeleteResult> {
+export async function deleteConversation(
+  conversationId: string,
+): Promise<DeleteResult> {
   const identity = await resolveCaller();
   if (!identity) return { ok: false, reason: "not_found" };
   return service().deleteConversation(conversationId, identity.userId);

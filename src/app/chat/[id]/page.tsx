@@ -1,11 +1,15 @@
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import type { UIMessage } from "ai";
-import type { Conversation } from "@shared/store";
+import type { ConversationSummary } from "@shared/store";
 import { ChatClient } from "@/components/chat/ChatClient";
 import { storeToUiMessages } from "@/lib/chat-ui";
 import { e2eFixtureThread } from "@/lib/chat-fixtures";
-import { loadConversation, listOwnerConversations, resolveViewer } from "@/lib/server-store";
+import {
+  loadConversation,
+  listOwnerConversations,
+  resolveViewer,
+} from "@/lib/server-store";
 import { isE2E } from "@/lib/e2e";
 
 // The chat shell (mock 2a). Server-renders the conversation from the store (AC-13 resume: cards intact,
@@ -37,8 +41,9 @@ export default async function ChatPage({
   let initialMessages: UIMessage[] = [];
   let pendingQuestion: string | undefined;
   let signedIn = false;
-  let conversations: Pick<Conversation, "id" | "title" | "created_at">[] = [];
+  let conversations: ConversationSummary[] = [];
   let accountName: string | undefined;
+  let accountEmail: string | undefined;
 
   if (e2e) {
     // No Postgres in the automated suite: resume from the fixture, or carry the landing question in. A
@@ -64,7 +69,10 @@ export default async function ChatPage({
     }
     signedIn = viewer.signedIn;
     accountName = viewer.accountName ?? undefined;
-    conversations = viewer.accountUserId ? await listOwnerConversations(viewer.accountUserId) : [];
+    accountEmail = viewer.accountEmail ?? undefined;
+    conversations = viewer.accountUserId
+      ? await listOwnerConversations(viewer.accountUserId)
+      : [];
   }
 
   return (
@@ -78,6 +86,7 @@ export default async function ChatPage({
       e2e={e2e}
       signedIn={signedIn}
       accountName={accountName}
+      accountEmail={accountEmail}
       conversations={conversations}
     />
   );

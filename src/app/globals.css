@@ -460,6 +460,183 @@ a:hover {
   color: var(--shell-strong);
 }
 
+/* ---------- account chip + menu (refresh #2 s4: auth affordance in the title bar) ---------- */
+.account {
+  position: relative;
+  flex-shrink: 0;
+}
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px 4px 5px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.account-chip:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+.account-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.account-caret {
+  font-size: 10px;
+  color: var(--text-3);
+}
+.account-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 220px;
+  z-index: 60;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.account-menu-head {
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.account-menu-email {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-menu-sub {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+.account-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+}
+.account-menu-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.account-menu-label {
+  flex: 1;
+}
+.account-menu-item.danger {
+  color: var(--danger);
+}
+.account-menu-item.danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+/* the dark-mode pill switch (34x20, 16px knob; --accent track when on) */
+.toggle {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: var(--r-pill);
+  background: var(--border-strong);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.toggle.on {
+  background: var(--accent);
+}
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.toggle.on .toggle-knob {
+  transform: translateX(14px);
+}
+
+/* ---------- Left Chat Part: profile empty state (refresh #2 s7) ---------- */
+.profile-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  max-width: 480px;
+}
+.profile-empty h3 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.profile-empty p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.profile-fields {
+  display: flex;
+  gap: 10px;
+}
+.profile-fields .field {
+  flex: 1;
+}
+.profile-note {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+/* the dropzone is a quiet "coming soon" affordance for now - the resume-parse backend is P2 (s7). */
+.dropzone.disabled {
+  cursor: default;
+}
+.dropzone.disabled:hover {
+  border-color: var(--border-strong);
+}
+
+/* refresh #2 s5: the history row's second line - a muted, single-line first-message preview that
+   distinguishes duplicate titles. */
+.sb-item .sb-preview {
+  display: block;
+  font-size: var(--fs-2xs);
+  color: var(--shell-fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- buttons ---------- */
 .btn {
   display: inline-flex;

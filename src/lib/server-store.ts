@@ -1,7 +1,11 @@
 import "server-only";
 import { cookies, headers } from "next/headers";
 import postgres, { type Sql } from "postgres";
-import { createStore, type Conversation, type Store } from "@shared/store";
+import {
+  createStore,
+  type ConversationSummary,
+  type Store,
+} from "@shared/store";
 import { auth as authServer } from "@/lib/auth";
 
 // Server-only Postgres access for the chat page's resume render (AC-13). A lazy singleton pool (no
@@ -12,7 +16,9 @@ import { auth as authServer } from "@/lib/auth";
 // instead of leaking a fresh pool per module reload - see the auth-pool note in auth.ts.
 const globalForSql = globalThis as unknown as { __jobchatSql?: Sql };
 function store(): Store {
-  return createStore((globalForSql.__jobchatSql ??= postgres(process.env.DATABASE_URL!)));
+  return createStore(
+    (globalForSql.__jobchatSql ??= postgres(process.env.DATABASE_URL!)),
+  );
 }
 
 const GUEST_COOKIE = "jobchat_guest";
@@ -25,6 +31,8 @@ export type Viewer = {
   ownerIds: string[];
   accountUserId: string | null;
   accountName: string | null;
+  /** The signed-in email, for the account-menu header (refresh #2 s4); null for a guest. */
+  accountEmail: string | null;
 };
 
 /** The stored conversation + messages, or `null` for an unknown/malformed id (store contract). */
@@ -46,12 +54,16 @@ export async function resolveViewer(): Promise<Viewer> {
   let signedIn = false;
   let accountUserId: string | null = null;
   let accountName: string | null = null;
+  let accountEmail: string | null = null;
   try {
-    const session = await authServer.api.getSession({ headers: await headers() });
+    const session = await authServer.api.getSession({
+      headers: await headers(),
+    });
     const authUserId = session?.user?.id;
     if (authUserId) {
       signedIn = true;
       accountName = session?.user?.name || session?.user?.email || null;
+      accountEmail = session?.user?.email || null;
       const account = await store().findUserByAuthId(authUserId);
       if (account) {
         accountUserId = account.user_id;
@@ -61,12 +73,12 @@ export async function resolveViewer(): Promise<Viewer> {
   } catch {
     // auth misconfig / no session -> guest-only ownership; never break the resume render
   }
-  return { signedIn, ownerIds, accountUserId, accountName };
+  return { signedIn, ownerIds, accountUserId, accountName, accountEmail };
 }
 
 /** AC-12 (initial SSR list): the account's conversations, newest first, for the sidebar history. */
 export function listOwnerConversations(
   accountUserId: string,
-): Promise<Pick<Conversation, "id" | "title" | "created_at">[]> {
+): Promise<ConversationSummary[]> {
   return store().listConversations(accountUserId);
 }

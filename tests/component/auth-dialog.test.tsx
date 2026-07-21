@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { AuthDialog } from "@/components/auth/AuthDialog";
 import type { UIMessage } from "ai";
 import type { DataInsight } from "@shared/insight";
@@ -14,7 +20,9 @@ import { setAuthDialogOpen } from "@/lib/layers";
 // chat-client.test.tsx does; here no turn streams, so the transport is inert.
 const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
-const sendMessagesMock = vi.fn(async () => new ReadableStream({ start: (c) => c.close() }));
+const sendMessagesMock = vi.fn(
+  async () => new ReadableStream({ start: (c) => c.close() }),
+);
 const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
@@ -54,24 +62,45 @@ import { LandingComposer } from "@/components/landing/LandingComposer";
 
 const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
 
-const composer = () => screen.getByRole("textbox", { name: "Ask a follow-up" }) as HTMLTextAreaElement;
-const pressEsc = () => act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
-const clickSidebarSignIn = () => fireEvent.click(screen.getAllByRole("button", { name: "Sign in" })[0]);
+const composer = () =>
+  screen.getByRole("textbox", {
+    name: "Ask a follow-up",
+  }) as HTMLTextAreaElement;
+const pressEsc = () =>
+  act(
+    () =>
+      void window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape" }),
+      ),
+  );
+const clickSidebarSignIn = () =>
+  fireEvent.click(screen.getAllByRole("button", { name: "Sign in" })[0]);
 
 function tableInsight(n: number): DataInsight {
   return {
     id: "t1",
     kind: "table",
     verdict: "Amazon leads hiring across the market.",
-    rows: Array.from({ length: n }, (_, i) => ({ company: `Co ${i + 1}`, count: 100 - i })),
+    rows: Array.from({ length: n }, (_, i) => ({
+      company: `Co ${i + 1}`,
+      count: 100 - i,
+    })),
     followups: [],
     meta: { sql: "SELECT 1", sampleN: 3483, updatedAt: "2026-07-18 19:12:00" },
   };
 }
 function threadWithTable(n: number): UIMessage[] {
   return [
-    { id: "u1", role: "user", parts: [{ type: "text", text: "Top companies?" }] },
-    { id: "a1", role: "assistant", parts: [{ type: "data-insight", id: "a1-c0", data: tableInsight(n) }] },
+    {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "text", text: "Top companies?" }],
+    },
+    {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "data-insight", id: "a1-c0", data: tableInsight(n) }],
+    },
   ];
 }
 
@@ -86,11 +115,21 @@ afterEach(() => {
 
 describe("google-only auth dialog (017)", () => {
   test("Should_OfferOnlyGoogle_When_Opened", () => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
     clickSidebarSignIn();
 
-    expect(screen.getByRole("dialog", { name: "Sign in to jobchat.dev" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Continue with Google/i })).toBeTruthy();
+    expect(
+      screen.getByRole("dialog", { name: "Create your free account" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Continue with Google/i }),
+    ).toBeTruthy();
     // no email/password affordances remain
     expect(screen.queryByLabelText("Email")).toBeNull();
     expect(screen.queryByLabelText("Password")).toBeNull();
@@ -99,9 +138,13 @@ describe("google-only auth dialog (017)", () => {
 
   test("Should_StartClientGoogleRedirect_When_ContinueTapped", () => {
     render(<AuthDialog onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /Continue with Google/i }),
+    );
     expect(signInSocialMock).toHaveBeenCalledTimes(1);
-    expect(signInSocialMock.mock.calls[0][0]).toMatchObject({ provider: "google" });
+    expect(signInSocialMock.mock.calls[0][0]).toMatchObject({
+      provider: "google",
+    });
   });
 });
 
@@ -113,21 +156,35 @@ describe("post-sign-in destination decided by the host (017 fix round 2)", () =>
   test("Should_LandInChatNew_When_SignInStartedFromLanding", async () => {
     render(<LandingComposer e2e={false} />);
     act(() => openAuthDialog()); // the landing header / composer opens the shared dialog
-    fireEvent.click(await screen.findByRole("button", { name: /Continue with Google/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Continue with Google/i }),
+    );
 
     expect(signInSocialMock).toHaveBeenCalledTimes(1);
-    expect((signInSocialMock.mock.calls[0][0] as { callbackURL: string }).callbackURL).toBe(
-      `/auth/complete?next=${encodeURIComponent("/chat/new")}`,
-    );
+    expect(
+      (signInSocialMock.mock.calls[0][0] as { callbackURL: string })
+        .callbackURL,
+    ).toBe(`/auth/complete?next=${encodeURIComponent("/chat/new")}`);
   });
 
   test("Should_ReturnToCurrentChat_When_SignInStartedFromAChat", () => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
     clickSidebarSignIn();
-    fireEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /Continue with Google/i }),
+    );
 
     expect(signInSocialMock).toHaveBeenCalledTimes(1);
-    expect((signInSocialMock.mock.calls[0][0] as { callbackURL: string }).callbackURL).toBe(
+    expect(
+      (signInSocialMock.mock.calls[0][0] as { callbackURL: string })
+        .callbackURL,
+    ).toBe(
       `/auth/complete?next=${encodeURIComponent(`/chat/${CONVERSATION_ID}`)}`,
     );
   });
@@ -137,25 +194,49 @@ describe("google redirect error surfacing (017 strand 2)", () => {
   test("Should_OpenDialogAndShowError_When_ErrorParamPresent", async () => {
     // Better Auth's errorCallbackURL bounced the browser back with ?error=<code> (not a silent reload).
     window.history.replaceState(null, "", "/chat/x?error=account_not_linked");
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
 
     // the host opened the dialog on the ?error param, and the dialog surfaced the mapped message
-    expect(await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" })).toBeTruthy();
-    expect(screen.getByText(/can't be linked to an existing account/i)).toBeTruthy();
+    expect(
+      await screen.findByRole("dialog", { name: "Create your free account" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/can't be linked to an existing account/i),
+    ).toBeTruthy();
     // the param is stripped so a refresh does not re-surface a stale error
     expect(window.location.search).not.toContain("error");
   });
 
   test("Should_ShowGenericMessage_When_UnknownErrorCode", async () => {
     window.history.replaceState(null, "", "/chat/x?error=some_unexpected_code");
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
 
-    expect(await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" })).toBeTruthy();
+    expect(
+      await screen.findByRole("dialog", { name: "Create your free account" }),
+    ).toBeTruthy();
     expect(screen.getByText(/didn't complete/i)).toBeTruthy();
   });
 
   test("Should_NotOpenDialog_When_NoErrorParam", () => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
@@ -170,8 +251,12 @@ describe("google redirect error surfacing on the LANDING host (017 strand 2)", (
     window.history.replaceState(null, "", "/?error=account_not_linked");
     render(<LandingComposer e2e={false} />);
 
-    expect(await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" })).toBeTruthy();
-    expect(screen.getByText(/can't be linked to an existing account/i)).toBeTruthy();
+    expect(
+      await screen.findByRole("dialog", { name: "Create your free account" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/can't be linked to an existing account/i),
+    ).toBeTruthy();
     expect(window.location.search).not.toContain("error"); // stripped so a refresh does not re-surface it
   });
 
@@ -183,37 +268,71 @@ describe("google redirect error surfacing on the LANDING host (017 strand 2)", (
 
 describe("auth dialog open (AC-10)", () => {
   test("Should_OpenAuthDialog_When_SignInTapped", () => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
     expect(screen.queryByRole("dialog")).toBeNull();
 
     clickSidebarSignIn();
 
-    expect(screen.getByRole("dialog", { name: "Sign in to jobchat.dev" })).toBeTruthy();
+    expect(
+      screen.getByRole("dialog", { name: "Create your free account" }),
+    ).toBeTruthy();
     // the composer dims while the dialog is up (interaction-spec section 4)
     expect(composer().disabled).toBe(true);
   });
 
   test("Should_OpenAuthDialog_When_GuestCapHit", async () => {
     sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
 
     const box = composer();
     fireEvent.change(box, { target: { value: "One more question" } });
     fireEvent.keyDown(box, { key: "Enter" });
 
-    expect(await screen.findByRole("dialog", { name: "Sign in to jobchat.dev" })).toBeTruthy();
+    expect(
+      await screen.findByRole("dialog", { name: "Create your free account" }),
+    ).toBeTruthy();
   });
 });
 
 describe("auth dialog dismiss returns to chat untouched (AC-10)", () => {
-  const initial: UIMessage[] = [{ id: "u1", role: "user", parts: [{ type: "text", text: "A prior question" }] }];
+  const initial: UIMessage[] = [
+    {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "text", text: "A prior question" }],
+    },
+  ];
 
   test.each([
-    ["cancel", () => fireEvent.click(screen.getByRole("button", { name: "Cancel" }))],
+    [
+      "cancel",
+      () => fireEvent.click(screen.getByRole("button", { name: "Not now" })),
+    ],
     ["Esc", () => pressEsc()],
-    ["backdrop", () => fireEvent.click(document.querySelector(".overlay") as HTMLElement)],
+    [
+      "backdrop",
+      () => fireEvent.click(document.querySelector(".overlay") as HTMLElement),
+    ],
   ])("Should_ReturnToChatUntouched_OnEachDismiss: %s", (_label, dismiss) => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={initial} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={initial}
+        e2e={false}
+      />,
+    );
     clickSidebarSignIn();
     expect(screen.getByRole("dialog")).toBeTruthy();
 
@@ -227,8 +346,16 @@ describe("auth dialog dismiss returns to chat untouched (AC-10)", () => {
 
 describe("Esc layer priority: real dialog above the LCP (AC-9)", () => {
   test("Should_RouteEscToAuthDialog_WhenRealDialogAboveLcp", async () => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={threadWithTable(9)} e2e={false} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Open full table (9 rows)" }));
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={threadWithTable(9)}
+        e2e={false}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open full table (9 rows)" }),
+    );
     expect(document.querySelector(".lcp")).toBeTruthy();
 
     // open the REAL dialog on top of the open LCP
@@ -269,7 +396,13 @@ describe("modal focus a11y (AC-10)", () => {
     'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
   test("Should_FocusIntoDialog_When_Opened", () => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
     clickSidebarSignIn();
     const dialog = screen.getByRole("dialog");
     // focus moved off the background shell and into the dialog (the Google button) on open
@@ -278,10 +411,18 @@ describe("modal focus a11y (AC-10)", () => {
   });
 
   test("Should_ContainTab_When_TabbingPastDialogEdges", () => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
     clickSidebarSignIn();
     const dialog = screen.getByRole("dialog");
-    const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const focusables = Array.from(
+      dialog.querySelectorAll<HTMLElement>(FOCUSABLE),
+    );
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
     expect(focusables.length).toBeGreaterThan(1);
@@ -298,7 +439,13 @@ describe("modal focus a11y (AC-10)", () => {
   });
 
   test("Should_RestoreFocusToOpener_When_DialogCloses", () => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
     const opener = screen.getAllByRole("button", { name: "Sign in" })[0];
     opener.focus();
     fireEvent.click(opener);

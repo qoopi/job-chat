@@ -10,12 +10,23 @@ import { TitleBar } from "./TitleBar";
 import { Composer, type ComposerState } from "./Composer";
 import { MessageList } from "./MessageList";
 import { LcpPanel } from "./LcpPanel";
+import { LcpProfile } from "./LcpProfile";
 import { AuthDialog } from "@/components/auth/AuthDialog";
 import { authClient } from "@/lib/auth-client";
 import { useJobChatTransport } from "@/lib/chat-transport";
-import { isStreaming, reconcileMessagesById, resolveInsightTarget, type LcpTarget } from "@/lib/chat-ui";
+import {
+  isStreaming,
+  reconcileMessagesById,
+  resolveInsightTarget,
+  type LcpTarget,
+} from "@/lib/chat-ui";
 import { isAuthDialogOpen } from "@/lib/layers";
-import { closeAuthDialog, openAuthDialog, useAuthDialogOpen, useOpenAuthDialogOnError } from "@/lib/auth-dialog";
+import {
+  closeAuthDialog,
+  openAuthDialog,
+  useAuthDialogOpen,
+  useOpenAuthDialogOnError,
+} from "@/lib/auth-dialog";
 import {
   clearGuestSession,
   deleteConversation as deleteConversationAction,
@@ -46,6 +57,7 @@ export function ChatClient({
   e2e = false,
   signedIn: signedInInitial = false,
   accountName: accountNameInitial,
+  accountEmail,
   conversations: conversationsInitial = [],
 }: {
   conversationId: string;
@@ -61,11 +73,23 @@ export function ChatClient({
    *  takes over after an in-page sign-in / sign-out (no full-page refresh needed). */
   signedIn?: boolean;
   accountName?: string;
-  conversations?: Pick<Conversation, "id" | "title" | "created_at">[];
+  /** refresh #2 s4: the account menu header shows the email (accountName is the display name). */
+  accountEmail?: string;
+  conversations?: (Pick<Conversation, "id" | "title" | "created_at"> & {
+    preview?: string;
+  })[];
 }) {
   const router = useRouter();
   const transport = useJobChatTransport({ e2e });
-  const { messages, sendMessage, stop, status, regenerate, setMessages, resumeStream } = useChat({
+  const {
+    messages,
+    sendMessage,
+    stop,
+    status,
+    regenerate,
+    setMessages,
+    resumeStream,
+  } = useChat({
     id: conversationId,
     transport,
     messages: initialMessages,
@@ -114,8 +138,19 @@ export function ChatClient({
   // re-resolves from the immutable message payload - a resumed conversation renders the same LCP. One
   // at a time: opening from another card just replaces the target.
   const [lcpTarget, setLcpTarget] = useState<LcpTarget | null>(null);
-  const openLcp = useCallback((messageId: string, partId: string) => setLcpTarget({ messageId, partId }), []);
+  // refresh #2 s7: the account menu's "Your profile" opens the profile in the LCP. One LCP at a time -
+  // opening a table closes the profile and vice versa.
+  const [profileOpen, setProfileOpen] = useState(false);
+  const openLcp = useCallback((messageId: string, partId: string) => {
+    setProfileOpen(false);
+    setLcpTarget({ messageId, partId });
+  }, []);
   const closeLcp = useCallback(() => setLcpTarget(null), []);
+  const openProfile = useCallback(() => {
+    setLcpTarget(null);
+    setProfileOpen(true);
+  }, []);
+  const closeProfile = useCallback(() => setProfileOpen(false), []);
 
   // AC-19: New chat starts fresh IN PLACE (interaction-spec s5) - clear the thread, close the LCP, clear
   // and focus the composer, WITHOUT navigating to the landing. The signed-in user's current conversation
@@ -125,6 +160,7 @@ export function ChatClient({
     freshChatRef.current = true;
     setMessages([]);
     setLcpTarget(null);
+    setProfileOpen(false);
     setDraft("");
     setFailed(null);
     setTitleState(undefined); // title bar returns to the "New chat" empty state
@@ -140,7 +176,11 @@ export function ChatClient({
     (reason: "guest_cap" | "daily_budget", text: string) => {
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", parts: [{ type: "data-refusal", data: { reason } }] } as UIMessage,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          parts: [{ type: "data-refusal", data: { reason } }],
+        } as UIMessage,
       ]);
       setDraft(text); // the blocked draft stays in the composer (survives the dialog / cancel)
       // A guest hitting the cap gets the sign-in dialog. Google is a full-page redirect, so there is no
@@ -175,7 +215,9 @@ export function ChatClient({
       if (freshChatRef.current) {
         try {
           if (e2e) {
-            router.push(`/chat/${crypto.randomUUID()}?new=1&q=${encodeURIComponent(text)}`);
+            router.push(
+              `/chat/${crypto.randomUUID()}?new=1&q=${encodeURIComponent(text)}`,
+            );
             return;
           }
           const r = await startConversationAction(text);
@@ -206,9 +248,14 @@ export function ChatClient({
       const userMessageId = crypto.randomUUID();
       setMessages((prev) => [
         ...prev,
-        { id: userMessageId, role: "user", parts: [{ type: "text", text }] } as UIMessage,
+        {
+          id: userMessageId,
+          role: "user",
+          parts: [{ type: "text", text }],
+        } as UIMessage,
       ]);
-      const rollbackEcho = () => setMessages((prev) => prev.filter((m) => m.id !== userMessageId));
+      const rollbackEcho = () =>
+        setMessages((prev) => prev.filter((m) => m.id !== userMessageId));
 
       try {
         if (e2e) {
@@ -263,7 +310,16 @@ export function ChatClient({
         setAwaiting(false); // fallback clear for paths that never stream (refusal / invalid / abort)
       }
     },
-    [e2e, conversationId, router, sendMessage, setMessages, transport, showRefusal, failSend],
+    [
+      e2e,
+      conversationId,
+      router,
+      sendMessage,
+      setMessages,
+      transport,
+      showRefusal,
+      failSend,
+    ],
   );
 
   // AC-3 arrival attach: the landing action already created the conversation and triggered its run, but
@@ -275,7 +331,10 @@ export function ChatClient({
     try {
       const r = await mintChatToken(conversationId);
       if (!r.ok) return;
-      transport.setSession(conversationId, { publicAccessToken: r.token, isStreaming: true });
+      transport.setSession(conversationId, {
+        publicAccessToken: r.token,
+        isStreaming: true,
+      });
       await resumeStream();
     } finally {
       setAwaiting(false);
@@ -365,9 +424,14 @@ export function ChatClient({
   // rebuilds the array), but a settled target keeps its object ref - so an LCP left open during an
   // unrelated follow-up's stream does NOT re-parse or re-sort per chunk. Truthiness also gates the dock:
   // an unresolvable target (can't happen in practice - payloads persist) docks/renders nothing.
-  const targetMessage = lcpTarget ? view.find((m) => m.id === lcpTarget.messageId) ?? null : null;
+  const targetMessage = lcpTarget
+    ? (view.find((m) => m.id === lcpTarget.messageId) ?? null)
+    : null;
   const lcpInsight = useMemo(
-    () => (targetMessage && lcpTarget ? resolveInsightTarget([targetMessage], lcpTarget) : null),
+    () =>
+      targetMessage && lcpTarget
+        ? resolveInsightTarget([targetMessage], lcpTarget)
+        : null,
     [targetMessage, lcpTarget],
   );
 
@@ -380,6 +444,9 @@ export function ChatClient({
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       if (isAuthDialogOpen()) return; // a layer above the LCP consumes Esc first
+      // Close whichever LCP view is open (table or profile). They are mutually exclusive, so at most one
+      // of these does anything; the other is already closed.
+      setProfileOpen(false);
       setLcpTarget((t) => (t ? null : t));
     }
     window.addEventListener("keydown", onKey);
@@ -391,7 +458,11 @@ export function ChatClient({
   // dialog dims the composer (interaction-spec section 4 - and this is the brief input disable against
   // an Enter-repeat at the cap moment: the dialog auto-opens, so the composer is inert while it is up).
   const pending = isStreaming(status) || awaiting;
-  const composerState: ComposerState = dialogOpen ? "disabled" : pending ? "streaming" : "default";
+  const composerState: ComposerState = dialogOpen
+    ? "disabled"
+    : pending
+      ? "streaming"
+      : "default";
 
   return (
     <div className="app" style={{ height: "100vh" }}>
@@ -403,14 +474,26 @@ export function ChatClient({
         activeTitle={titleState}
         onNewChat={startNewChat}
         onSignIn={openAuthDialog}
-        onSignOut={() => void onSignOut()}
         onDeleteConversation={(id) => void onDeleteConversation(id)}
       />
       <main className="main">
-        {/* AC-8: the LCP takes the middle of the canvas while the chat docks to the 360px right rail. */}
-        {lcpInsight ? <LcpPanel insight={lcpInsight} onClose={closeLcp} /> : null}
-        <div className={lcpInsight ? "canvas docked" : "canvas"}>
-          <TitleBar title={titleState} />
+        {/* AC-8 / s7: the LCP takes the middle of the canvas (a table OR the profile) while the chat
+            docks to the 360px right rail. */}
+        {profileOpen ? (
+          <LcpProfile onClose={closeProfile} />
+        ) : lcpInsight ? (
+          <LcpPanel insight={lcpInsight} onClose={closeLcp} />
+        ) : null}
+        <div className={profileOpen || lcpInsight ? "canvas docked" : "canvas"}>
+          <TitleBar
+            title={titleState}
+            signedIn={signedIn}
+            accountName={accountName}
+            email={accountEmail}
+            onSignIn={openAuthDialog}
+            onOpenProfile={openProfile}
+            onSignOut={() => void onSignOut()}
+          />
           <div className="thread-scroll">
             <MessageList
               messages={view}
@@ -471,7 +554,12 @@ export function ChatClient({
       ) : null}
       {/* Topmost layer (interaction-spec "Priority of layers": auth dialog > LCP > thread). Sign-in from
           inside a chat returns to THIS conversation (017 fix round 2). */}
-      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} next={`/chat/${conversationId}`} /> : null}
+      {dialogOpen ? (
+        <AuthDialog
+          onClose={closeAuthDialog}
+          next={`/chat/${conversationId}`}
+        />
+      ) : null}
     </div>
   );
 }

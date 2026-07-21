@@ -1,38 +1,50 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import type { Conversation } from "@shared/store";
 import { PlusIcon, ChevronLeftIcon } from "@/components/icons";
 import { freshnessLabel } from "@/lib/insight-format";
 
-// The small text-link button shared by the sidebar foot's Sign in (guest) and Sign out (signed-in).
-const footLinkStyle: CSSProperties = {
-  display: "block",
-  padding: 0,
-  border: 0,
-  background: "none",
-  font: "inherit",
-  fontSize: "var(--fs-2xs)",
-  color: "var(--shell-fg-dim)",
-  cursor: "pointer",
+// A history row's data: the stored fields plus a first-message preview (refresh #2 s5) - optional so a
+// caller that has not fetched it (or a guest) simply renders no preview line.
+type HistoryItem = Pick<Conversation, "id" | "title" | "created_at"> & {
+  preview?: string;
 };
 
 // The shell sidebar (interaction-spec s5). Guest: the teaser + Sign in (opens the lazy auth dialog).
-// Signed-in: the real history list (newest first, title + relative date, active highlight, click loads,
-// New chat on top, "No conversations yet" empty state). Pure presentation - sign-in state + the history
-// list are resolved by the caller (SSR seed + client refetch after an in-page sign-in). Collapse + the
-// built-for credit are P1 surfaces, untouched.
+// Signed-in: the real history list (newest first, title + first-message preview + relative date, active
+// highlight, click loads, New chat on top, "No conversations yet" empty state). refresh #2 s5: the
+// identity/auth foot is gone - sign in / sign out live in the title bar now (AccountMenu). Pure
+// presentation - sign-in state + the history list are resolved by the caller (SSR seed + client refetch
+// after an in-page sign-in). Collapse + the built-for credit are untouched.
 function BrandCredit() {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 8px" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        padding: "0 8px",
+      }}
+    >
       {/* AC-20: the wordmark is a way home - it links to the landing. */}
-      <Link className="sb-brand" href="/" style={{ padding: 0, textDecoration: "none" }}>
+      <Link
+        className="sb-brand"
+        href="/"
+        style={{ padding: 0, textDecoration: "none" }}
+      >
         jobchat.dev
       </Link>
       <div style={{ fontSize: "10.5px", color: "var(--shell-fg-dim)" }}>
-        built for <span style={{ color: "var(--clickhouse)", fontWeight: 600 }}>ClickHouse</span>{" "}
-        &times; <span style={{ color: "var(--triggerdev)", fontWeight: 600 }}>Trigger.dev</span>
+        built for{" "}
+        <span style={{ color: "var(--clickhouse)", fontWeight: 600 }}>
+          ClickHouse
+        </span>{" "}
+        &times;{" "}
+        <span style={{ color: "var(--triggerdev)", fontWeight: 600 }}>
+          Trigger.dev
+        </span>
       </div>
     </div>
   );
@@ -52,17 +64,15 @@ export function Sidebar({
   activeTitle,
   onNewChat,
   onSignIn,
-  onSignOut,
   onDeleteConversation,
 }: {
   signedIn?: boolean;
   accountName?: string;
-  conversations?: Pick<Conversation, "id" | "title" | "created_at">[];
+  conversations?: HistoryItem[];
   activeId?: string;
   activeTitle?: string;
   onNewChat?: () => void;
   onSignIn?: () => void;
-  onSignOut?: () => void;
   /** AC-21: delete a signed-in conversation (guarded server-side). Absent (guest) => no affordance. */
   onDeleteConversation?: (conversationId: string) => void;
 }) {
@@ -74,7 +84,15 @@ export function Sidebar({
     return (
       <aside className="sidebar collapsed">
         {/* AC-20: the collapsed wordmark is a way home too. */}
-        <Link href="/" style={{ fontSize: "15px", fontWeight: 700, color: "var(--shell-strong)", textDecoration: "none" }}>
+        <Link
+          href="/"
+          style={{
+            fontSize: "15px",
+            fontWeight: 700,
+            color: "var(--shell-strong)",
+            textDecoration: "none",
+          }}
+        >
           j.
         </Link>
         <button
@@ -105,7 +123,13 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+        }}
+      >
         <BrandCredit />
         <button
           className="sb-icon"
@@ -130,7 +154,11 @@ export function Sidebar({
       </div>
 
       {/* New chat on top (AC-19): always starts a fresh chat IN PLACE (never a bounce to the landing). */}
-      <button className="btn btn-primary btn-block" type="button" onClick={() => onNewChat?.()}>
+      <button
+        className="btn btn-primary btn-block"
+        type="button"
+        onClick={() => onNewChat?.()}
+      >
         <PlusIcon />
         New chat
       </button>
@@ -157,15 +185,26 @@ export function Sidebar({
                     >
                       Delete
                     </button>
-                    <button type="button" className="sb-confirm-no" onClick={() => setConfirmingId(null)}>
+                    <button
+                      type="button"
+                      className="sb-confirm-no"
+                      onClick={() => setConfirmingId(null)}
+                    >
                       Cancel
                     </button>
                   </div>
                 </div>
               ) : (
                 <div key={c.id} className="sb-item-row">
-                  <Link className={c.id === activeId ? "sb-item active" : "sb-item"} href={`/chat/${c.id}`}>
+                  <Link
+                    className={c.id === activeId ? "sb-item active" : "sb-item"}
+                    href={`/chat/${c.id}`}
+                  >
                     {c.title}
+                    {/* refresh #2 s5: a muted first-message preview distinguishes duplicate titles. */}
+                    {c.preview ? (
+                      <span className="sb-preview">{c.preview}</span>
+                    ) : null}
                     <time>{relativeDate(c.created_at)}</time>
                   </Link>
                   <button
@@ -193,44 +232,16 @@ export function Sidebar({
           ) : null}
           <div className="sb-teaser">
             Sign in to keep your conversations.
-            <button className="btn btn-shell btn-sm" type="button" onClick={() => onSignIn?.()}>
+            <button
+              className="btn btn-shell btn-sm"
+              type="button"
+              onClick={() => onSignIn?.()}
+            >
               Sign in
             </button>
           </div>
         </div>
       )}
-
-      <div className="sb-foot">
-        {signedIn ? (
-          <>
-            <div className="avatar">{accountName?.[0]?.toUpperCase() ?? "A"}</div>
-            <div className="sb-who">
-              {accountName ?? "Account"}
-              <button
-                type="button"
-                onClick={() => onSignOut?.()}
-                style={footLinkStyle}
-              >
-                Sign out
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="avatar">?</div>
-            <div className="sb-who">
-              Guest
-              <button
-                type="button"
-                onClick={() => onSignIn?.()}
-                style={footLinkStyle}
-              >
-                Sign in
-              </button>
-            </div>
-          </>
-        )}
-      </div>
     </aside>
   );
 }

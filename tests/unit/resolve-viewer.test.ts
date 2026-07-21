@@ -12,7 +12,8 @@ vi.mock("server-only", () => ({}));
 const cookieStore = new Map<string, string>();
 vi.mock("next/headers", () => ({
   cookies: async () => ({
-    get: (name: string) => (cookieStore.has(name) ? { value: cookieStore.get(name)! } : undefined),
+    get: (name: string) =>
+      cookieStore.has(name) ? { value: cookieStore.get(name)! } : undefined,
   }),
   headers: async () => new Headers(),
 }));
@@ -20,7 +21,9 @@ vi.mock("next/headers", () => ({
 vi.mock("postgres", () => ({ default: () => ({}) }));
 
 const getSessionMock = vi.fn(
-  async (): Promise<{ user?: { id: string; name?: string; email?: string } } | null> => null,
+  async (): Promise<{
+    user?: { id: string; name?: string; email?: string };
+  } | null> => null,
 );
 vi.mock("@/lib/auth", () => ({
   auth: { api: { getSession: () => getSessionMock() } },
@@ -70,6 +73,7 @@ describe("resolveViewer (AC-14 / resume-gate ruling 2)", () => {
       ownerIds: ["guest-1"],
       accountUserId: null,
       accountName: null,
+      accountEmail: null,
     });
   });
 
@@ -79,7 +83,13 @@ describe("resolveViewer (AC-14 / resume-gate ruling 2)", () => {
     const { resolveViewer } = await import("@/lib/server-store");
     const viewer = await resolveViewer();
 
-    expect(viewer).toEqual({ signedIn: false, ownerIds: [], accountUserId: null, accountName: null });
+    expect(viewer).toEqual({
+      signedIn: false,
+      ownerIds: [],
+      accountUserId: null,
+      accountName: null,
+      accountEmail: null,
+    });
   });
 
   it("Should_ResolveAccountOwnership_When_SignedInWithLinkedRow", async () => {
@@ -88,7 +98,11 @@ describe("resolveViewer (AC-14 / resume-gate ruling 2)", () => {
     fakeStore = makeStore({
       findUserByAuthId: async (authUserId) =>
         authUserId === "auth-1"
-          ? ({ user_id: "account-1", created_at: new Date(), auth_user_id: "auth-1" } as User)
+          ? ({
+              user_id: "account-1",
+              created_at: new Date(),
+              auth_user_id: "auth-1",
+            } as User)
           : null,
     });
 
@@ -100,7 +114,27 @@ describe("resolveViewer (AC-14 / resume-gate ruling 2)", () => {
       ownerIds: ["account-1"],
       accountUserId: "account-1",
       accountName: "Ada",
+      accountEmail: null, // this session carries a name but no email
     });
+  });
+
+  it("Should_ExposeAccountEmail_When_SessionCarriesOne (refresh #2 s4 account-menu header)", async () => {
+    getSessionMock.mockResolvedValue({
+      user: { id: "auth-1", name: "Ada", email: "ada@example.com" },
+    });
+    fakeStore = makeStore({
+      findUserByAuthId: async () => ({
+        user_id: "account-1",
+        created_at: new Date(),
+        auth_user_id: "auth-1",
+      }),
+    });
+
+    const { resolveViewer } = await import("@/lib/server-store");
+    const viewer = await resolveViewer();
+
+    expect(viewer.accountEmail).toBe("ada@example.com");
+    expect(viewer.accountName).toBe("Ada");
   });
 
   it("Should_IncludeBothOwnerIds_When_SignedInWithADistinctGuestCookieOnThisDevice", async () => {
@@ -109,7 +143,11 @@ describe("resolveViewer (AC-14 / resume-gate ruling 2)", () => {
     cookieStore.set("jobchat_guest", "guest-2");
     getSessionMock.mockResolvedValue({ user: { id: "auth-1" } });
     fakeStore = makeStore({
-      findUserByAuthId: async () => ({ user_id: "account-1", created_at: new Date(), auth_user_id: "auth-1" }),
+      findUserByAuthId: async () => ({
+        user_id: "account-1",
+        created_at: new Date(),
+        auth_user_id: "auth-1",
+      }),
     });
 
     const { resolveViewer } = await import("@/lib/server-store");
@@ -124,7 +162,11 @@ describe("resolveViewer (AC-14 / resume-gate ruling 2)", () => {
     cookieStore.set("jobchat_guest", "guest-3");
     getSessionMock.mockResolvedValue({ user: { id: "auth-1" } });
     fakeStore = makeStore({
-      findUserByAuthId: async () => ({ user_id: "guest-3", created_at: new Date(), auth_user_id: "auth-1" }),
+      findUserByAuthId: async () => ({
+        user_id: "guest-3",
+        created_at: new Date(),
+        auth_user_id: "auth-1",
+      }),
     });
 
     const { resolveViewer } = await import("@/lib/server-store");
@@ -146,6 +188,7 @@ describe("resolveViewer (AC-14 / resume-gate ruling 2)", () => {
       ownerIds: ["guest-4"],
       accountUserId: null,
       accountName: null,
+      accountEmail: null,
     });
   });
 
@@ -158,6 +201,12 @@ describe("resolveViewer (AC-14 / resume-gate ruling 2)", () => {
     const { resolveViewer } = await import("@/lib/server-store");
     const viewer = await resolveViewer();
 
-    expect(viewer).toEqual({ signedIn: true, ownerIds: [], accountUserId: null, accountName: null });
+    expect(viewer).toEqual({
+      signedIn: true,
+      ownerIds: [],
+      accountUserId: null,
+      accountName: null,
+      accountEmail: null,
+    });
   });
 });

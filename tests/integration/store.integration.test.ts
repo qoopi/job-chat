@@ -32,13 +32,17 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     expect(a.user_id).toBe(guestId);
     const b = await store.getOrCreateUser(guestId);
     expect(b.created_at.getTime()).toBe(a.created_at.getTime()); // same row, not recreated
-    const rows = await sql`SELECT count(*)::int AS c FROM users WHERE user_id = ${guestId}`;
+    const rows =
+      await sql`SELECT count(*)::int AS c FROM users WHERE user_id = ${guestId}`;
     expect(rows[0].c).toBe(1);
   });
 
   it("createConversation derives a never-null title and persists it", async () => {
     await store.getOrCreateUser(guestId);
-    const conv = await store.createConversation(guestId, "  What is the median salary in SF?  ");
+    const conv = await store.createConversation(
+      guestId,
+      "  What is the median salary in SF?  ",
+    );
     expect(conv.title).toBe("What is the median salary in SF?");
     expect(conv.id).toBeTruthy();
     const reload = await store.getConversation(conv.id);
@@ -47,13 +51,26 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
 
   it("appendMessage stores null parts for user turns and JSON parts for assistant turns", async () => {
     await store.getOrCreateUser(guestId);
-    const conv = await store.createConversation(guestId, "Top companies hiring?");
-    const userMsg = await store.appendMessage(conv.id, "user", "Top companies hiring?", null);
+    const conv = await store.createConversation(
+      guestId,
+      "Top companies hiring?",
+    );
+    const userMsg = await store.appendMessage(
+      conv.id,
+      "user",
+      "Top companies hiring?",
+      null,
+    );
     expect(userMsg.parts).toBeNull();
     expect(userMsg.role).toBe("user");
 
     const parts = { id: "p1", kind: "chart", verdict: "Google leads" };
-    const asstMsg = await store.appendMessage(conv.id, "assistant", "Google is hiring most.", parts);
+    const asstMsg = await store.appendMessage(
+      conv.id,
+      "assistant",
+      "Google is hiring most.",
+      parts,
+    );
     expect(asstMsg.parts).toEqual(parts);
 
     const loaded = await store.getConversation(conv.id);
@@ -82,7 +99,10 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
   it("getConversationOwner returns { user_id, auth_user_id }, or null for missing/malformed ids", async () => {
     await store.getOrCreateUser(guestId);
     const conv = await store.createConversation(guestId, "Who owns this?");
-    expect(await store.getConversationOwner(conv.id)).toEqual({ user_id: guestId, auth_user_id: null });
+    expect(await store.getConversationOwner(conv.id)).toEqual({
+      user_id: guestId,
+      auth_user_id: null,
+    });
     expect(await store.getConversationOwner(crypto.randomUUID())).toBeNull(); // unknown
     expect(await store.getConversationOwner("not-a-uuid")).toBeNull(); // malformed, not a DB error
   });
@@ -109,7 +129,10 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await store.getOrCreateUser(u);
     const conv = await store.createConversation(u, "mine");
     await store.linkAuthUser(u, authId);
-    expect(await store.getConversationOwner(conv.id)).toEqual({ user_id: u, auth_user_id: authId });
+    expect(await store.getConversationOwner(conv.id)).toEqual({
+      user_id: u,
+      auth_user_id: authId,
+    });
     await purge(u);
   });
 
@@ -202,11 +225,16 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     const guest = `test-guest-${crypto.randomUUID()}`;
     await store.getOrCreateUser(canonical);
     await store.getOrCreateUser(guest); // guest row exists, but starts no conversation
-    const priorConv = await store.createConversation(canonical, "canonical's own thread");
+    const priorConv = await store.createConversation(
+      canonical,
+      "canonical's own thread",
+    );
 
     await expect(store.adoptGuest(canonical, guest)).resolves.toBeUndefined();
     // The canonical's pre-existing conversation is unaffected by an empty adoption.
-    expect((await store.getConversationOwner(priorConv.id))?.user_id).toBe(canonical);
+    expect((await store.getConversationOwner(priorConv.id))?.user_id).toBe(
+      canonical,
+    );
 
     await purge(canonical);
     await purge(guest);
@@ -230,6 +258,40 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(u);
   });
 
+  // refresh #2 s5: each history row carries the conversation's FIRST user message as a preview, so rows
+  // that share a title stay distinguishable. An assistant turn never becomes the preview.
+  it("listConversations returns the first user message as each row's preview (refresh #2 s5)", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    const conv = await store.createConversation(u, "Median salary in SF");
+    await store.appendMessage(
+      conv.id,
+      "user",
+      "what is the median salary for a data engineer in SF",
+      null,
+    );
+    await store.appendMessage(conv.id, "assistant", "The median is $182k.", {
+      kind: "system",
+    });
+    await store.appendMessage(
+      conv.id,
+      "user",
+      "a later follow-up that must NOT win",
+      null,
+    );
+
+    const empty = await store.createConversation(u, "No messages yet");
+
+    const list = await store.listConversations(u);
+    const byId = new Map(list.map((x) => [x.id, x.preview]));
+    expect(byId.get(conv.id)).toBe(
+      "what is the median salary for a data engineer in SF",
+    ); // first user turn only
+    expect(byId.get(empty.id)).toBe(""); // COALESCE guard: a conversation with no user turn
+
+    await purge(u);
+  });
+
   // AC-21: deleting a conversation removes it AND its messages (the FK has no ON DELETE CASCADE, so the
   // store deletes both in one transaction). A sibling conversation's messages are untouched.
   it("deleteConversation removes the conversation and its messages, leaving siblings intact (AC-21)", async () => {
@@ -237,21 +299,27 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await store.getOrCreateUser(owner);
     const target = await store.createConversation(owner, "delete me");
     await store.appendMessage(target.id, "user", "q1", null);
-    await store.appendMessage(target.id, "assistant", "a1", { id: "p", kind: "table" });
+    await store.appendMessage(target.id, "assistant", "a1", {
+      id: "p",
+      kind: "table",
+    });
     const keep = await store.createConversation(owner, "keep me");
     await store.appendMessage(keep.id, "user", "q2", null);
 
     await store.deleteConversation(target.id);
 
     expect(await store.getConversation(target.id)).toBeNull(); // conversation gone
-    const orphaned = await sql`SELECT count(*)::int AS c FROM messages WHERE conversation_id = ${target.id}`;
+    const orphaned =
+      await sql`SELECT count(*)::int AS c FROM messages WHERE conversation_id = ${target.id}`;
     expect(orphaned[0].c).toBe(0); // its messages cascaded (no FK-violation, no orphans)
     // The sibling and its message survive.
     expect((await store.getConversation(keep.id))?.messages).toHaveLength(1);
 
     // Idempotent / malformed-id safety: deleting again and a garbage id are both no-ops, not errors.
     await expect(store.deleteConversation(target.id)).resolves.toBeUndefined();
-    await expect(store.deleteConversation("not-a-uuid")).resolves.toBeUndefined();
+    await expect(
+      store.deleteConversation("not-a-uuid"),
+    ).resolves.toBeUndefined();
 
     await purge(owner);
   });
@@ -261,11 +329,17 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await store.getOrCreateUser(freshGuest);
     const conv = await store.createConversation(freshGuest, "Q");
     await store.appendMessage(conv.id, "user", "one", null);
-    await store.appendMessage(conv.id, "assistant", "answer", { id: "p", kind: "table" });
+    await store.appendMessage(conv.id, "assistant", "answer", {
+      id: "p",
+      kind: "table",
+    });
     await store.appendMessage(conv.id, "user", "two", null);
 
     const since = new Date(0);
-    const scoped = await store.messageCounts({ userId: freshGuest, sinceUtcMidnight: since });
+    const scoped = await store.messageCounts({
+      userId: freshGuest,
+      sinceUtcMidnight: since,
+    });
     expect(scoped).toBe(2); // two user turns; the assistant reply is not counted
     const global = await store.messageCounts({ sinceUtcMidnight: since });
     expect(global).toBeGreaterThanOrEqual(scoped);
@@ -290,7 +364,10 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await sql`INSERT INTO messages (conversation_id, role, content, created_at)
               VALUES (${conv.id}, 'user', 'at boundary', ${boundary})`;
 
-    const scoped = await store.messageCounts({ userId: freshGuest, sinceUtcMidnight: boundary });
+    const scoped = await store.messageCounts({
+      userId: freshGuest,
+      sinceUtcMidnight: boundary,
+    });
     expect(scoped).toBe(1); // only the at-boundary row; the before-boundary row is excluded
 
     await purge(freshGuest);

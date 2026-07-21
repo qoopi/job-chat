@@ -12,13 +12,18 @@ export type MessageRole = "user" | "assistant";
 // `invalid input syntax for type uuid`, which would break `getConversation`'s "null = not found"
 // contract at the trust boundary (006 feeds it an untrusted `/chat/[id]` param). Guard before the
 // query so a malformed id reads as "not found" - without swallowing real DB errors on a valid one.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Postgres unique_violation SQLSTATE. porsager/postgres surfaces the server's SQLSTATE as `err.code`
 // on a PostgresError; `linkAuthUser` uses it to turn the auth_user_id UNIQUE race into a typed refusal.
 const PG_UNIQUE_VIOLATION = "23505";
 function isUniqueViolation(e: unknown): boolean {
-  return typeof e === "object" && e !== null && (e as { code?: unknown }).code === PG_UNIQUE_VIOLATION;
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    (e as { code?: unknown }).code === PG_UNIQUE_VIOLATION
+  );
 }
 
 /** A persisted JSON payload (the insight-card parts). Opaque here; validated by `insight.ts`. */
@@ -37,6 +42,15 @@ export interface Conversation {
   created_at: Date;
 }
 
+/** A sidebar history row: the conversation's identity + a first-user-message preview (refresh #2 s5),
+ *  which distinguishes rows that share a title. */
+export type ConversationSummary = Pick<
+  Conversation,
+  "id" | "title" | "created_at"
+> & {
+  preview: string;
+};
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -48,7 +62,10 @@ export interface Message {
 
 export interface Store {
   getOrCreateUser(guestId: string): Promise<User>;
-  createConversation(userId: string, firstQuestion: string): Promise<Conversation>;
+  createConversation(
+    userId: string,
+    firstQuestion: string,
+  ): Promise<Conversation>;
   appendMessage(
     conversationId: string,
     role: MessageRole,
@@ -84,8 +101,9 @@ export interface Store {
    * belongs to a DIFFERENT account (a forged guest cookie must not steal a signed-in user's chats).
    */
   adoptGuest(canonicalUserId: string, guestUserId: string): Promise<void>;
-  /** A user's conversations, newest first (the signed-in sidebar history, AC-12). */
-  listConversations(userId: string): Promise<Pick<Conversation, "id" | "title" | "created_at">[]>;
+  /** A user's conversations, newest first (the signed-in sidebar history, AC-12), each with a
+   *  first-user-message preview (refresh #2 s5). */
+  listConversations(userId: string): Promise<ConversationSummary[]>;
   /**
    * Delete a conversation and its messages (AC-21). Messages are removed first (the FK has no ON DELETE
    * CASCADE), both in one transaction so a conversation never outlives a partial message delete. A
@@ -95,7 +113,10 @@ export interface Store {
    */
   deleteConversation(conversationId: string): Promise<void>;
   /** Count user-turn messages since `sinceUtcMidnight`. No `userId` => global (the daily budget). */
-  messageCounts(args: { userId?: string; sinceUtcMidnight: Date }): Promise<number>;
+  messageCounts(args: {
+    userId?: string;
+    sinceUtcMidnight: Date;
+  }): Promise<number>;
 }
 
 /**
@@ -161,11 +182,15 @@ export function createStore(sql: Sql): Store {
       // JOIN of two indexed rows (conversations PK + users PK) - the auth_user_id rides along so the
       // guard picks the cap by kind - and still no message history.
       if (!UUID_RE.test(conversationId)) return null;
-      const rows = await sql<{ user_id: string; auth_user_id: string | null }[]>`
+      const rows = await sql<
+        { user_id: string; auth_user_id: string | null }[]
+      >`
         SELECT cv.user_id, u.auth_user_id
         FROM conversations cv JOIN users u ON u.user_id = cv.user_id
         WHERE cv.id = ${conversationId}`;
-      return rows.length === 0 ? null : { user_id: rows[0].user_id, auth_user_id: rows[0].auth_user_id };
+      return rows.length === 0
+        ? null
+        : { user_id: rows[0].user_id, auth_user_id: rows[0].auth_user_id };
     },
 
     async findUserByAuthId(authUserId) {
@@ -205,10 +230,19 @@ export function createStore(sql: Sql): Store {
     },
 
     async listConversations(userId) {
-      const rows = await sql<Pick<Conversation, "id" | "title" | "created_at">[]>`
-        SELECT id, title, created_at FROM conversations
-        WHERE user_id = ${userId}
-        ORDER BY created_at DESC, id DESC`;
+      // The preview is the conversation's first user message (refresh #2 s5) - a correlated subquery so
+      // the row set stays one-per-conversation; COALESCE guards a conversation with no user turn yet.
+      const rows = await sql<ConversationSummary[]>`
+        SELECT c.id, c.title, c.created_at,
+          COALESCE((
+            SELECT m.content FROM messages m
+            WHERE m.conversation_id = c.id AND m.role = 'user'
+            ORDER BY m.created_at ASC, m.id ASC
+            LIMIT 1
+          ), '') AS preview
+        FROM conversations c
+        WHERE c.user_id = ${userId}
+        ORDER BY c.created_at DESC, c.id DESC`;
       return [...rows];
     },
 

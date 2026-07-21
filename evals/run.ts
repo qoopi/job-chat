@@ -1,7 +1,11 @@
 import { streamText, stepCountIs } from "ai";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
-import type { Analytics, CoverageProfile, QueryResult } from "@shared/analytics";
+import type {
+  Analytics,
+  CoverageProfile,
+  QueryResult,
+} from "@shared/analytics";
 import { DataInsightSchema } from "@shared/insight";
 import {
   deriveTitle,
@@ -13,14 +17,31 @@ import {
   type User,
 } from "@shared/store";
 import { getAgentLimits } from "@shared/env";
-import { createChatRun, type StreamModel, type StreamModelArgs } from "../trigger/run";
-import { buildCatalogTools, CATALOG_TOOL_NAMES, type EmitPart } from "../trigger/tools";
+import {
+  createChatRun,
+  type StreamModel,
+  type StreamModelArgs,
+} from "../trigger/run";
+import {
+  buildCatalogTools,
+  CATALOG_TOOL_NAMES,
+  type EmitPart,
+} from "../trigger/tools";
 import { persistAssistantTurn } from "../trigger/parts";
 import { ADVISER_V1 } from "../trigger/prompts/adviser-v1";
 import { ADVISER_V2 } from "../trigger/prompts/adviser-v2";
 import { FIXTURE_INGESTED_AT } from "../tests/fixtures/postings.fixture";
-import { countSentences, startsWithBannedOpener } from "../tests/fixtures/plain-prompts";
-import { CHART_BEARING, EVAL_SET, type EvalCase, type EvalExpect, type EvalMode } from "./eval-set";
+import {
+  countSentences,
+  startsWithBannedOpener,
+} from "../tests/fixtures/plain-prompts";
+import {
+  CHART_BEARING,
+  EVAL_SET,
+  type EvalCase,
+  type EvalExpect,
+  type EvalMode,
+} from "./eval-set";
 
 // The flag-gated live eval runner (AC-6/AC-7/AC-4). It drives every case's question through the REAL
 // prompt + Bedrock model via createChatRun (the same durable-run seam production uses, trigger/run.ts),
@@ -55,7 +76,9 @@ type EvalModel = ReturnType<typeof buildModel>;
  * (AWS_REGION plus either static keys or a named profile). Throws with a plain, actionable message;
  * NOTHING runs before this passes, so no Bedrock call is ever made by accident.
  */
-export function assertEvalEnabled(env: Record<string, string | undefined> = process.env): void {
+export function assertEvalEnabled(
+  env: Record<string, string | undefined> = process.env,
+): void {
   if (env.JOBCHAT_EVAL !== "1") {
     throw new Error(
       "refusing to run: this harness makes live Bedrock calls (cost). Set JOBCHAT_EVAL=1 to enable.",
@@ -102,7 +125,11 @@ function createMemoryStore(): Store {
     async getOrCreateUser(guestId: string) {
       const existing = users.get(guestId);
       if (existing) return existing;
-      const user: User = { user_id: guestId, created_at: now(), auth_user_id: null };
+      const user: User = {
+        user_id: guestId,
+        created_at: now(),
+        auth_user_id: null,
+      };
       users.set(guestId, user);
       return user;
     },
@@ -116,7 +143,12 @@ function createMemoryStore(): Store {
       conversations.set(conv.id, conv);
       return conv;
     },
-    async appendMessage(conversationId: string, role: MessageRole, content: string, parts: Json | null) {
+    async appendMessage(
+      conversationId: string,
+      role: MessageRole,
+      content: string,
+      parts: Json | null,
+    ) {
       const message: Message = {
         id: crypto.randomUUID(),
         conversation_id: conversationId,
@@ -139,10 +171,14 @@ function createMemoryStore(): Store {
     async getConversationOwner(conversationId: string) {
       const conv = conversations.get(conversationId);
       if (!conv) return null;
-      return { user_id: conv.user_id, auth_user_id: users.get(conv.user_id)?.auth_user_id ?? null };
+      return {
+        user_id: conv.user_id,
+        auth_user_id: users.get(conv.user_id)?.auth_user_id ?? null,
+      };
     },
     async findUserByAuthId(authUserId: string) {
-      for (const user of users.values()) if (user.auth_user_id === authUserId) return user;
+      for (const user of users.values())
+        if (user.auth_user_id === authUserId) return user;
       return null;
     },
     async linkAuthUser() {
@@ -158,14 +194,26 @@ function createMemoryStore(): Store {
       return [...conversations.values()]
         .filter((c) => c.user_id === userId)
         .sort((a, b) => b.created_at.getTime() - a.created_at.getTime())
-        .map(({ id, title, created_at }) => ({ id, title, created_at }));
+        .map(({ id, title, created_at }) => ({
+          id,
+          title,
+          created_at,
+          preview: "",
+        }));
     },
-    async messageCounts({ userId, sinceUtcMidnight }: { userId?: string; sinceUtcMidnight: Date }) {
+    async messageCounts({
+      userId,
+      sinceUtcMidnight,
+    }: {
+      userId?: string;
+      sinceUtcMidnight: Date;
+    }) {
       return messages.filter(
         (m) =>
           m.role === "user" &&
           m.created_at >= sinceUtcMidnight &&
-          (userId === undefined || conversations.get(m.conversation_id)?.user_id === userId),
+          (userId === undefined ||
+            conversations.get(m.conversation_id)?.user_id === userId),
       ).length;
     },
   };
@@ -180,11 +228,69 @@ function createMemoryStore(): Store {
  */
 function fakeAnalytics(): Analytics {
   const rows: Record<string, unknown>[] = [
-    { label: "Google", company: "Google", city: "San Francisco", region: "California", country: "United States", title: "Senior Software Engineer", experience_level: "Senior", employment_type: "full-time", location_kind: "onsite", bucket: "2026-05-01", day: "2026-05-01", count: 4, median: 180000, median_salary: 180000, p25_salary: 150000, p75_salary: 200000, n: 4 },
-    { label: "Meta", company: "Meta", city: "Los Angeles", region: "California", country: "United States", title: "Backend Engineer", experience_level: "Senior", employment_type: "full-time", location_kind: "hybrid", bucket: "2026-06-01", day: "2026-06-01", count: 2, median: 150000, median_salary: 150000, p25_salary: 130000, p75_salary: 170000, n: 2 },
-    { label: "Stripe", company: "Stripe", city: "San Francisco", region: "California", country: "United States", title: "Data Engineer", experience_level: "Junior", employment_type: "contract", location_kind: "remote", bucket: "2026-07-01", day: "2026-07-01", count: 2, median: 170000, median_salary: 170000, p25_salary: 140000, p75_salary: 190000, n: 2 },
+    {
+      label: "Google",
+      company: "Google",
+      city: "San Francisco",
+      region: "California",
+      country: "United States",
+      title: "Senior Software Engineer",
+      experience_level: "Senior",
+      employment_type: "full-time",
+      location_kind: "onsite",
+      bucket: "2026-05-01",
+      day: "2026-05-01",
+      count: 4,
+      median: 180000,
+      median_salary: 180000,
+      p25_salary: 150000,
+      p75_salary: 200000,
+      n: 4,
+    },
+    {
+      label: "Meta",
+      company: "Meta",
+      city: "Los Angeles",
+      region: "California",
+      country: "United States",
+      title: "Backend Engineer",
+      experience_level: "Senior",
+      employment_type: "full-time",
+      location_kind: "hybrid",
+      bucket: "2026-06-01",
+      day: "2026-06-01",
+      count: 2,
+      median: 150000,
+      median_salary: 150000,
+      p25_salary: 130000,
+      p75_salary: 170000,
+      n: 2,
+    },
+    {
+      label: "Stripe",
+      company: "Stripe",
+      city: "San Francisco",
+      region: "California",
+      country: "United States",
+      title: "Data Engineer",
+      experience_level: "Junior",
+      employment_type: "contract",
+      location_kind: "remote",
+      bucket: "2026-07-01",
+      day: "2026-07-01",
+      count: 2,
+      median: 170000,
+      median_salary: 170000,
+      p25_salary: 140000,
+      p75_salary: 190000,
+      n: 2,
+    },
   ];
-  const result = (sql: string): QueryResult => ({ sql, rows, meta: { sampleN: 8, freshestAt: FIXTURE_INGESTED_AT } });
+  const result = (sql: string): QueryResult => ({
+    sql,
+    rows,
+    meta: { sampleN: 8, freshestAt: FIXTURE_INGESTED_AT },
+  });
   return {
     runQuery: async (name) => result(`-- fake template ${name}`),
     runComposedQuery: async () => result(`-- fake query_postings`),
@@ -272,7 +378,10 @@ export async function runCase(
     createChatRun({
       withStore: (fn) => fn(store),
       // Generous caps: the eval is not testing the guard, so no case is ever refused before the model.
-      guards: { guestCap: Number.MAX_SAFE_INTEGER, dailyBudget: Number.MAX_SAFE_INTEGER },
+      guards: {
+        guestCap: Number.MAX_SAFE_INTEGER,
+        dailyBudget: Number.MAX_SAFE_INTEGER,
+      },
       emit,
       now: () => new Date(),
       system,
@@ -294,29 +403,51 @@ export async function runCase(
         signal: new AbortController().signal,
       });
       if (!result) {
-        observed = { toolCalls: [], text: "", hasInsight: false, error: "run refused before the model (unexpected)" };
+        observed = {
+          toolCalls: [],
+          text: "",
+          hasInsight: false,
+          error: "run refused before the model (unexpected)",
+        };
         break;
       }
       await result.consumeStream(); // drive tool execution + finish
       const steps = await result.steps;
       const toolCalls = steps
         .flatMap((s) => s.toolCalls)
-        .map((tc) => ({ name: tc.toolName, input: (tc.input ?? {}) as Record<string, unknown> }));
+        .map((tc) => ({
+          name: tc.toolName,
+          input: (tc.input ?? {}) as Record<string, unknown>,
+        }));
       const text = (await result.text).trim();
       const hasInsight = emitted.some(
-        (p) => p.type === "data-insight" && DataInsightSchema.safeParse((p as { data: unknown }).data).success,
+        (p) =>
+          p.type === "data-insight" &&
+          DataInsightSchema.safeParse((p as { data: unknown }).data).success,
       );
       observed = { toolCalls, text, hasInsight };
       // Persist the assistant turn (mirror onTurnComplete) so a later turn's rebuilt history carries it.
       const responseMessage = {
         parts: [
           { type: "text", text },
-          ...emitted.map((p) => ({ type: p.type, id: p.id, data: (p as { data: unknown }).data })),
+          ...emitted.map((p) => ({
+            type: p.type,
+            id: p.id,
+            data: (p as { data: unknown }).data,
+          })),
         ],
       };
-      await persistAssistantTurn(store, { conversationId: conv.id, responseMessage });
+      await persistAssistantTurn(store, {
+        conversationId: conv.id,
+        responseMessage,
+      });
     } catch (err) {
-      observed = { toolCalls: [], text: "", hasInsight: false, error: (err as Error).message };
+      observed = {
+        toolCalls: [],
+        text: "",
+        hasInsight: false,
+        error: (err as Error).message,
+      };
       break;
     }
   }
@@ -356,11 +487,15 @@ function sameSet(a: unknown[], b: unknown[]): boolean {
 }
 
 /** SUBSET match: every expected key present in the actual input with an equal value (never exact-object). */
-function paramsSubsetMatch(expected: Record<string, unknown>, actual: Record<string, unknown>): boolean {
+function paramsSubsetMatch(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+): boolean {
   return Object.entries(expected).every(([key, exp]) => {
     const act = actual[key];
     if (Array.isArray(exp)) return Array.isArray(act) && sameSet(exp, act);
-    if (typeof exp === "string" && typeof act === "string") return exp.toLowerCase() === act.toLowerCase();
+    if (typeof exp === "string" && typeof act === "string")
+      return exp.toLowerCase() === act.toLowerCase();
     return act === exp;
   });
 }
@@ -379,12 +514,18 @@ function toolMatches(expect: EvalExpect, observedTools: string[]): boolean {
   if (expect.tool === undefined) return observedTools.length === 0; // a pure plain answer calls no tool
   if (!DATA_TOOLS.has(expect.tool)) return observedTools.includes(expect.tool); // report_unanswerable
   const expectedCalls = observedTools.filter((t) => t === expect.tool).length;
-  const extraDataTool = observedTools.some((t) => t !== expect.tool && DATA_TOOLS.has(t));
+  const extraDataTool = observedTools.some(
+    (t) => t !== expect.tool && DATA_TOOLS.has(t),
+  );
   return expectedCalls === 1 && !extraDataTool;
 }
 
 function formatOk(text: string): boolean {
-  return countSentences(text) <= 2 && !text.includes("!") && !startsWithBannedOpener(text);
+  return (
+    countSentences(text) <= 2 &&
+    !text.includes("!") &&
+    !startsWithBannedOpener(text)
+  );
 }
 
 // 018 strand 5 (informational): a scope-qualified answer names the sample / its dominance rather than
@@ -402,11 +543,17 @@ export function scoreCase(evalCase: EvalCase, observed: Observed): ScoredCase {
   const modePass = observedMode === expect.mode;
   const toolPass = toolMatches(expect, observedTools);
 
-  const composedCall = observed.toolCalls.find((t) => t.name === "query_postings");
-  const rawChartType = composedCall ? asString(composedCall.input.chartType) : undefined;
+  const composedCall = observed.toolCalls.find(
+    (t) => t.name === "query_postings",
+  );
+  const rawChartType = composedCall
+    ? asString(composedCall.input.chartType)
+    : undefined;
   const chartBearing = expect.chartType !== undefined;
 
-  const expectedCall = expect.tool ? observed.toolCalls.find((t) => t.name === expect.tool) : undefined;
+  const expectedCall = expect.tool
+    ? observed.toolCalls.find((t) => t.name === expect.tool)
+    : undefined;
   const paramsChecked = Boolean(expect.params && expectedCall);
 
   return {
@@ -420,11 +567,15 @@ export function scoreCase(evalCase: EvalCase, observed: Observed): ScoredCase {
     chartBearing,
     chartPass: chartBearing ? rawChartType === expect.chartType : undefined,
     paramsChecked,
-    paramsPass: paramsChecked ? paramsSubsetMatch(expect.params!, expectedCall!.input) : undefined,
+    paramsPass: paramsChecked
+      ? paramsSubsetMatch(expect.params!, expectedCall!.input)
+      : undefined,
     formatChecked: Boolean(expect.formatRules),
     formatPass: expect.formatRules ? formatOk(observed.text) : undefined,
     scopeChecked: Boolean(expect.scopeQualified),
-    scopePass: expect.scopeQualified ? scopeQualifiedOk(observed.text) : undefined,
+    scopePass: expect.scopeQualified
+      ? scopeQualifiedOk(observed.text)
+      : undefined,
     error: observed.error,
   };
 }
@@ -450,7 +601,8 @@ export interface Aggregate {
 }
 
 export function aggregate(scored: ScoredCase[]): Aggregate {
-  const count = (pred: (s: ScoredCase) => boolean) => scored.filter(pred).length;
+  const count = (pred: (s: ScoredCase) => boolean) =>
+    scored.filter(pred).length;
   return {
     total: scored.length,
     toolModePass: count((s) => s.toolModePass),
@@ -472,8 +624,10 @@ export function aggregate(scored: ScoredCase[]): Aggregate {
 
 const RULE = "-".repeat(96);
 const HEAVY = "=".repeat(96);
-const flag = (v: boolean | undefined) => (v === undefined ? "--" : v ? "ok" : "XX");
-const pct = (n: number, d: number) => (d === 0 ? "n/a" : `${((100 * n) / d).toFixed(1)}%`);
+const flag = (v: boolean | undefined) =>
+  v === undefined ? "--" : v ? "ok" : "XX";
+const pct = (n: number, d: number) =>
+  d === 0 ? "n/a" : `${((100 * n) / d).toFixed(1)}%`;
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 3)}...`;
@@ -517,23 +671,39 @@ function printReport(prompt: PromptVersion, scored: ScoredCase[]): void {
   console.log(
     `  tool+mode : ${agg.toolModePass}/${agg.total}  (${pct(agg.toolModePass, agg.total)})   AC-7 gate >= 90% : ${ac7 ? "PASS" : "FAIL"}`,
   );
-  console.log(`    - tool  : ${agg.toolPass}/${agg.total}  (${pct(agg.toolPass, agg.total)})`);
-  console.log(`    - mode  : ${agg.modePass}/${agg.total}  (${pct(agg.modePass, agg.total)})`);
+  console.log(
+    `    - tool  : ${agg.toolPass}/${agg.total}  (${pct(agg.toolPass, agg.total)})`,
+  );
+  console.log(
+    `    - mode  : ${agg.modePass}/${agg.total}  (${pct(agg.modePass, agg.total)})`,
+  );
   console.log(
     `  chart-pick: ${agg.chartPass}/${agg.chartTotal}  (${pct(agg.chartPass, agg.chartTotal)})   AC-4 gate >= 90% : ${ac4 ? "PASS" : "FAIL"}   (chart-bearing cases only)`,
   );
-  console.log(`  params    : ${agg.paramsPass}/${agg.paramsTotal}  (${pct(agg.paramsPass, agg.paramsTotal)})   (informational; subset match on the expected tool call)`);
-  console.log(`  format    : ${agg.formatPass}/${agg.formatTotal}  (${pct(agg.formatPass, agg.formatTotal)})   (informational; AC-5 tone gate is the offline vitest test)`);
-  console.log(`  scope     : ${agg.scopePass}/${agg.scopeTotal}  (${pct(agg.scopePass, agg.scopeTotal)})   (informational; 018 strand 5 market-wide scope qualification)`);
+  console.log(
+    `  params    : ${agg.paramsPass}/${agg.paramsTotal}  (${pct(agg.paramsPass, agg.paramsTotal)})   (informational; subset match on the expected tool call)`,
+  );
+  console.log(
+    `  format    : ${agg.formatPass}/${agg.formatTotal}  (${pct(agg.formatPass, agg.formatTotal)})   (informational; AC-5 tone gate is the offline vitest test)`,
+  );
+  console.log(
+    `  scope     : ${agg.scopePass}/${agg.scopeTotal}  (${pct(agg.scopePass, agg.scopeTotal)})   (informational; 018 strand 5 market-wide scope qualification)`,
+  );
   console.log(`  errors    : ${agg.errors} case(s) hit a runtime/model error`);
 
-  const failures = scored.filter((s) => !s.toolModePass || (s.chartBearing && s.chartPass === false));
+  const failures = scored.filter(
+    (s) => !s.toolModePass || (s.chartBearing && s.chartPass === false),
+  );
   console.log(RULE);
   console.log(`FAILURES (tool+mode or chart): ${failures.length}`);
   for (const s of failures) {
     const reasons: string[] = [];
-    if (!s.toolModePass) reasons.push(`tool+mode expected ok, got tools=[${s.observedTools.join(",") || "(none)"}] mode=${s.observedMode}`);
-    if (s.chartBearing && s.chartPass === false) reasons.push(`chart expected pick, got ${s.rawChartType ?? "(none)"}`);
+    if (!s.toolModePass)
+      reasons.push(
+        `tool+mode expected ok, got tools=[${s.observedTools.join(",") || "(none)"}] mode=${s.observedMode}`,
+      );
+    if (s.chartBearing && s.chartPass === false)
+      reasons.push(`chart expected pick, got ${s.rawChartType ?? "(none)"}`);
     if (s.error) reasons.push(`error: ${s.error}`);
     console.log(`  [${s.id}] ${reasons.join("; ")}`);
   }
@@ -552,7 +722,9 @@ async function main(): Promise<void> {
     assertEvalEnabled();
   } catch (err) {
     console.error(`[eval] ${(err as Error).message}`);
-    console.error(`[eval] parsed prompt: ${prompt} - nothing ran, no Bedrock calls made.`);
+    console.error(
+      `[eval] parsed prompt: ${prompt} - nothing ran, no Bedrock calls made.`,
+    );
     process.exit(1);
   }
 
@@ -562,13 +734,19 @@ async function main(): Promise<void> {
   // exists, so its tool/mode numbers are not comparable to v2. Do NOT re-tune v1; read v1 results as a
   // stale baseline only. (v2 is the shipped prompt; trigger/chat.ts wires it.)
   if (prompt === "v1") {
-    console.warn("[eval] WARNING: --prompt v1 is a STALE baseline - report_unanswerable was retired from the catalog; v1's tool/mode numbers are not comparable to v2, and v1 is not to be re-tuned.");
+    console.warn(
+      "[eval] WARNING: --prompt v1 is a STALE baseline - report_unanswerable was retired from the catalog; v1's tool/mode numbers are not comparable to v2, and v1 is not to be re-tuned.",
+    );
   }
   const streamModel = bedrockStreamModel(buildModel());
 
   console.log(HEAVY);
-  console.log(`Job.Chat eval harness  |  prompt=${prompt}  |  model=${MODEL_ID}`);
-  console.log(`${EVAL_SET.length} cases  |  ${CHART_BEARING.length} chart-bearing (AC-4 sample)`);
+  console.log(
+    `Job.Chat eval harness  |  prompt=${prompt}  |  model=${MODEL_ID}`,
+  );
+  console.log(
+    `${EVAL_SET.length} cases  |  ${CHART_BEARING.length} chart-bearing (AC-4 sample)`,
+  );
   console.log(HEAVY);
 
   const scored: ScoredCase[] = [];

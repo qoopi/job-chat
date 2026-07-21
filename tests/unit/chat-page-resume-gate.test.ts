@@ -32,7 +32,10 @@ vi.mock("@/lib/server-store", () => ({
 // ChatClient pulls in @ai-sdk/react and friends - irrelevant to the gate under test. Stubbed so the
 // page's returned element's props can be asserted directly.
 vi.mock("@/components/chat/ChatClient", () => ({
-  ChatClient: (props: Record<string, unknown>) => ({ type: "ChatClient", props }),
+  ChatClient: (props: Record<string, unknown>) => ({
+    type: "ChatClient",
+    props,
+  }),
 }));
 
 import ChatPage from "@/app/chat/[id]/page";
@@ -40,7 +43,12 @@ import ChatPage from "@/app/chat/[id]/page";
 const CONVERSATION_ID = "aaaaaaaa-0000-4000-8000-000000000001";
 
 function conversation(userId: string): Conversation {
-  return { id: CONVERSATION_ID, user_id: userId, title: "A thread", created_at: new Date() };
+  return {
+    id: CONVERSATION_ID,
+    user_id: userId,
+    title: "A thread",
+    created_at: new Date(),
+  };
 }
 
 const aMessage: Message = {
@@ -53,14 +61,23 @@ const aMessage: Message = {
 };
 
 function viewer(overrides: Partial<Viewer> = {}): Viewer {
-  return { signedIn: false, ownerIds: [], accountUserId: null, accountName: null, ...overrides };
+  return {
+    signedIn: false,
+    ownerIds: [],
+    accountUserId: null,
+    accountName: null,
+    accountEmail: null,
+    ...overrides,
+  };
 }
 
 async function renderPage() {
   const element = (await ChatPage({
     params: Promise.resolve({ id: CONVERSATION_ID }),
     searchParams: Promise.resolve({}),
-  })) as unknown as { props: { initialMessages: unknown[]; title?: string; signedIn: boolean } };
+  })) as unknown as {
+    props: { initialMessages: unknown[]; title?: string; signedIn: boolean };
+  };
   return element.props;
 }
 
@@ -70,7 +87,10 @@ afterEach(() => {
 
 describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer)", () => {
   it("Should_HydrateThread_When_GuestCookieOwnsTheConversation", async () => {
-    loadConversationMock.mockResolvedValue({ conversation: conversation("guest-1"), messages: [aMessage] });
+    loadConversationMock.mockResolvedValue({
+      conversation: conversation("guest-1"),
+      messages: [aMessage],
+    });
     resolveViewerMock.mockResolvedValue(viewer({ ownerIds: ["guest-1"] }));
 
     const props = await renderPage();
@@ -81,9 +101,17 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
 
   it("Should_HydrateThread_When_SignedInAccountOwnsItOnAnyDevice", async () => {
     // no guest cookie on THIS device - the resolved Viewer's account id is what matches (ruling 2's point)
-    loadConversationMock.mockResolvedValue({ conversation: conversation("account-1"), messages: [aMessage] });
+    loadConversationMock.mockResolvedValue({
+      conversation: conversation("account-1"),
+      messages: [aMessage],
+    });
     resolveViewerMock.mockResolvedValue(
-      viewer({ signedIn: true, ownerIds: ["account-1"], accountUserId: "account-1", accountName: "Ada" }),
+      viewer({
+        signedIn: true,
+        ownerIds: ["account-1"],
+        accountUserId: "account-1",
+        accountName: "Ada",
+      }),
     );
 
     const props = await renderPage();
@@ -96,8 +124,13 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
   it("Should_RenderEmptyThread_When_CallerDoesNotOwnTheConversation", async () => {
     // the conversation exists (loadConversation resolves it) but neither the guest cookie nor the
     // signed-in account is its owner - fail-closed: no title, no messages leak to a non-owner.
-    loadConversationMock.mockResolvedValue({ conversation: conversation("someone-elses-row"), messages: [aMessage] });
-    resolveViewerMock.mockResolvedValue(viewer({ ownerIds: ["guest-not-the-owner"] }));
+    loadConversationMock.mockResolvedValue({
+      conversation: conversation("someone-elses-row"),
+      messages: [aMessage],
+    });
+    resolveViewerMock.mockResolvedValue(
+      viewer({ ownerIds: ["guest-not-the-owner"] }),
+    );
 
     const props = await renderPage();
 
@@ -116,15 +149,24 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
   });
 
   it("Should_SeedSidebarHistory_OnlyForASignedInAccount", async () => {
-    loadConversationMock.mockResolvedValue({ conversation: conversation("account-1"), messages: [] });
+    loadConversationMock.mockResolvedValue({
+      conversation: conversation("account-1"),
+      messages: [],
+    });
     resolveViewerMock.mockResolvedValue(
-      viewer({ signedIn: true, ownerIds: ["account-1"], accountUserId: "account-1" }),
+      viewer({
+        signedIn: true,
+        ownerIds: ["account-1"],
+        accountUserId: "account-1",
+      }),
     );
     listOwnerConversationsMock.mockResolvedValue([
       { id: CONVERSATION_ID, title: "A thread", created_at: new Date() },
     ]);
 
-    const props = (await renderPage()) as unknown as { conversations: unknown[] };
+    const props = (await renderPage()) as unknown as {
+      conversations: unknown[];
+    };
 
     expect(listOwnerConversationsMock).toHaveBeenCalledWith("account-1");
     expect(props.conversations).toHaveLength(1);
@@ -145,7 +187,12 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
   // seeds the sidebar so the user lands "into the app".
   it("Should_RenderFreshShell_When_IdIsNew", async () => {
     resolveViewerMock.mockResolvedValue(
-      viewer({ signedIn: true, ownerIds: ["account-1"], accountUserId: "account-1", accountName: "Ada" }),
+      viewer({
+        signedIn: true,
+        ownerIds: ["account-1"],
+        accountUserId: "account-1",
+        accountName: "Ada",
+      }),
     );
     listOwnerConversationsMock.mockResolvedValue([
       { id: CONVERSATION_ID, title: "A thread", created_at: new Date() },

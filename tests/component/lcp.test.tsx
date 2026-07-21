@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import type { UIMessage } from "ai";
 import type { DataInsight } from "@shared/insight";
 import { setAuthDialogOpen } from "@/lib/layers";
@@ -10,7 +16,9 @@ import { setAuthDialogOpen } from "@/lib/layers";
 // boundaries and mocked exactly as chat-client.test.tsx does; here no turn is sent, so they are inert.
 const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
-const sendMessagesMock = vi.fn(async () => new ReadableStream({ start: (c) => c.close() }));
+const sendMessagesMock = vi.fn(
+  async () => new ReadableStream({ start: (c) => c.close() }),
+);
 const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
@@ -36,7 +44,10 @@ function tableInsight(n: number): DataInsight {
     id: "t1",
     kind: "table",
     verdict: "Amazon leads hiring across the market.",
-    rows: Array.from({ length: n }, (_, i) => ({ company: `Co ${i + 1}`, count: 100 - i })),
+    rows: Array.from({ length: n }, (_, i) => ({
+      company: `Co ${i + 1}`,
+      count: 100 - i,
+    })),
     followups: [],
     meta: { sql: "SELECT 1", sampleN: 3483, updatedAt: "2026-07-18 19:12:00" },
   };
@@ -44,19 +55,45 @@ function tableInsight(n: number): DataInsight {
 
 function threadWithTable(n: number): UIMessage[] {
   return [
-    { id: "u1", role: "user", parts: [{ type: "text", text: "Top companies?" }] },
-    { id: "a1", role: "assistant", parts: [{ type: "data-insight", id: "a1-c0", data: tableInsight(n) }] },
+    {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "text", text: "Top companies?" }],
+    },
+    {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "data-insight", id: "a1-c0", data: tableInsight(n) }],
+    },
   ];
 }
 
-const lcpRows = () => document.querySelector(".lcp")?.querySelectorAll("tbody tr").length ?? 0;
-const composer = () => screen.getByRole("textbox", { name: "Ask a follow-up" }) as HTMLTextAreaElement;
+const lcpRows = () =>
+  document.querySelector(".lcp")?.querySelectorAll("tbody tr").length ?? 0;
+const composer = () =>
+  screen.getByRole("textbox", {
+    name: "Ask a follow-up",
+  }) as HTMLTextAreaElement;
 // The Esc listener is on `window`; dispatch there and wrap in act so React flushes the close.
-const pressEsc = () => act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+const pressEsc = () =>
+  act(
+    () =>
+      void window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape" }),
+      ),
+  );
 
 async function openLcp(rows: number) {
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={threadWithTable(rows)} e2e={false} />);
-  const affordance = await screen.findByRole("button", { name: `Open full table (${rows} rows)` });
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={threadWithTable(rows)}
+      e2e={false}
+    />,
+  );
+  const affordance = await screen.findByRole("button", {
+    name: `Open full table (${rows} rows)`,
+  });
   fireEvent.click(affordance);
 }
 
@@ -67,10 +104,18 @@ afterEach(() => {
 
 describe("table LCP (AC-8)", () => {
   test("Should_PreviewAndOpenLcp_When_TableExceedsThreshold", async () => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={threadWithTable(9)} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={threadWithTable(9)}
+        e2e={false}
+      />,
+    );
 
     // In-thread: a 5-row preview + affordance; the LCP is not open yet, the canvas is not docked.
-    const affordance = await screen.findByRole("button", { name: "Open full table (9 rows)" });
+    const affordance = await screen.findByRole("button", {
+      name: "Open full table (9 rows)",
+    });
     expect(document.querySelector(".lcp")).toBeNull();
     expect(document.querySelector(".canvas.docked")).toBeNull();
 
@@ -83,18 +128,35 @@ describe("table LCP (AC-8)", () => {
   });
 
   test("Should_NotOpenLcp_When_TableAtThreshold", async () => {
-    render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={threadWithTable(8)} e2e={false} />);
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={threadWithTable(8)}
+        e2e={false}
+      />,
+    );
     await screen.findByText("Top companies?");
-    expect(screen.queryByRole("button", { name: /Open full table/ })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Open full table/ }),
+    ).toBeNull();
     expect(document.querySelector(".lcp")).toBeNull();
   });
 });
 
 describe("table LCP close paths (AC-9)", () => {
   test.each([
-    ["close control", () => fireEvent.click(screen.getByRole("button", { name: "Close full table" }))],
+    [
+      "close control",
+      () =>
+        fireEvent.click(
+          screen.getByRole("button", { name: "Close full table" }),
+        ),
+    ],
     ["Esc", () => pressEsc()],
-    ["New chat", () => fireEvent.click(screen.getByRole("button", { name: "New chat" }))],
+    [
+      "New chat",
+      () => fireEvent.click(screen.getByRole("button", { name: "New chat" })),
+    ],
   ])("Should_CloseLcp_OnEachCloseTrigger: %s", async (_label, act) => {
     await openLcp(9);
     expect(document.querySelector(".lcp")).toBeTruthy();
@@ -121,5 +183,56 @@ describe("table LCP close paths (AC-9)", () => {
     setAuthDialogOpen(false);
     pressEsc();
     expect(document.querySelector(".lcp")).toBeNull();
+  });
+});
+
+// refresh #2 s7: the account menu's "Your profile" opens the profile empty state in the LCP (docking the
+// chat), and it closes on the LCP close paths just like a table.
+describe("profile LCP (refresh #2 s7)", () => {
+  test("'Your profile' opens the profile empty state in the LCP; Esc closes it", () => {
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+        signedIn
+        accountName="Ada"
+        accountEmail="ada@example.com"
+      />,
+    );
+    expect(document.querySelector(".lcp")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Account: Ada/ })); // open the account menu
+    fireEvent.click(screen.getByRole("button", { name: "Your profile" }));
+
+    // the designed empty state is open and the canvas docks
+    expect(screen.getByText("No profile yet")).toBeTruthy();
+    expect(screen.getByText(/coming soon/i)).toBeTruthy(); // the dropzone accepts no upload yet (P2)
+    expect(document.querySelector(".canvas.docked")).toBeTruthy();
+
+    pressEsc();
+    expect(screen.queryByText("No profile yet")).toBeNull();
+    expect(document.querySelector(".canvas.docked")).toBeNull();
+  });
+
+  test("opening a table LCP replaces the open profile (one LCP at a time)", () => {
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={threadWithTable(9)}
+        e2e={false}
+        signedIn
+        accountName="Ada"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Account: Ada/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Your profile" }));
+    expect(screen.getByText("No profile yet")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open full table (9 rows)" }),
+    );
+    expect(screen.queryByText("No profile yet")).toBeNull(); // the profile gave way to the table
+    expect(document.querySelector(".lcp")).toBeTruthy();
   });
 });
