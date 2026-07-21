@@ -79,6 +79,25 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     expect(loaded!.messages[1].parts).toEqual(parts);
   });
 
+  // AC-5: a caller-supplied message id makes the write idempotent - re-persisting the SAME id (a
+  // replayed or re-executed completion reaching persistence twice) inserts exactly once. ON CONFLICT
+  // (id) DO NOTHING, first write wins.
+  it("appendMessage inserts once when the same message id is persisted twice (AC-5)", async () => {
+    await store.getOrCreateUser(guestId);
+    const conv = await store.createConversation(guestId, "idempotent persist?");
+    const id = crypto.randomUUID();
+    await store.appendMessage(conv.id, "assistant", "first write", { id: "p", kind: "table" }, id);
+    // A redelivered / replayed completion re-persists the same id: it must not add a second row.
+    await store.appendMessage(conv.id, "assistant", "second write", { id: "p", kind: "table" }, id);
+
+    const count =
+      await sql<{ c: number }[]>`SELECT count(*)::int AS c FROM messages WHERE id = ${id}`;
+    expect(count[0].c).toBe(1);
+    // DO NOTHING keeps the original row: the first write wins, the second is dropped silently.
+    const loaded = await store.getConversation(conv.id);
+    expect(loaded!.messages.find((m) => m.id === id)?.content).toBe("first write");
+  });
+
   it("getConversation returns null for a missing id", async () => {
     expect(await store.getConversation(crypto.randomUUID())).toBeNull();
   });
