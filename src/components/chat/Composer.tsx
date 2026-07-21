@@ -7,13 +7,17 @@ import { SendIcon, StopIcon } from "@/components/icons";
 // 006 wires behavior via optional callbacks - controlled value, Enter-to-send (Shift+Enter newline),
 // and the streaming send->stop swap. With no handlers passed it stays inert (the 005 contract), so the
 // focus ring / disabled dimming / stop glyph remain pure CSS.
-export type ComposerState = "default" | "focused" | "streaming" | "disabled";
+export type ComposerState =
+  "default" | "focused" | "streaming" | "disabled" | "capped";
 
 const PLACEHOLDER: Record<ComposerState, string> = {
   default: "Ask a follow-up...",
   focused: "I am looking for...",
   streaming: "Answering...",
   disabled: "Sign in to continue",
+  // refresh #2 s8: at the guest cap the composer stays ENABLED - a send opens the register dialog with
+  // the draft queued - so its placeholder invites the account instead of blocking.
+  capped: "Create an account to keep asking…",
 };
 
 export function Composer({
@@ -34,7 +38,11 @@ export function Composer({
   focusSignal?: number;
 }) {
   const barClass =
-    state === "focused" ? "input-bar focused" : state === "disabled" ? "input-bar disabled" : "input-bar";
+    state === "focused"
+      ? "input-bar focused"
+      : state === "disabled"
+        ? "input-bar disabled"
+        : "input-bar";
   const streaming = state === "streaming";
   const inputDisabled = streaming || state === "disabled";
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -79,7 +87,11 @@ export function Composer({
           {streaming ? <StopIcon /> : <SendIcon />}
         </button>
       </div>
-      {streaming ? null : <div className="hint">Enter to send &middot; Shift+Enter for a new line</div>}
+      {streaming ? null : (
+        <div className="hint">
+          Enter to send &middot; Shift+Enter for a new line
+        </div>
+      )}
     </div>
   );
 }

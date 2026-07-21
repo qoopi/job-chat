@@ -5,16 +5,24 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { SendIcon } from "@/components/icons";
 import { RefusalNotice } from "@/components/insight/ErrorCard";
-import { closeAuthDialog, openAuthDialog, useAuthDialogOpen, useOpenAuthDialogOnError } from "@/lib/auth-dialog";
+import {
+  closeAuthDialog,
+  openAuthDialog,
+  useAuthDialogOpen,
+  useOpenAuthDialogOnError,
+} from "@/lib/auth-dialog";
 import { ensureGuest, startConversation } from "@/app/actions";
 import type { RefusalReason } from "@/lib/insight-format";
 
 // The landing is the first-paint / marketing route where the dialog is rarely opened, so defer the
 // AuthDialog (and the Better Auth `authClient` it pulls) off the landing's initial JS - it loads only
 // when the dialog first opens. Client-only: the dialog never renders on the server.
-const AuthDialog = dynamic(() => import("@/components/auth/AuthDialog").then((m) => m.AuthDialog), {
-  ssr: false,
-});
+const AuthDialog = dynamic(
+  () => import("@/components/auth/AuthDialog").then((m) => m.AuthDialog),
+  {
+    ssr: false,
+  },
+);
 
 // The landing hero's interactive part (mock 4b): the ask box + intent chips that hand off to the chat
 // with the stream already attached on arrival (AC-3, interaction-spec section 7). On first paint it
@@ -33,7 +41,10 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
   const router = useRouter();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
-  const [refusal, setRefusal] = useState<Extract<RefusalReason, "guest_cap" | "daily_budget"> | null>(null);
+  const [refusal, setRefusal] = useState<Extract<
+    RefusalReason,
+    "guest_cap" | "daily_budget"
+  > | null>(null);
   const dialogOpen = useAuthDialogOpen();
   useOpenAuthDialogOnError(); // a Google redirect error (?error=) opens the dialog so it can be surfaced
 
@@ -49,7 +60,9 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
     setRefusal(null);
     try {
       if (e2e) {
-        router.push(`/chat/${crypto.randomUUID()}?new=1&q=${encodeURIComponent(text)}`);
+        router.push(
+          `/chat/${crypto.randomUUID()}?new=1&q=${encodeURIComponent(text)}`,
+        );
         return;
       }
       const r = await startConversation(text);
@@ -60,9 +73,8 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
       if (r.reason === "guest_cap" || r.reason === "daily_budget") {
         setRefusal(r.reason);
         setDraft(text); // the blocked question stays in the box (survives the dialog / cancel)
-        // A guest hitting the cap gets the sign-in dialog. Google is a full-page redirect, so there is no
-        // in-page auto-continuation of the blocked question (that path was email-only, now removed).
-        if (r.reason === "guest_cap") openAuthDialog();
+        // refresh #2 s8: a guest cap renders the warm register card (RefusalNotice) with a "Create
+        // account" button that opens the dialog - no auto-open, so the composer stays usable.
       }
       setBusy(false); // refusal / invalid - let the visitor edit and retry
     } catch {
@@ -75,7 +87,10 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
   return (
     <>
       <div style={{ width: "100%", maxWidth: 560, marginTop: 10 }}>
-        <div className="input-bar focused" style={{ padding: "12px 12px 12px 18px" }}>
+        <div
+          className="input-bar focused"
+          style={{ padding: "12px 12px 12px 18px" }}
+        >
           <textarea
             rows={1}
             aria-label="What are you looking for"
@@ -102,18 +117,37 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
         </div>
       </div>
       {refusal ? (
-        <div style={{ width: "100%", maxWidth: 560, display: "flex", justifyContent: "center" }}>
+        <div
+          style={{
+            width: "100%",
+            maxWidth: 560,
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
           <RefusalNotice reason={refusal} onSignIn={openAuthDialog} />
         </div>
       ) : null}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", maxWidth: 640 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+          justifyContent: "center",
+          maxWidth: 640,
+        }}
+      >
         {CHIPS.map((c) => (
           <button
             key={c}
             className="chip"
             type="button"
             disabled={inputDisabled}
-            style={{ background: "transparent", borderColor: "var(--shell-border)", color: "var(--shell-fg)" }}
+            style={{
+              background: "transparent",
+              borderColor: "var(--shell-border)",
+              color: "var(--shell-fg)",
+            }}
             onClick={() => void submit(c)}
           >
             {c}
@@ -121,7 +155,9 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
         ))}
       </div>
       {/* Landing-initiated sign-in lands the user INSIDE the app (a fresh chat shell), not back on "/". */}
-      {dialogOpen ? <AuthDialog onClose={closeAuthDialog} next="/chat/new" /> : null}
+      {dialogOpen ? (
+        <AuthDialog onClose={closeAuthDialog} next="/chat/new" />
+      ) : null}
     </>
   );
 }

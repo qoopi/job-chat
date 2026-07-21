@@ -26,7 +26,7 @@ export default async function ChatPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ new?: string; q?: string }>;
+  searchParams: Promise<{ new?: string; q?: string; profile?: string }>;
 }) {
   const { id } = await params;
   // `/chat/new` (017 fix round 2): a fresh chat shell, NOT a stored conversation - the landing-initiated
@@ -34,7 +34,7 @@ export default async function ChatPage({
   // account's history, and arms ChatClient to start a new conversation on the first send.
   const isNewChat = id === "new";
   if (!isNewChat && !ConversationIdSchema.safeParse(id).success) notFound();
-  const { new: isNew, q } = await searchParams;
+  const { new: isNew, q, profile } = await searchParams;
   const e2e = isE2E();
 
   let title: string | undefined;
@@ -88,6 +88,7 @@ export default async function ChatPage({
       accountName={accountName}
       accountEmail={accountEmail}
       conversations={conversations}
+      profileOnArrival={profile === "1"}
     />
   );
 }

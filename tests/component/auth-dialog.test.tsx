@@ -286,7 +286,9 @@ describe("auth dialog open (AC-10)", () => {
     expect(composer().disabled).toBe(true);
   });
 
-  test("Should_OpenAuthDialog_When_GuestCapHit", async () => {
+  // refresh #2 s8: the guest cap no longer AUTO-opens the dialog - it shows the register card and keeps
+  // the composer enabled; the dialog opens on the NEXT send (the queued draft) or the card's button.
+  test("Should_NotAutoOpen_ButOpenOnNextSend_When_GuestCapHit", async () => {
     sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
     render(
       <ChatClient
@@ -300,6 +302,12 @@ describe("auth dialog open (AC-10)", () => {
     fireEvent.change(box, { target: { value: "One more question" } });
     fireEvent.keyDown(box, { key: "Enter" });
 
+    // the register card lands but the dialog does NOT auto-open
+    expect(await screen.findByText(/reached the guest limit/i)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // a send while capped opens the dialog (with the draft queued)
+    fireEvent.keyDown(box, { key: "Enter" });
     expect(
       await screen.findByRole("dialog", { name: "Create your free account" }),
     ).toBeTruthy();

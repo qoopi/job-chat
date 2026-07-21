@@ -215,6 +215,22 @@ describe("profile LCP (refresh #2 s7)", () => {
     expect(document.querySelector(".canvas.docked")).toBeNull();
   });
 
+  test("profileOnArrival opens the profile on mount (landing 'Your profile' -> /chat/new?profile=1, s10)", () => {
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+        newChat
+        signedIn
+        accountName="Ada"
+        profileOnArrival
+      />,
+    );
+    expect(screen.getByText("No profile yet")).toBeTruthy();
+    expect(document.querySelector(".canvas.docked")).toBeTruthy();
+  });
+
   test("opening a table LCP replaces the open profile (one LCP at a time)", () => {
     render(
       <ChatClient

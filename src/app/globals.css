@@ -1173,6 +1173,27 @@ a:hover {
   flex-shrink: 0;
 }
 
+/* refresh #2 s8: the guest cap -> register moment. An accent-soft card (not red, not a bubble) that
+   invites a free account; the composer stays enabled and a send opens the dialog with the draft queued. */
+.register-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  width: 100%;
+  max-width: 640px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--accent-ink);
+}
+.register-card p {
+  margin: 0;
+  line-height: 1.5;
+}
+
 /* ---------- auth dialog (lazy - interaction-spec s6; ported from the handoff components.css) ---------- */
 /* backdrop: dims the page, centers the dialog, catches backdrop clicks (s6.5). Above the LCP + toast
    (dialog > LCP > thread). rgba matches the mock (shell-strong at 38%). */

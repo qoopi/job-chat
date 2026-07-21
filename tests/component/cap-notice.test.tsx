@@ -1,15 +1,24 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { closeAuthDialog } from "@/lib/auth-dialog";
 
-// AC-13 (UI slice): a guest cap refusal is VISIBLE at EVERY message origin - the chat composer AND the
-// landing composer - as a polite notice with a sign-in affordance (no silent refusal), and the input is
-// briefly disabled against an Enter-repeat (the dialog auto-opens, so the composer is inert). Both
-// external boundaries are mocked; the assertion is the same at both origins.
+// refresh #2 s8 (was AC-13): the guest cap is a warm register moment, VISIBLE at every message origin -
+// the chat composer AND the landing composer - as an accent-soft card inviting a free account ("Create
+// account"), NOT a red error and NOT a silent refusal. The composer stays ENABLED (no auto-open); a send
+// while capped opens the dialog with the draft queued. Both external boundaries are mocked.
 const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
-const sendMessagesMock = vi.fn(async () => new ReadableStream({ start: (c) => c.close() }));
+const sendMessagesMock = vi.fn(
+  async () => new ReadableStream({ start: (c) => c.close() }),
+);
 const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
@@ -56,38 +65,82 @@ afterEach(() => {
   startConversationMock.mockReset();
 });
 
-test("Should_ShowCapNoticeEverywhere_When_Capped: chat composer", async () => {
+test("Should_ShowRegisterCardAndKeepComposerEnabled_When_Capped: chat composer", async () => {
   sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+    />,
+  );
 
-  const box = screen.getByRole("textbox", { name: "Ask a follow-up" }) as HTMLTextAreaElement;
+  const box = screen.getByRole("textbox", {
+    name: "Ask a follow-up",
+  }) as HTMLTextAreaElement;
   fireEvent.change(box, { target: { value: "One more question" } });
   fireEvent.keyDown(box, { key: "Enter" });
 
-  const notice = await waitFor(() => {
-    const n = document.querySelector(".notice");
+  const card = await waitFor(() => {
+    const n = document.querySelector(".register-card");
     expect(n).toBeTruthy();
     return n as HTMLElement;
   });
-  expect(within(notice).getByText(/reached the guest message limit/i)).toBeTruthy();
-  expect(within(notice).getByRole("button", { name: "Sign in" })).toBeTruthy(); // sign-in affordance
-  expect(box.disabled).toBe(true); // brief disable against Enter-repeat
+  expect(within(card).getByText(/reached the guest limit/i)).toBeTruthy();
+  expect(
+    within(card).getByRole("button", { name: "Create account" }),
+  ).toBeTruthy();
+  expect(document.querySelector(".notice")).toBeNull(); // not the grey error notice
+  expect(screen.queryByRole("dialog")).toBeNull(); // the dialog does NOT auto-open
+  // the composer stays ENABLED, with the register placeholder
+  await waitFor(() => expect(box.disabled).toBe(false));
+  expect(box.placeholder).toBe("Create an account to keep asking…");
 });
 
-test("Should_ShowCapNoticeEverywhere_When_Capped: landing composer", async () => {
+test("Should_OpenDialogWithDraftQueued_When_SendWhileCapped: chat composer", async () => {
+  sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+    />,
+  );
+
+  const box = screen.getByRole("textbox", {
+    name: "Ask a follow-up",
+  }) as HTMLTextAreaElement;
+  fireEvent.change(box, { target: { value: "One more question" } });
+  fireEvent.keyDown(box, { key: "Enter" });
+  await screen.findByText(/reached the guest limit/i);
+
+  // a send while capped opens the dialog and keeps the draft queued (does NOT hit the server again)
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(
+    await screen.findByRole("dialog", { name: "Create your free account" }),
+  ).toBeTruthy();
+  expect(box.value).toBe("One more question");
+  expect(sendMessageMock).toHaveBeenCalledTimes(1);
+});
+
+test("Should_ShowRegisterCardAndKeepComposerEnabled_When_Capped: landing composer", async () => {
   startConversationMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
   render(<LandingComposer e2e={false} />);
 
-  const box = screen.getByRole("textbox", { name: "What are you looking for" }) as HTMLTextAreaElement;
+  const box = screen.getByRole("textbox", {
+    name: "What are you looking for",
+  }) as HTMLTextAreaElement;
   fireEvent.change(box, { target: { value: "Top companies hiring" } });
   fireEvent.keyDown(box, { key: "Enter" });
 
-  const notice = await waitFor(() => {
-    const n = document.querySelector(".notice");
+  const card = await waitFor(() => {
+    const n = document.querySelector(".register-card");
     expect(n).toBeTruthy();
     return n as HTMLElement;
   });
-  expect(within(notice).getByText(/reached the guest message limit/i)).toBeTruthy();
-  expect(within(notice).getByRole("button", { name: "Sign in" })).toBeTruthy();
-  expect(box.disabled).toBe(true); // no silent refusal, and the input is disabled while the dialog is up
+  expect(
+    within(card).getByRole("button", { name: "Create account" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("dialog")).toBeNull(); // no silent refusal, no auto-open
+  await waitFor(() => expect(box.disabled).toBe(false)); // the input stays usable
 });

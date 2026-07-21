@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { UIMessage } from "ai";
 
 // ChatClient.send() has TWO distinct paths that can produce a cap/budget refusal (decision 19 / 004
@@ -19,7 +26,9 @@ import type { UIMessage } from "ai";
 // Arrival still attaches via `reconnectToStream` (resumeStream on an in-flight run). All three are spied.
 const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
-const sendMessagesMock = vi.fn(async () => new ReadableStream({ start: (c) => c.close() }));
+const sendMessagesMock = vi.fn(
+  async () => new ReadableStream({ start: (c) => c.close() }),
+);
 const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
@@ -33,7 +42,8 @@ vi.mock("@/lib/chat-transport", () => ({
 const sendMessageMock = vi.fn();
 const mintChatTokenMock = vi.fn();
 vi.mock("@/app/actions", () => ({
-  sendMessage: (conversationId: string, text: string) => sendMessageMock(conversationId, text),
+  sendMessage: (conversationId: string, text: string) =>
+    sendMessageMock(conversationId, text),
   mintChatToken: (conversationId: string) => mintChatTokenMock(conversationId),
 }));
 
@@ -54,18 +64,27 @@ afterEach(() => {
   sendMessagesMock.mockClear();
 });
 
-test("action-refusal: the sendMessage action's cap refusal renders the SAME limit notice as the agent-side refusal", async () => {
+test("action-refusal: the sendMessage action's cap refusal renders the SAME register card as the agent-side refusal", async () => {
   sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+    />,
+  );
 
   const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
   fireEvent.change(box, { target: { value: "One more question" } });
   fireEvent.keyDown(box, { key: "Enter" });
 
-  expect(await screen.findByText(/reached the guest message limit/i)).toBeTruthy();
-  expect(document.querySelector(".notice")).toBeTruthy();
+  expect(await screen.findByText(/reached the guest limit/i)).toBeTruthy(); // refresh #2 s8 register card
+  expect(document.querySelector(".register-card")).toBeTruthy();
   expect(document.querySelector(".err-card")).toBeNull();
-  expect(sendMessageMock).toHaveBeenCalledWith(CONVERSATION_ID, "One more question");
+  expect(sendMessageMock).toHaveBeenCalledWith(
+    CONVERSATION_ID,
+    "One more question",
+  );
   // A refusal short-circuits BEFORE any attach - the transport must never be touched.
   expect(setSessionMock).not.toHaveBeenCalled();
 });
@@ -78,7 +97,13 @@ test("action-refusal: an ok send does NOT render a notice (control case)", async
     publicAccessToken: "tok",
     runId: "run1",
   });
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+    />,
+  );
 
   const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
   fireEvent.change(box, { target: { value: "A normal question" } });
@@ -95,7 +120,13 @@ test("Should_EchoUserBubbleSynchronously_When_Sent: the user bubble renders befo
   // ~6s run-wake floor). Nothing is hydrated on the transport yet either.
   let release: (v: unknown) => void = () => {};
   sendMessageMock.mockReturnValue(new Promise((res) => (release = res)));
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+    />,
+  );
 
   const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
   fireEvent.change(box, { target: { value: "Median salary in Berlin?" } });
@@ -120,7 +151,13 @@ test("Should_EchoUserBubbleSynchronously_When_Sent: the user bubble renders befo
 // test that would catch it. These two close that gap (flow C: a blocked/failed message is not shown as sent).
 test("Should_RollbackOptimisticBubble_When_SendRefused: a cap/budget refusal removes the optimistic bubble, not just shows the notice", async () => {
   sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+    />,
+  );
 
   const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
   fireEvent.change(box, { target: { value: "Refused question" } });
@@ -128,17 +165,25 @@ test("Should_RollbackOptimisticBubble_When_SendRefused: a cap/budget refusal rem
 
   expect(screen.getByText("Refused question")).toBeTruthy(); // the optimistic bubble is up first
 
-  await screen.findByText(/reached the guest message limit/i); // the refusal notice lands
+  await screen.findByText(/reached the guest limit/i); // the refusal (register card) lands
   // The optimistic bubble must be gone - not orphaned as a "sent" message the refusal contradicts. Scoped
   // to the bubble class (not a bare queryByText): AC-11 correctly restores the same text into the
   // composer's textarea, which a bare document-wide text query would also match and hide the regression.
-  expect(screen.queryByText("Refused question", { selector: ".bubble.user" })).toBeNull();
+  expect(
+    screen.queryByText("Refused question", { selector: ".bubble.user" }),
+  ).toBeNull();
   expect(document.querySelectorAll(".msg.user")).toHaveLength(0);
 });
 
 test("Should_RollbackOptimisticBubble_When_SendThrows: a thrown/failed send removes the optimistic bubble (toast + draft, not a stuck bubble)", async () => {
   sendMessageMock.mockRejectedValue(new Error("network down"));
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+    />,
+  );
 
   const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
   fireEvent.change(box, { target: { value: "Send that will fail" } });
@@ -147,11 +192,15 @@ test("Should_RollbackOptimisticBubble_When_SendThrows: a thrown/failed send remo
   expect(screen.getByText("Send that will fail")).toBeTruthy(); // the optimistic bubble is up first
 
   await screen.findByRole("alert"); // the send-failure toast lands
-  expect(screen.getByText("Could not send - check your connection.")).toBeTruthy();
+  expect(
+    screen.getByText("Could not send - check your connection."),
+  ).toBeTruthy();
   // The optimistic bubble must be gone - the failed turn is not left behind as a stuck "sent" message.
   // Scoped to the bubble class: the draft is correctly restored into the composer's textarea (interaction
   // spec section 4), which a bare document-wide text query would also match and hide the regression.
-  expect(screen.queryByText("Send that will fail", { selector: ".bubble.user" })).toBeNull();
+  expect(
+    screen.queryByText("Send that will fail", { selector: ".bubble.user" }),
+  ).toBeNull();
   expect(document.querySelectorAll(".msg.user")).toHaveLength(0);
 });
 
@@ -170,7 +219,11 @@ test("Should_RollbackOptimisticBubble_When_SendThrows: a thrown/failed send remo
 test("Should_DisableFollowupChip_When_TurnInFlight: a follow-up chip is pending-disabled mid-stream, so clicking it fires no 2nd send (the chip pending-gate; the reentrancy guard is proven separately)", async () => {
   // A settled prior turn with a follow-up chip is on screen.
   const initial: UIMessage[] = [
-    { id: "u0", role: "user", parts: [{ type: "text", text: "Top companies?" }] },
+    {
+      id: "u0",
+      role: "user",
+      parts: [{ type: "text", text: "Top companies?" }],
+    },
     {
       id: "a0",
       role: "assistant",
@@ -185,7 +238,11 @@ test("Should_DisableFollowupChip_When_TurnInFlight: a follow-up chip is pending-
             verdict: "Amazon leads hiring with 214 open roles.",
             series: [{ company: "Amazon", count: 214 }],
             followups: ["Only remote roles"],
-            meta: { sql: "SELECT 1", sampleN: 3483, updatedAt: "2026-07-18 19:12:00" },
+            meta: {
+              sql: "SELECT 1",
+              sampleN: 3483,
+              updatedAt: "2026-07-18 19:12:00",
+            },
           },
         },
       ],
@@ -194,7 +251,13 @@ test("Should_DisableFollowupChip_When_TurnInFlight: a follow-up chip is pending-
   // Hold the gate unresolved so the first send stays in flight (pending) while the chip is clicked.
   let release: (v: unknown) => void = () => {};
   sendMessageMock.mockReturnValue(new Promise((res) => (release = res)));
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={initial} e2e={false} />);
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={initial}
+      e2e={false}
+    />,
+  );
 
   // First send via the composer - it holds the turn open (gate unresolved), so pending stays true.
   const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
@@ -215,9 +278,16 @@ test("Should_DisableFollowupChip_When_TurnInFlight: a follow-up chip is pending-
 
   // Exactly one send proceeded: no 2nd action call, no orphan chip-text bubble, first bubble intact.
   expect(sendMessageMock).toHaveBeenCalledTimes(1);
-  expect(sendMessageMock).toHaveBeenCalledWith(CONVERSATION_ID, "First question");
-  expect(screen.queryByText("Only remote roles", { selector: ".bubble.user" })).toBeNull();
-  expect(screen.getByText("First question", { selector: ".bubble.user" })).toBeTruthy();
+  expect(sendMessageMock).toHaveBeenCalledWith(
+    CONVERSATION_ID,
+    "First question",
+  );
+  expect(
+    screen.queryByText("Only remote roles", { selector: ".bubble.user" }),
+  ).toBeNull();
+  expect(
+    screen.getByText("First question", { selector: ".bubble.user" }),
+  ).toBeTruthy();
 
   // Settle cleanly (avoid a dangling act warning): the held gate resolves ok, the turn finishes.
   release({ ok: true, publicAccessToken: "tok" });
@@ -236,7 +306,13 @@ test("Should_IgnoreReenteredSend_When_SendAlreadyInFlight: two same-tick compose
   // Hold the gate unresolved so the first send stays in flight (sendingRef stays armed) across both clicks.
   let release: (v: unknown) => void = () => {};
   sendMessageMock.mockReturnValue(new Promise((res) => (release = res)));
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+    />,
+  );
 
   const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
   fireEvent.change(box, { target: { value: "First question" } });
@@ -245,14 +321,20 @@ test("Should_IgnoreReenteredSend_When_SendAlreadyInFlight: two same-tick compose
   // composer into its streaming (Send -> Stop) state, so both onClick closures still call `onSend`.
   const sendBtn = screen.getByRole("button", { name: "Send" });
   act(() => {
-    sendBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    sendBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    sendBtn.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    sendBtn.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
   });
 
   // Exactly one send proceeded: the reentrant second call returned at the guard before touching the
   // action or appending a second optimistic bubble. Without the guard both assertions read 2.
   expect(sendMessageMock).toHaveBeenCalledTimes(1);
-  expect(screen.getAllByText("First question", { selector: ".bubble.user" })).toHaveLength(1);
+  expect(
+    screen.getAllByText("First question", { selector: ".bubble.user" }),
+  ).toHaveLength(1);
 
   // Settle cleanly (avoid a dangling act warning): the held gate resolves ok, the turn finishes.
   release({ ok: true, publicAccessToken: "tok" });
@@ -262,8 +344,17 @@ test("Should_IgnoreReenteredSend_When_SendAlreadyInFlight: two same-tick compose
 // --- mechanism (a): a follow-up delivers + watches via sendMessages, hydrated first ---
 
 test("follow-up send: the action's session token hydrates the transport BEFORE the deliver+watch send (streams live, not peekSettled reconnect)", async () => {
-  sendMessageMock.mockResolvedValue({ ok: true, publicAccessToken: "tok-followup" });
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  sendMessageMock.mockResolvedValue({
+    ok: true,
+    publicAccessToken: "tok-followup",
+  });
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+    />,
+  );
 
   const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
   fireEvent.change(box, { target: { value: "Any remote roles?" } });
@@ -275,13 +366,18 @@ test("follow-up send: the action's session token hydrates the transport BEFORE t
   // The action's scoped token hydrates the session so `sendMessages` attaches with it.
   expect(setSessionMock).toHaveBeenCalledWith(
     CONVERSATION_ID,
-    expect.objectContaining({ publicAccessToken: "tok-followup", isStreaming: true }),
+    expect.objectContaining({
+      publicAccessToken: "tok-followup",
+      isStreaming: true,
+    }),
   );
   // Delivered + watched via sendMessages (append + subscribe-with-wait), NOT the peekSettled reconnect.
   await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
   expect(reconnectMock).not.toHaveBeenCalled();
   // Ordering: hydrate, THEN send (else the transport attaches with no cached session token).
-  expect(setSessionMock.mock.invocationCallOrder[0]).toBeLessThan(sendMessagesMock.mock.invocationCallOrder[0]);
+  expect(setSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
+    sendMessagesMock.mock.invocationCallOrder[0],
+  );
 });
 
 test("instant feedback: the answering indicator + Stop show AT ONCE on send, through the run-wake gap before the run streams (006 ruling 1)", async () => {
@@ -289,8 +385,18 @@ test("instant feedback: the answering indicator + Stop show AT ONCE on send, thr
   // (the ~6s run-wake gap). During it the SDK has not moved status off "ready" yet, so the ONLY thing
   // that can give instant feedback is the local awaiting bridge.
   let release: (v: unknown) => void = () => {};
-  sendMessageMock.mockReturnValue(new Promise((res) => { release = res; }));
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} e2e={false} />);
+  sendMessageMock.mockReturnValue(
+    new Promise((res) => {
+      release = res;
+    }),
+  );
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+    />,
+  );
 
   const box = screen.getByRole("textbox", { name: "Ask a follow-up" });
   fireEvent.change(box, { target: { value: "Top companies?" } });
@@ -305,21 +411,39 @@ test("instant feedback: the answering indicator + Stop show AT ONCE on send, thr
 
   // Let it settle (a cap refusal ends the turn without streaming) so the bridge clears cleanly.
   release({ ok: false, reason: "guest_cap" });
-  await screen.findByText(/reached the guest message limit/i);
+  await screen.findByText(/reached the guest limit/i);
   expect(screen.queryByRole("status", { name: "Answering" })).toBeNull();
 });
 
 test("arrival: a new chat mints its session token and hydrates the transport so the first run streams on mount (AC-3)", async () => {
   mintChatTokenMock.mockResolvedValue({ ok: true, token: "tok-arrival" });
-  const initial: UIMessage[] = [{ id: "u1", role: "user", parts: [{ type: "text", text: "Which companies are hiring the most?" }] }];
-  render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={initial} autoStream e2e={false} />);
+  const initial: UIMessage[] = [
+    {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "text", text: "Which companies are hiring the most?" }],
+    },
+  ];
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={initial}
+      autoStream
+      e2e={false}
+    />,
+  );
 
   await waitFor(() => expect(setSessionMock).toHaveBeenCalled());
   expect(mintChatTokenMock).toHaveBeenCalledWith(CONVERSATION_ID);
   expect(setSessionMock).toHaveBeenCalledWith(
     CONVERSATION_ID,
-    expect.objectContaining({ publicAccessToken: "tok-arrival", isStreaming: true }),
+    expect.objectContaining({
+      publicAccessToken: "tok-arrival",
+      isStreaming: true,
+    }),
   );
   await waitFor(() => expect(reconnectMock).toHaveBeenCalled());
-  expect(setSessionMock.mock.invocationCallOrder[0]).toBeLessThan(reconnectMock.mock.invocationCallOrder[0]);
+  expect(setSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
+    reconnectMock.mock.invocationCallOrder[0],
+  );
 });

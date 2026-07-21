@@ -15,6 +15,8 @@ import { AuthDialog } from "@/components/auth/AuthDialog";
 import { authClient } from "@/lib/auth-client";
 import { useJobChatTransport } from "@/lib/chat-transport";
 import {
+  classifyCardData,
+  dataParts,
   isStreaming,
   reconcileMessagesById,
   resolveInsightTarget,
@@ -59,6 +61,7 @@ export function ChatClient({
   accountName: accountNameInitial,
   accountEmail,
   conversations: conversationsInitial = [],
+  profileOnArrival = false,
 }: {
   conversationId: string;
   title?: string;
@@ -78,6 +81,9 @@ export function ChatClient({
   conversations?: (Pick<Conversation, "id" | "title" | "created_at"> & {
     preview?: string;
   })[];
+  /** refresh #2 s10: arriving from the landing's account menu "Your profile" (`/chat/new?profile=1`)
+   *  opens the profile LCP on mount (the landing has no LCP of its own). */
+  profileOnArrival?: boolean;
 }) {
   const router = useRouter();
   const transport = useJobChatTransport({ e2e });
@@ -140,7 +146,7 @@ export function ChatClient({
   const [lcpTarget, setLcpTarget] = useState<LcpTarget | null>(null);
   // refresh #2 s7: the account menu's "Your profile" opens the profile in the LCP. One LCP at a time -
   // opening a table closes the profile and vice versa.
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(profileOnArrival);
   const openLcp = useCallback((messageId: string, partId: string) => {
     setProfileOpen(false);
     setLcpTarget({ messageId, partId });
@@ -168,10 +174,10 @@ export function ChatClient({
   }, [setMessages]);
 
   // The polite cap/budget notice, rendered as a data-refusal turn so the one MessageList path shows it
-  // (decision 19 / 004 handoff), not a bespoke banner. A GUEST hitting the cap also queues the blocked
-  // draft and opens the lazy dialog for auto-send on sign-in (AC-10/AC-11); a signed-in cap or a
-  // post-sign-in re-send just shows the notice and keeps the draft. Shared by the follow-up and the
-  // fresh-chat send paths (DRY).
+  // (decision 19 / 004 handoff), not a bespoke banner. A GUEST cap renders the warm accent-soft register
+  // card (RefusalNotice, refresh #2 s8) and flips the derived `capped` state below - it does NOT auto-open
+  // the dialog anymore; the card + a queued send invite it. The blocked draft stays in the composer for
+  // that queued send. Shared by the follow-up and the fresh-chat send paths (DRY).
   const showRefusal = useCallback(
     (reason: "guest_cap" | "daily_budget", text: string) => {
       setMessages((prev) => [
@@ -182,13 +188,9 @@ export function ChatClient({
           parts: [{ type: "data-refusal", data: { reason } }],
         } as UIMessage,
       ]);
-      setDraft(text); // the blocked draft stays in the composer (survives the dialog / cancel)
-      // A guest hitting the cap gets the sign-in dialog. Google is a full-page redirect, so there is no
-      // in-page auto-send of the blocked draft (that path was email-only, now removed) - the notice and
-      // the draft remain for the user to retry after signing in.
-      if (reason === "guest_cap" && !signedIn) openAuthDialog();
+      setDraft(text); // the blocked draft stays in the composer (the queued message; survives cancel)
     },
-    [signedIn, setMessages],
+    [setMessages],
   );
 
   // A send that could not go through (invalid input / not_found / a thrown round trip): show the retry
@@ -199,10 +201,35 @@ export function ChatClient({
     setDraft(text);
   }, []);
 
+  // refresh #2 s8: a guest is "capped" once a guest_cap refusal is in the thread (from either the action
+  // gate or the agent backstop). Derived from the messages so it needs no separate state - New chat
+  // clears the thread (uncaps) and a sign-in flips `signedIn` (uncaps). Drives the composer's capped
+  // placeholder and the send -> dialog gate below.
+  const capped = useMemo(
+    () =>
+      !signedIn &&
+      messages.some(
+        (m) =>
+          m.role === "assistant" &&
+          dataParts(m).some((p) => {
+            const cls = classifyCardData(p.data);
+            return cls.kind === "refusal" && cls.reason === "guest_cap";
+          }),
+      ),
+    [signedIn, messages],
+  );
+
   const send = useCallback(
     async (raw: string) => {
       const text = raw.trim();
       if (!text) return;
+      // refresh #2 s8: while capped, a send does not go to the server - it opens the register dialog with
+      // the draft queued (kept in the composer), and after signing in the user re-sends it.
+      if (capped) {
+        setDraft(text);
+        openAuthDialog();
+        return;
+      }
       if (sendingRef.current) return; // a turn is already in flight - ignore the concurrent send
       sendingRef.current = true;
       setFailed(null);
@@ -319,6 +346,7 @@ export function ChatClient({
       transport,
       showRefusal,
       failSend,
+      capped,
     ],
   );
 
@@ -455,14 +483,16 @@ export function ChatClient({
 
   // `pending` = streaming OR the pre-stream run-wake gap. Drives BOTH the composer streaming state and
   // the MessageList answering indicator off one flag, so the indicator + Stop stay in lockstep. The auth
-  // dialog dims the composer (interaction-spec section 4 - and this is the brief input disable against
-  // an Enter-repeat at the cap moment: the dialog auto-opens, so the composer is inert while it is up).
+  // dialog dims the composer (interaction-spec section 4). When capped (refresh #2 s8) the composer stays
+  // ENABLED with its register placeholder - a send there opens the dialog with the draft queued.
   const pending = isStreaming(status) || awaiting;
   const composerState: ComposerState = dialogOpen
     ? "disabled"
     : pending
       ? "streaming"
-      : "default";
+      : capped
+        ? "capped"
+        : "default";
 
   return (
     <div className="app" style={{ height: "100vh" }}>
