@@ -98,6 +98,25 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     expect(loaded!.messages.find((m) => m.id === id)?.content).toBe("first write");
   });
 
+  // Contract boundary of the AC-5 upsert: omitting `id` must behave exactly as before the id column
+  // was added - the DB mints a fresh uuid per call, so two calls (even with identical role/content, as
+  // the count-keyed user-turn path can produce) insert TWO distinct rows, never deduped. This guards
+  // the no-id caller path (persistIncomingUserTurns' user rows) against a regression from the new
+  // id-supplied ON CONFLICT branch.
+  it("appendMessage with no id mints a distinct row every call - repeats are not deduped", async () => {
+    await store.getOrCreateUser(guestId);
+    const conv = await store.createConversation(guestId, "no-id append twice?");
+    const a = await store.appendMessage(conv.id, "user", "same text", null);
+    const b = await store.appendMessage(conv.id, "user", "same text", null);
+
+    expect(a.id).not.toBe(b.id); // distinct DB-minted ids, not the same row
+    const count =
+      await sql<{ c: number }[]>`SELECT count(*)::int AS c FROM messages WHERE conversation_id = ${conv.id}`;
+    expect(count[0].c).toBe(2); // two rows, not one deduped row
+    const loaded = await store.getConversation(conv.id);
+    expect(loaded!.messages.map((m) => m.content)).toEqual(["same text", "same text"]);
+  });
+
   it("getConversation returns null for a missing id", async () => {
     expect(await store.getConversation(crypto.randomUUID())).toBeNull();
   });
