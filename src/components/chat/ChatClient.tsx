@@ -14,6 +14,7 @@ import { LcpProfile } from "./LcpProfile";
 import { AuthDialog } from "@/components/auth/AuthDialog";
 import { authClient } from "@/lib/auth-client";
 import { useJobChatTransport } from "@/lib/chat-transport";
+import { persistedSessionIsStreaming } from "@/lib/chat-session-store";
 import {
   classifyCardData,
   dataParts,
@@ -95,7 +96,11 @@ export function ChatClient({
   fromAuth?: boolean;
 }) {
   const router = useRouter();
-  const transport = useJobChatTransport({ e2e });
+  const transport = useJobChatTransport({ e2e, conversationId });
+  // Resume a mid-stream reload: when the persisted session says a turn is still streaming, `useChat`
+  // drives `reconnectToStream` on mount to finish it from the persisted cursor (a settled session leaves
+  // this false, so a reload of a completed turn never replays). Read once at mount (SSR-guarded).
+  const [resume] = useState(() => persistedSessionIsStreaming(conversationId));
   const {
     messages,
     sendMessage,
@@ -108,6 +113,7 @@ export function ChatClient({
     id: conversationId,
     transport,
     messages: initialMessages,
+    resume,
   });
 
   const [draft, setDraft] = useState("");
