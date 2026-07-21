@@ -190,6 +190,15 @@ function createMemoryStore(): Store {
     async deleteConversation() {
       // unused by the eval run path
     },
+    async deleteTrailingAssistant(conversationId: string) {
+      // The regenerate pop: remove the assistant row(s) trailing the last user turn for this conversation
+      // (createChatRun calls this on a regenerate). Walk newest-first, dropping assistants until a user.
+      const convMsgs = messages.filter((m) => m.conversation_id === conversationId);
+      for (let i = convMsgs.length - 1; i >= 0 && convMsgs[i].role !== "user"; i--) {
+        const at = messages.indexOf(convMsgs[i]);
+        if (at >= 0) messages.splice(at, 1);
+      }
+    },
     async listConversations(userId: string) {
       return [...conversations.values()]
         .filter((c) => c.user_id === userId)

@@ -362,6 +362,51 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(owner);
   });
 
+  // R3 must-fix (022): a regenerate supersedes the row it re-answers. deleteTrailingAssistant is the
+  // narrow durable mirror of the SDK's trailing-assistant pop - it removes ONLY the assistant row(s)
+  // trailing the LAST user message, leaving earlier turns intact. Validates the (created_at, id) tuple
+  // comparison against real Postgres (the same composite order getConversation reads by).
+  it("deleteTrailingAssistant pops the assistant row(s) after the last user turn, leaving prior turns intact", async () => {
+    const owner = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(owner);
+    const conv = await store.createConversation(owner, "regenerate me");
+    await store.appendMessage(conv.id, "user", "q1", null);
+    await store.appendMessage(conv.id, "assistant", "a1", { id: "p1", kind: "table" });
+    await store.appendMessage(conv.id, "user", "q2 - the turn being retried", null);
+    // The failed turn's error-card row, trailing the last user turn (content "" - errors persist verbatim).
+    await store.appendMessage(conv.id, "assistant", "", { kind: "system" });
+
+    await store.deleteTrailingAssistant(conv.id);
+
+    const loaded = await store.getConversation(conv.id);
+    // Only the trailing error card is gone; q1/a1/q2 survive - the tail is now the user turn to re-answer.
+    expect(loaded!.messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(loaded!.messages.map((m) => m.content)).toEqual(["q1", "a1", "q2 - the turn being retried"]);
+
+    await purge(owner);
+  });
+
+  // No-op contracts: nothing trails the last user (a normal submit state), and a malformed id.
+  it("deleteTrailingAssistant is a no-op when the tail is already a user turn, or the id is malformed", async () => {
+    const owner = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(owner);
+    const conv = await store.createConversation(owner, "nothing to pop");
+    await store.appendMessage(conv.id, "user", "q1", null);
+    await store.appendMessage(conv.id, "assistant", "a1", { id: "p1", kind: "table" });
+    await store.appendMessage(conv.id, "user", "q2", null); // the just-persisted user turn, no answer yet
+
+    await store.deleteTrailingAssistant(conv.id);
+    expect((await store.getConversation(conv.id))!.messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+    ]); // unchanged - nothing trails the last user
+
+    await expect(store.deleteTrailingAssistant("not-a-uuid")).resolves.toBeUndefined(); // malformed = no-op
+
+    await purge(owner);
+  });
+
   it("messageCounts scopes to a user (cap) and aggregates globally (daily budget)", async () => {
     const freshGuest = `test-guest-${crypto.randomUUID()}`;
     await store.getOrCreateUser(freshGuest);

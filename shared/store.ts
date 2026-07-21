@@ -124,6 +124,15 @@ export interface Store {
     userId?: string;
     sinceUtcMidnight: Date;
   }): Promise<number>;
+  /**
+   * Delete the assistant row(s) trailing the last user message - the durable mirror of the SDK's
+   * regenerate pop (it trims trailing assistant messages from its in-memory accumulator until the tail
+   * is a user turn, then re-runs). Called ONLY on the regenerate path, before the retry's answer
+   * persists, so a superseded error card (or a prior answer) never survives alongside the new reply
+   * (I4: exactly one assistant reply per user turn). A conversation with no user turn, or whose tail is
+   * already a user row, is a no-op; a malformed id is a no-op (the "null = not found" contract).
+   */
+  deleteTrailingAssistant(conversationId: string): Promise<void>;
 }
 
 /**
@@ -271,6 +280,30 @@ export function createStore(sql: Sql): Store {
         await tx`DELETE FROM messages WHERE conversation_id = ${conversationId}`;
         await tx`DELETE FROM conversations WHERE id = ${conversationId}`;
       });
+    },
+
+    async deleteTrailingAssistant(conversationId) {
+      // Malformed id: no-op (contract parity with getConversation - never surface a raw uuid cast error).
+      if (!UUID_RE.test(conversationId)) return;
+      // Delete the assistant rows that TRAIL the last user turn: an assistant row trails it iff NO user
+      // row sorts at-or-after it, by the SAME (created_at, id) composite order getConversation reads by -
+      // so "trailing" here means exactly what the reload shows. An assistant BETWEEN two user turns has a
+      // later user (kept); only the tail after the last user is removed. The EXISTS guard keeps a
+      // user-less conversation a no-op (never nukes stray assistant rows) - defense; a real conversation
+      // always opens with a user turn.
+      await sql`
+        DELETE FROM messages a
+        WHERE a.conversation_id = ${conversationId}
+          AND a.role = 'assistant'
+          AND EXISTS (
+            SELECT 1 FROM messages u
+            WHERE u.conversation_id = ${conversationId} AND u.role = 'user'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM messages u
+            WHERE u.conversation_id = ${conversationId} AND u.role = 'user'
+              AND (u.created_at, u.id) >= (a.created_at, a.id)
+          )`;
     },
 
     async messageCounts({ userId, sinceUtcMidnight }) {

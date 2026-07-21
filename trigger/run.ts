@@ -98,13 +98,20 @@ export function createChatRun<R>(deps: ChatRunDeps<R>) {
       const tooLong = await persistIncomingUserTurns(store, chatId, messages);
       if (tooLong) return { kind: "refuse", reason: tooLong };
 
+      // A regenerate (Retry) supersedes the row it re-answers: mirror the SDK's trailing-assistant pop
+      // (it trims trailing assistant messages from its accumulator until the tail is a user, then
+      // re-runs) in the DURABLE store, BEFORE the read below - so the superseded error card (or a prior
+      // answer) is gone, and both the rebuilt history and a later reload show exactly ONE assistant reply
+      // per user turn (I4/AC-6/AC-8). A no-op on submit (nothing trails the just-persisted user turn).
+      if (trigger === "regenerate-message") await store.deleteTrailingAssistant(chatId);
+
       const loaded = await store.getConversation(chatId);
       const persisted = loaded?.messages ?? [];
 
       // The LOAD-BEARING dedup. Crash-continuation re-dispatch re-EXECUTES a turn with a NEW assistant id
       // (the 021 upsert only stops SAME-id replays), so only this gate stops that duplicate. A regenerate
-      // (Retry) always runs - buildModelHistory drops the trailing empty error row. A submit whose turn is
-      // already answered (a non-user tail) is a redelivery - skip.
+      // (Retry) always runs (its superseded tail was popped above). A submit whose turn is already
+      // answered (a non-user tail) is a redelivery - skip.
       const tail = persisted[persisted.length - 1];
       const alreadyAnswered = tail !== undefined && tail.role !== "user";
       if (trigger !== "regenerate-message" && alreadyAnswered) return { kind: "skip" };

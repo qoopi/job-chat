@@ -34,6 +34,7 @@ function stubStore(seed: Seed[] = [{ role: "user", content: "hi" }]): Store {
     linkAuthUser: async () => false,
     adoptGuest: async () => {},
     deleteConversation: async () => {},
+    deleteTrailingAssistant: async () => {},
     listConversations: async () => [],
   } as unknown as Store;
 }
