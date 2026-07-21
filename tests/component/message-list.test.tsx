@@ -251,6 +251,24 @@ describe("MessageList", () => {
     expect(container.querySelector(".bubble.ai")).toBeNull();
   });
 
+  // AC-6/7 (R3): a FAILED turn now persists as a turn (a synthesized system error card, content ""), so a
+  // reload resumes it as the error card WITH Retry - not a bare unanswered question. Drives the real
+  // hydration function (storeToUiMessages), the resume path onTurnComplete's error branch feeds.
+  test("Should_ResumeErrorCard_When_FailedTurnReloaded", () => {
+    const onRetry = vi.fn();
+    const stored: StoredMessage[] = [
+      { id: "u1", role: "user", content: "Who is hiring the most?", parts: null },
+      { id: "a1", role: "assistant", content: "", parts: { kind: "system" } }, // the persisted failed turn
+    ];
+    const messages = storeToUiMessages(stored);
+    render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={onRetry} onOpenLcp={noop} />);
+    // the question survives, and its failed answer resumes as the error card with a working Retry
+    expect(screen.getByText("Who is hiring the most?")).toBeTruthy();
+    expect(screen.getByText("Something went wrong on my side - try again")).toBeTruthy();
+    fireEvent.click(btn("Retry"));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
   test("AC-15: a refusal part renders the polite limit notice (not the error card)", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "data-refusal", id: "a1-r", data: { reason: "guest_cap" } }] },

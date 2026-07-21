@@ -94,11 +94,14 @@ export const jobChatAgent = chat.agent({
   run: (payload) => chatRun(payload),
   // Mint uuid response ids so responseMessage.id is a uuid the store can key the assistant row on.
   uiMessageStreamOptions: { generateMessageId },
-  // Persist the assistant turn on completion. Fires for stopped turns too (responseMessage has its
-  // aborted parts cleaned up), which is how a stopped answer's partial card survives to resume -
-  // verified live, see the epic decision log (no client-snapshot fallback needed).
-  onTurnComplete: async ({ chatId, responseMessage }) => {
-    if (!responseMessage) return;
-    await withStore((store) => persistAssistantTurn(store, { conversationId: chatId, responseMessage }));
+  // Persist the assistant turn on completion - normal, stopped, OR errored. A stopped turn carries a
+  // responseMessage with its aborted parts cleaned up (a partial card survives to resume). An ERRORED
+  // turn fires with `error` set and the response undefined-or-partial; persistAssistantTurn synthesizes
+  // the error card so a failed turn persists as a turn and reloads with Retry (AC-6/7), instead of the
+  // old `if (!responseMessage) return` that dropped exactly those turns.
+  onTurnComplete: async ({ chatId, responseMessage, error }) => {
+    await withStore((store) =>
+      persistAssistantTurn(store, { conversationId: chatId, responseMessage, error }),
+    );
   },
 });
