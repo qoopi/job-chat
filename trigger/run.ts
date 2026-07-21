@@ -22,6 +22,8 @@ import type { EmitPart } from "./tools";
 // assistant answers and made every turn re-answer all prior questions (004 round 4); (4) hands that
 // history to the injected model seam. A refusal streams a taxonomized part and returns WITHOUT calling
 // the model, so a guest can never drive the model past the cap/budget or with an unbounded payload.
+// Between (1) and (2) sits the redelivery guard: the envelope arrives at-least-once, and a duplicate
+// (persisted tail already answered) must never reach the model or persist a second answer.
 
 /** The arguments the injected model seam receives - the rebuilt history plus the turn's tools/signal. */
 export interface StreamModelArgs {
@@ -55,7 +57,10 @@ export interface ChatRunDeps<R> {
   streamModel: StreamModel<R>;
 }
 
-type Gate = { kind: "refuse"; reason: RefusalPartReason } | { kind: "run"; history: ModelMessage[] };
+type Gate =
+  | { kind: "refuse"; reason: RefusalPartReason }
+  | { kind: "skip" }
+  | { kind: "run"; history: ModelMessage[] };
 
 /** The one-line DATA SCOPE note appended to the system prompt from the corpus profile (018 strand 5). */
 function dataScopeNote(p: CoverageProfile): string {
@@ -77,10 +82,22 @@ export function createChatRun<R>(deps: ChatRunDeps<R>) {
 
     // Persist the newly-arrived user turn(s) BEFORE the guard counts them, then apply the backstop,
     // then rebuild the model input from the now-current store - all on ONE connection so persist ->
-    // count -> rebuild is atomic and reads the same history.
+    // duplicate-check -> count -> rebuild is atomic and reads the same history.
     const gate = await deps.withStore<Gate>(async (store) => {
       const tooLong = await persistIncomingUserTurns(store, chatId, messages);
       if (tooLong) return { kind: "refuse", reason: tooLong };
+
+      // Trigger delivers the turn envelope at-least-once, so an already-answered turn can arrive
+      // again. The persisted tail decides: a non-user last row means the latest user turn already has
+      // its answer - a redelivery, skipped BEFORE the guards so a duplicate never emits a spurious
+      // refusal, never reaches the model, and never persists a second answer. Depends on
+      // persistAssistantTurn never writing an empty assistant row: a failed turn keeps a user tail, so
+      // a legitimate Retry (regenerate - same envelope, no new user turn) still runs. Reuses the
+      // rebuild read below - no extra query.
+      const loaded = await store.getConversation(chatId);
+      const persisted = loaded?.messages ?? [];
+      const tail = persisted[persisted.length - 1];
+      if (tail !== undefined && tail.role !== "user") return { kind: "skip" };
 
       const refusal = await checkConversationGuards(
         { store, guards: deps.guards, now: deps.now },
@@ -88,9 +105,13 @@ export function createChatRun<R>(deps: ChatRunDeps<R>) {
       );
       if (refusal) return { kind: "refuse", reason: refusal };
 
-      const loaded = await store.getConversation(chatId);
-      return { kind: "run", history: buildModelHistory(loaded?.messages ?? []) };
+      return { kind: "run", history: buildModelHistory(persisted) };
     });
+
+    if (gate.kind === "skip") {
+      console.log("[turn] duplicate delivery skipped");
+      return undefined;
+    }
 
     if (gate.kind === "refuse") {
       deps.emit(refusalPart(crypto.randomUUID(), gate.reason));

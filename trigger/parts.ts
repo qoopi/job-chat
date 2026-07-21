@@ -603,12 +603,18 @@ export function extractAssistantPersistence(message: MessageLike): {
  * Persist the assistant turn (content + card payload) via the store. Called from the agent's
  * `onTurnComplete` on both normal and stopped completion (AC-13; the stopped case is the cancelled-
  * run partial-persistence path).
+ *
+ * A turn whose final text is empty (the tool-failure path: every query errored, no verdict, no prose)
+ * persists NOTHING - the conversation's tail must stay the unanswered user row, so resume renders the
+ * retry state and the redelivery guard (trigger/run.ts) can read a non-user tail as "already answered"
+ * without mistaking a legitimate Retry for a duplicate.
  */
 export async function persistAssistantTurn(
   store: Store,
   args: { conversationId: string; responseMessage: MessageLike },
 ): Promise<void> {
   const { content, parts } = extractAssistantPersistence(args.responseMessage);
+  if (content.trim().length === 0) return;
   await store.appendMessage(args.conversationId, "assistant", content, parts);
 }
 
