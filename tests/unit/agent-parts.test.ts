@@ -13,10 +13,10 @@ import {
   emptyModelOutput,
   emptyPart,
   errorPart,
-  extractAssistantPersistence,
   refusalPart,
   toModelOutput,
 } from "../../trigger/parts";
+import { extractAssistantPersistence } from "../../trigger/persistence";
 
 // Synthetic query results mirroring the AC-11 fixture's hand-computed rows (tests/fixtures), so the
 // pure part-building is unit-testable without a ClickHouse client. The live 7/7 run lives in the

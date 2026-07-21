@@ -5,12 +5,11 @@ import type { CoverageProfile } from "@shared/analytics";
 import { checkConversationGuards } from "./guard";
 import {
   buildModelHistory,
-  persistIncomingUserTurns,
   refusalPart,
   type ModelMessage,
   type RefusalPartReason,
-  type RunMessage,
 } from "./parts";
+import { persistIncomingUserTurns, type RunMessage } from "./persistence";
 import type { EmitPart } from "./tools";
 
 // The durable chat run's orchestration seam, extracted from trigger/chat.ts so the whole per-turn loop

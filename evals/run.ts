@@ -27,7 +27,7 @@ import {
   CATALOG_TOOL_NAMES,
   type EmitPart,
 } from "../trigger/tools";
-import { persistAssistantTurn } from "../trigger/parts";
+import { persistAssistantTurn } from "../trigger/persistence";
 import { ADVISER_V1 } from "../trigger/prompts/adviser-v1";
 import { ADVISER_V2 } from "../trigger/prompts/adviser-v2";
 import { FIXTURE_INGESTED_AT } from "../tests/fixtures/postings.fixture";

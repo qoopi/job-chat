@@ -2,7 +2,8 @@ import { afterEach, beforeAll, afterAll, describe, expect, it } from "vitest";
 import postgres, { type Sql } from "postgres";
 import { createStore, type Store } from "@shared/store";
 import type { EmitPart } from "../../trigger/tools";
-import { buildInsight, persistAssistantTurn, type ModelMessage } from "../../trigger/parts";
+import { buildInsight, type ModelMessage } from "../../trigger/parts";
+import { persistAssistantTurn } from "../../trigger/persistence";
 import { createChatRun } from "../../trigger/run";
 
 // 004 round 4 root-cause guard. In production every turn re-answered ALL prior questions: the model

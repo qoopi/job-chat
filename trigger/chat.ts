@@ -10,7 +10,7 @@ import { getAgentLimits, getGuardConfig } from "@shared/env";
 import { AGENT_ID } from "./agent-id";
 import { ADVISER_V2 } from "./prompts/adviser-v2";
 import { buildCatalogTools, type EmitPart } from "./tools";
-import { persistAssistantTurn } from "./parts";
+import { persistAssistantTurn } from "./persistence";
 import { createChatRun, type StreamModelArgs } from "./run";
 
 // The conversation loop: ONE durable Trigger.dev chat.agent per conversation (keyed on chatId = our
