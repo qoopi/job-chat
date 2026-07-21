@@ -36,6 +36,10 @@ export function extractAssistantPersistence(message: MessageLike): {
   parts: unknown;
 } {
   const parts = message.parts ?? [];
+  // F8 (prose rule, one home each): persist the model's prose VERBATIM - what the assistant actually said.
+  // The card is the single answer surface at RENDER (MessageList suppresses the prose when a card renders)
+  // and the code-derived verdict is what the MODEL sees (buildModelHistory substitutes it for a card turn),
+  // so neither concern rewrites the stored content - Postgres stays a faithful record of the turn.
   const content = parts
     .filter((p) => p.type === "text" && typeof p.text === "string")
     .map((p) => p.text)
@@ -51,21 +55,7 @@ export function extractAssistantPersistence(message: MessageLike): {
   }
   const payloads = [...byId.values()].filter(isPersistablePayload);
   const payload = payloads.length === 0 ? null : payloads.length === 1 ? payloads[0] : payloads;
-  // 018 strand 2 (extends AC-25's single-surface rule to SUCCESS cards): when a turn emits a data card,
-  // the CARD is the answer - the model's accompanying prose is dropped so a fabricated sentence (a
-  // company/number with zero DB rows behind it) is never persisted or fed back into the next turn's
-  // history. The turn instead persists the code-derived VERDICT (honest, from the real tool result),
-  // which keeps the resumed thread and the rebuilt model history accurate and role-alternating. An
-  // error/refusal card persists no prose (its own copy is the surface); a card-less turn keeps the
-  // model's plain prose. The render layer applies the matching suppression live.
-  const verdicts = payloads
-    .map((p) => {
-      const parsed = DataInsightSchema.safeParse(p);
-      return parsed.success ? parsed.data.verdict : null;
-    })
-    .filter((v): v is string => v !== null);
-  const finalContent = verdicts.length > 0 ? verdicts.join(" ") : payloads.length > 0 ? "" : content;
-  return { content: finalContent, parts: payload };
+  return { content, parts: payload };
 }
 
 /** The card synthesized for a turn that errored with no (or no card-bearing) response message, so a

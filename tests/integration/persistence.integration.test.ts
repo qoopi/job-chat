@@ -65,11 +65,10 @@ describe.skipIf(!hasCreds)("assistant-turn persistence against real Postgres", (
     const reloaded = await store.getConversation(conv.id);
     expect(reloaded).not.toBeNull();
     const assistant = reloaded!.messages.find((m) => m.role === "assistant");
-    // 018 strand 2: a card turn persists the code-derived VERDICT, NOT the model's prose ("Google is out
-    // in front." is dropped), so a fabricated sentence can never resume or feed the next turn's history.
-    expect(assistant?.content).toBe(card.verdict);
-    expect(assistant?.content).toBe("Google is hiring the most, with 4 openings.");
-    // The full card payload still survives verbatim - verdict, chart series, SQL, meta.
+    // F8: persistence stores the model's prose VERBATIM ("Google is out in front."), not the verdict - the
+    // render layer suppresses it and buildModelHistory substitutes the verdict, so Postgres stays faithful.
+    expect(assistant?.content).toBe("Google is out in front.");
+    // The full card payload survives verbatim - verdict, chart series, SQL, meta - the single answer surface.
     expect(assistant?.parts).toEqual(card);
   });
 

@@ -66,6 +66,66 @@ describe("buildModelHistory keeps valid role alternation across a dropped error 
   });
 });
 
+// F8 (prose rule, one home each): with persistence now storing prose VERBATIM, buildModelHistory is the
+// home that substitutes the code-derived verdict for a card turn's model-facing content - so the model
+// still sees the honest verdict, never the model's own (possibly fabricated) prose, and never the error
+// narration. Reads the persisted card off `parts`; a card-less turn keeps its prose.
+describe("buildModelHistory substitutes the verdict for card turns (F8)", () => {
+  it("hands the model the code-derived verdict for an insight-card turn, never the persisted prose", () => {
+    const card = buildInsight({
+      id: "m1",
+      tool: "top_companies",
+      params: {},
+      result: result([{ company: "Google", count: 4 }], 10),
+    });
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "Who is hiring the most?" },
+      { role: "assistant", content: "Apple and Meta are also ramping up hiring.", parts: card }, // verbatim
+      { role: "user", content: "How many in SF?" },
+    ]);
+    expect(rebuilt).toEqual([
+      { role: "user", content: "Who is hiring the most?" },
+      { role: "assistant", content: card.verdict },
+      { role: "user", content: "How many in SF?" },
+    ]);
+    expect(rebuilt[1].content).not.toContain("Apple"); // the fabricated prose never reaches the model
+  });
+
+  it("drops an error-card turn (no verdict) so the model never sees the error narration", () => {
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "Median salary in SF?" },
+      { role: "assistant", content: "Something went wrong - please try again.", parts: { kind: "system" } },
+      { role: "user", content: "Who is hiring the most?" },
+    ]);
+    // the error narration is not model-facing; the surrounding users coalesce (alternation-safe)
+    expect(rebuilt.map((m) => m.role)).toEqual(["user"]);
+    expect(rebuilt[0].content.toLowerCase()).not.toContain("went wrong");
+  });
+
+  it("keeps a plain (card-less) assistant turn's prose verbatim for the model", () => {
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "Two words.", parts: null },
+      { role: "user", content: "q2" },
+    ]);
+    expect(rebuilt).toEqual([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "Two words." },
+      { role: "user", content: "q2" },
+    ]);
+  });
+
+  it("substitutes the verdict from an array (multi-card) payload, joining them", () => {
+    const c1 = buildInsight({ id: "a", tool: "top_companies", params: {}, result: result([{ company: "Google", count: 4 }], 10) });
+    const c2 = buildInsight({ id: "b", tool: "top_companies", params: {}, result: result([{ company: "Meta", count: 2 }], 10) });
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "some prose", parts: [c1, c2] },
+    ]);
+    expect(rebuilt[1].content).toBe(`${c1.verdict} ${c2.verdict}`);
+  });
+});
+
 describe("chartTypeFor maps each catalog tool to its designated visual (AC-11)", () => {
   it("pins the visuals from the brief case table", () => {
     expect(chartTypeFor("salary_distribution")).toBe("histogram");
@@ -282,10 +342,10 @@ describe("refusalPart carries the guard reason for the UI to render like an acti
 });
 
 describe("extractAssistantPersistence pulls the persisted content + card payload (AC-13)", () => {
-  // 018 strand 2: a turn that emits a data card persists the code-derived VERDICT as its content, NOT
-  // the model's accompanying prose (which could name entities/numbers with no DB rows behind them). The
-  // card is the single answer surface; the honest verdict keeps the rebuilt history accurate + alternating.
-  it("persists the code-derived verdict (not the model's prose) and keeps the data-insight payload", () => {
+  // F8 (prose rule, one home each): persistence stores what HAPPENED - the model's prose VERBATIM plus the
+  // card payload. The verdict substitution moves to buildModelHistory (model input) and the render layer
+  // suppresses the prose when a card renders, so Postgres stays a faithful record with no rewritten history.
+  it("persists the model's prose VERBATIM alongside the card (no verdict substitution at persist)", () => {
     const insight = buildInsight({
       id: "i1",
       tool: "top_companies",
@@ -300,8 +360,8 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
       ],
     };
     const { content, parts } = extractAssistantPersistence(message);
-    expect(content).toBe(insight.verdict); // the fabricated prose is dropped
-    expect(content).not.toContain("Apple");
+    expect(content).toBe("Apple, Amazon, and Meta are also hiring aggressively right now."); // verbatim
+    expect(content).not.toBe(insight.verdict); // no longer rewritten to the verdict at persist
     expect(parts).toEqual(insight);
   });
 
@@ -345,10 +405,10 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
     expect(parts).toEqual({ kind: "system" });
   });
 
-  // AC-25 single refusal surface: when a turn ends in a system error card, its accompanying model prose
-  // (the "something went wrong" narration the tool asked the model to write) is NOT also persisted - the
-  // turn resumes as exactly one surface, the error card, never card + doubled text.
-  it("drops the accompanying prose when a turn ends in a system error card (AC-25)", () => {
+  // F8: an error-card turn persists its prose VERBATIM too (the store is a faithful record). The single
+  // answer surface is enforced downstream - the render layer suppresses the prose when the error card
+  // renders (AC-25), and buildModelHistory drops it from the model input - never at persist.
+  it("persists the accompanying prose verbatim when a turn ends in a system error card", () => {
     const message = {
       role: "assistant",
       parts: [
@@ -358,7 +418,7 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
       ],
     };
     const { content, parts } = extractAssistantPersistence(message);
-    expect(content).toBe(""); // the prose is dropped - the error card is the single surface
+    expect(content).toBe("Something went wrong on my side - please try again."); // verbatim, not ""
     expect(parts).toEqual({ kind: "system" });
   });
 

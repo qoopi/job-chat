@@ -240,9 +240,10 @@ describe("MessageList", () => {
     expect(container.textContent).not.toContain("Something went wrong on my side - please try again.");
   });
 
-  // The post-fix shape: extractAssistantPersistence now persists content "" for an error turn, so a
-  // freshly-fixed row never even hydrates a text part - belt and suspenders with the render-layer guard.
-  test("AC-25 resume: a post-fix error turn (content already dropped at persistence) hydrates with no prose part", () => {
+  // A SYNTHESIZED failed turn (the errored turn had no response message) persists content "", so the row
+  // hydrates no text part at all - belt and suspenders with the render-layer suppression. (A tool-failure
+  // that DID narrate persists the prose verbatim under F8; the render layer suppresses it - covered above.)
+  test("AC-25 resume: a synthesized error turn (empty content) hydrates with no prose part", () => {
     const stored: StoredMessage[] = [{ id: "a2", role: "assistant", content: "", parts: { kind: "system" } }];
     const messages = storeToUiMessages(stored);
     expect(messages[0].parts).toEqual([{ type: "data-error", id: "a2-card-0", data: { kind: "system" } }]);
