@@ -53,11 +53,52 @@ test("Should_RenderEachMessageOnce_When_ReloadedMidStreamAndSettled", async ({ p
   }
 });
 
-// AC-3 (mid-stream reload resumes the in-flight turn without duplicating earlier content) is proven at
-// the component seam in tests/component/chat-resume-mid-stream.test.tsx: the AI SDK's `resumeStream`
-// seeds its streaming state from the LAST message, so a faithful resume needs a thread ending in an
-// in-flight assistant turn - which the shared read-only e2e fixture (ends in a settled error card) can
-// not express. A fixture-backed e2e of the mid-stream case is left to 05-testing.
+// AC-3: reloading MID-STREAM resumes the in-flight turn and completes it without duplicating any
+// earlier content. The shared FIXTURE_ID thread always ends settled (reused verbatim by other specs), so
+// this uses the second, additive fixture id (src/lib/chat-fixtures.ts MIDSTREAM_FIXTURE_ID) whose thread
+// ends in a lone user question with no assistant reply yet - the state a genuine mid-stream reload
+// leaves behind. `resumeStream` seeds from that last message. The persisted session is seeded straight
+// into sessionStorage via addInitScript (exactly what the real transport's `onSessionChange` would have
+// written before the reload) and `__CHAT_REPLAY__` supplies the resumed tail - this exercises the real
+// `chat-transport.ts` hydration + `ChatClient`'s `resume` wiring end-to-end (unlike the component seam in
+// tests/component/chat-resume-mid-stream.test.tsx, which mocks `@/lib/chat-transport` out entirely).
+const MIDSTREAM_CHAT_ID = "00000000-0000-4000-8000-000000000001";
+const MIDSTREAM_CHAT = `/chat/${MIDSTREAM_CHAT_ID}`;
+
+test("Should_ResumeStreamWithoutDuplicating_When_ReloadedMidStream", async ({ page }) => {
+  const resumedReplay: ScriptStep[] = [
+    { chunk: { type: "start", messageId: "resumed-assistant" } },
+    { chunk: { type: "text-start", id: "r" } },
+    { chunk: { type: "text-delta", id: "r", delta: "RESUMED-ANSWER completing after the reload." } },
+    { chunk: { type: "text-end", id: "r" } },
+    { chunk: { type: "finish" } },
+  ];
+  await page.addInitScript(
+    ({ replay, sessionKey, sessionValue }) => {
+      (window as unknown as { __CHAT_REPLAY__?: unknown }).__CHAT_REPLAY__ = replay;
+      window.sessionStorage.setItem(sessionKey, sessionValue);
+    },
+    {
+      replay: resumedReplay,
+      sessionKey: `jobchat_session:${MIDSTREAM_CHAT_ID}`,
+      sessionValue: JSON.stringify({ publicAccessToken: "e2e-tok", isStreaming: true }),
+    },
+  );
+
+  await page.goto(MIDSTREAM_CHAT);
+
+  // The in-flight turn resumes and completes - the resumed answer appears exactly once.
+  await expect(
+    page.locator(".bubble.ai", { hasText: "RESUMED-ANSWER completing after the reload." }),
+  ).toHaveCount(1);
+
+  // No earlier content duplicated: the settled card and both questions render exactly once each.
+  await expect(page.locator(".insight")).toHaveCount(1);
+  await expect(
+    page.locator(".bubble.user", { hasText: "Top companies hiring right now" }),
+  ).toHaveCount(1);
+  await expect(page.locator(".bubble.user", { hasText: "And remote roles?" })).toHaveCount(1);
+});
 
 // AC-2: the first follow-up after a reload streams ONLY the new turn - no earlier turn is re-rendered,
 // and the new answer appears exactly once. After R1/R2 the transport owns the cursor, so `sendMessages`
