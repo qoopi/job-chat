@@ -127,4 +127,8 @@ export class MockChatTransport implements ChatTransport<UIMessage> {
       lastEventId: session.lastEventId,
     });
   };
+
+  // Stop's backend signal. E2E has no backend and the AI SDK stop already aborts the scripted stream, so
+  // this is inert here - it exists so the client's Stop path drives the SAME transport contract as prod.
+  stopGeneration = async (): Promise<boolean> => true;
 }

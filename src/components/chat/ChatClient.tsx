@@ -421,6 +421,15 @@ export function ChatClient({
   // be a fresh ref every ChatClient render and defeat the memo (regenerate is stable across renders).
   const onRetry = useCallback(() => void regenerate(), [regenerate]);
 
+  // Stop pairs the transport's backend signal with the AI SDK stop (conformance correction 6). After a
+  // resumed mount `useChat.stop()` aborts only the local reader - the AI SDK does not thread an abort
+  // through `reconnectToStream` - so without `stopGeneration` the backend keeps generating. E2E has no
+  // backend (the mock's stopGeneration is inert) and the AI SDK stop still aborts the scripted stream.
+  const onStop = useCallback(() => {
+    void transport.stopGeneration(conversationId);
+    void stop();
+  }, [transport, conversationId, stop]);
+
   // Sign out (017): drop the Better Auth session, then land the user on the LANDING as a guest with no
   // stale thread. On success (Better Auth's onSuccess), return the sidebar to its guest state, clear the
   // open thread + history, rotate the guest cookie (defensive - the Google path already cleared it), and
@@ -559,7 +568,7 @@ export function ChatClient({
             value={draft}
             onChange={setDraft}
             onSend={onComposerSend}
-            onStop={() => void stop()}
+            onStop={onStop}
             focusSignal={focusNonce}
           />
         </div>

@@ -20,6 +20,10 @@ export interface JobChatTransport extends ChatTransport<UIMessage> {
     chatId: string,
     session: { publicAccessToken: string; isStreaming?: boolean; lastEventId?: string },
   ): void;
+  // Stop must reach the backend after a RESUMED mount: `useChat.stop()` aborts only the local reader
+  // (the AI SDK does not thread an abort through `reconnectToStream`), so the composer's onStop pairs it
+  // with `stopGeneration`, which posts `{kind:"stop"}` on `.in` and halts the agent's streamText.
+  stopGeneration(chatId: string): Promise<boolean>;
 }
 
 // The transport seam. Production: the standard Trigger.dev chat transport (skill-endorsed, unchanged) -
