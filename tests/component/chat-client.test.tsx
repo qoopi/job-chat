@@ -19,23 +19,22 @@ import type { UIMessage } from "ai";
 // path, not a bespoke banner. The real transport and server action are mocked (external boundaries);
 // ChatClient's own branching is what is under test.
 //
-// It also proves the attach contract: a prod turn only streams once the transport's session cache is
-// HYDRATED - `setSession(chatId, { publicAccessToken, isStreaming: true })` must run BEFORE the send.
-// A follow-up delivers + watches via `sendMessages` (mechanism a, 004 round 3) - the only SDK path that
-// streams a freshly-triggered turn live; the peekSettled `reconnectToStream` is NOT used for follow-ups.
-// Arrival still attaches via `reconnectToStream` (resumeStream on an in-flight run). All three are spied.
+// It also proves the send contract after R1/R2: the follow-up send threads NO session state - the
+// transport owns the `.out` cursor and refreshes its token via `accessToken`, so `send` never calls
+// `setSession`. A follow-up delivers + watches via `sendMessages` (the only SDK path that streams a
+// freshly-triggered turn live); the peekSettled `reconnectToStream` is NOT used for follow-ups. Arrival
+// still attaches via `setSession` + `reconnectToStream` (resumeStream on an in-flight run; 024 removes
+// it). All three are spied.
 const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(
   async () => new ReadableStream({ start: (c) => c.close() }),
 );
-const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
     sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
     setSession: setSessionMock,
-    getSession: getSessionMock,
   }),
 }));
 
@@ -47,7 +46,10 @@ vi.mock("@/app/actions", () => ({
   mintChatToken: (conversationId: string) => mintChatTokenMock(conversationId),
 }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const routerReplaceMock = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: routerReplaceMock }),
+}));
 
 import { ChatClient } from "@/components/chat/ChatClient";
 import { closeAuthDialog } from "@/lib/auth-dialog";
@@ -62,6 +64,7 @@ afterEach(() => {
   setSessionMock.mockClear();
   reconnectMock.mockClear();
   sendMessagesMock.mockClear();
+  routerReplaceMock.mockClear();
 });
 
 test("action-refusal: the sendMessage action's cap refusal renders the SAME register card as the agent-side refusal", async () => {
@@ -290,8 +293,8 @@ test("Should_DisableFollowupChip_When_TurnInFlight: a follow-up chip is pending-
   ).toBeTruthy();
 
   // Settle cleanly (avoid a dangling act warning): the held gate resolves ok, the turn finishes.
-  release({ ok: true, publicAccessToken: "tok" });
-  await waitFor(() => expect(setSessionMock).toHaveBeenCalled());
+  release({ ok: true });
+  await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
 });
 
 // The `sendingRef` guard in isolation, independent of any `disabled` gating. Two Send-button clicks are
@@ -337,17 +340,14 @@ test("Should_IgnoreReenteredSend_When_SendAlreadyInFlight: two same-tick compose
   ).toHaveLength(1);
 
   // Settle cleanly (avoid a dangling act warning): the held gate resolves ok, the turn finishes.
-  release({ ok: true, publicAccessToken: "tok" });
-  await waitFor(() => expect(setSessionMock).toHaveBeenCalled());
+  release({ ok: true });
+  await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
 });
 
-// --- mechanism (a): a follow-up delivers + watches via sendMessages, hydrated first ---
+// --- R2: a follow-up delivers + watches via sendMessages and threads NO session state ---
 
-test("follow-up send: the action's session token hydrates the transport BEFORE the deliver+watch send (streams live, not peekSettled reconnect)", async () => {
-  sendMessageMock.mockResolvedValue({
-    ok: true,
-    publicAccessToken: "tok-followup",
-  });
+test("follow-up send: threads no session state (no setSession on the send path) and streams via sendMessages, not the peekSettled reconnect", async () => {
+  sendMessageMock.mockResolvedValue({ ok: true });
   render(
     <ChatClient
       conversationId={CONVERSATION_ID}
@@ -361,23 +361,12 @@ test("follow-up send: the action's session token hydrates the transport BEFORE t
   fireEvent.keyDown(box, { key: "Enter" });
 
   await screen.findByText("Any remote roles?"); // optimistic user bubble (useChat.sendMessage adds it)
-  await waitFor(() => expect(setSessionMock).toHaveBeenCalled());
-
-  // The action's scoped token hydrates the session so `sendMessages` attaches with it.
-  expect(setSessionMock).toHaveBeenCalledWith(
-    CONVERSATION_ID,
-    expect.objectContaining({
-      publicAccessToken: "tok-followup",
-      isStreaming: true,
-    }),
-  );
   // Delivered + watched via sendMessages (append + subscribe-with-wait), NOT the peekSettled reconnect.
   await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
   expect(reconnectMock).not.toHaveBeenCalled();
-  // Ordering: hydrate, THEN send (else the transport attaches with no cached session token).
-  expect(setSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
-    sendMessagesMock.mock.invocationCallOrder[0],
-  );
+  // R2/F1/F7: the send path never touches the transport's session cache - the transport owns the `.out`
+  // cursor and refreshes its token via `accessToken`. (Reverting the send-path deletion turns this RED.)
+  expect(setSessionMock).not.toHaveBeenCalled();
 });
 
 test("instant feedback: the answering indicator + Stop show AT ONCE on send, through the run-wake gap before the run streams (006 ruling 1)", async () => {
@@ -445,5 +434,10 @@ test("arrival: a new chat mints its session token and hydrates the transport so 
   await waitFor(() => expect(reconnectMock).toHaveBeenCalled());
   expect(setSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
     reconnectMock.mock.invocationCallOrder[0],
+  );
+  // R2/F4: ?new=1 is stripped after the attach so a later reload cannot re-run it (a cursor-less resume
+  // that replays settled turns as duplicates) - the reload resumes via the persisted session instead.
+  await waitFor(() =>
+    expect(routerReplaceMock).toHaveBeenCalledWith(`/chat/${CONVERSATION_ID}`),
   );
 });
