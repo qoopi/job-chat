@@ -186,15 +186,19 @@ const COMPOSED_CASES: EvalCase[] = [
 // gate; the verdict/currency/scope correctness is proven in the offline unit + integration suites.
 const FOLLOWUP_CASES: EvalCase[] = [
   {
-    // Inheritance: "those" = the companies from the prior turn; the follow-up must carry the company
-    // grouping forward and ADD only the city, resolving SF -> San Francisco.
+    // Inheritance: "those" = the companies from the prior turn. ADVISER_V2's own FOLLOW-UP INHERITANCE
+    // example is verbatim "how many of those are in SF? -> the same company grouping plus city", so the
+    // prompt-MANDATED route is to re-issue top_companies (which already groups by company) with the city
+    // added, resolving SF -> San Francisco. The assertion keeps proving the SF inheritance via params.city
+    // (018 review-fix R1: corrected from the old query_postings(measures,city) expectation, which the
+    // strict scorer never matched to the mandated top_companies route).
     id: "C13",
     question: "How many of those are in SF?",
     context: ["Which companies are hiring the most?"],
     expect: {
       mode: "data",
-      tool: "query_postings",
-      params: { measures: ["count"], city: "San Francisco" },
+      tool: "top_companies",
+      params: { city: "San Francisco" },
     },
   },
   {

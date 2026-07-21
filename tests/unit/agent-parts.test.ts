@@ -5,6 +5,7 @@ import {
   buildComposedInsight,
   buildComposedSkeleton,
   buildInsight,
+  buildModelHistory,
   buildSkeleton,
   chartTypeFor,
   chartTypeForShape,
@@ -23,6 +24,47 @@ import {
 function result(rows: Record<string, unknown>[], sampleN: number): QueryResult {
   return { sql: "SELECT 1", rows, meta: { sampleN, freshestAt: "2026-07-18 06:00:00" } };
 }
+
+// 018 review-fix (BOUNDED confirm): an error/refusal turn persists EMPTY content, and buildModelHistory
+// drops empty rows - so an error turn immediately followed by a user follow-up used to rebuild as two
+// CONSECUTIVE user messages, which Bedrock's strict role-alternation rejects. This pins that the rebuilt
+// model input stays validly alternating (no two same-role messages adjacent) across that error->followup
+// shape, WITHOUT restructuring persistence (the store still holds the empty error row).
+describe("buildModelHistory keeps valid role alternation across a dropped error turn (018 review-fix)", () => {
+  const alternates = (msgs: { role: string }[]) =>
+    msgs.every((m, i) => i === 0 || m.role !== msgs[i - 1].role);
+
+  it("an error turn (empty content) between two user turns does NOT leave consecutive user messages", () => {
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "Who is hiring the most?" },
+      { role: "assistant", content: "" }, // the errored turn - persisted empty, dropped by the filter
+      { role: "user", content: "How many of those are in SF?" },
+    ]);
+    // Both user questions survive (nothing lost), and the sequence alternates for Bedrock.
+    expect(rebuilt.map((m) => m.role)).toEqual(["user"]); // the two users coalesce into one alternation-safe turn
+    expect(alternates(rebuilt)).toBe(true);
+    expect(rebuilt[0].content).toContain("Who is hiring the most?");
+    expect(rebuilt[0].content).toContain("How many of those are in SF?");
+  });
+
+  it("a normal alternating history is unchanged (no spurious coalescing)", () => {
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "q2" },
+      { role: "assistant", content: "a2" },
+      { role: "user", content: "q3" },
+    ]);
+    expect(rebuilt).toEqual([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "q2" },
+      { role: "assistant", content: "a2" },
+      { role: "user", content: "q3" },
+    ]);
+    expect(alternates(rebuilt)).toBe(true);
+  });
+});
 
 describe("chartTypeFor maps each catalog tool to its designated visual (AC-11)", () => {
   it("pins the visuals from the brief case table", () => {
@@ -807,6 +849,25 @@ describe("Strand 3: signal-quality gates", () => {
     });
     expect(insight.verdict).toContain("Google leads with 3257 of 3488");
     expect(insight.verdict.toLowerCase()).not.toContain("no single");
+  });
+
+  // 018 review-fix (nit, rec 9 spirit for counts): a top-two count tie above the fragmentation floor still
+  // said "<X> leads with N" - a false superlative. rec 9 gives salary_compare an explicit "about the same"
+  // tie; the count-ranked path now has the equivalent. When the top two counts are equal, phrase it as a
+  // tie ("<X> and <Y> are level"), never "leads".
+  it("a top-two count tie is reported as level, never a false 'leads with' superlative (rec 9 for counts)", () => {
+    const insight = buildComposedInsight({
+      id: "tie1",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      // Google and Meta both at 40 of 100 (share 0.4, well above the 0.1 floor - not fragmented, a real tie).
+      result: composed([{ company: "Google", count: 40 }, { company: "Meta", count: 40 }, { company: "Amazon", count: 20 }], 100),
+    });
+    expect(insight.verdict).not.toContain("leads");
+    expect(insight.verdict.toLowerCase()).toContain("level");
+    expect(insight.verdict).toContain("Google");
+    expect(insight.verdict).toContain("Meta");
+    expect(insight.verdict).toContain("40 of 100");
   });
 
   it("salary_compare on an exact tie says 'about the same', never a false 'pays more'", () => {

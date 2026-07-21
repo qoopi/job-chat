@@ -214,6 +214,13 @@ function verdictForComposed(params: ComposedShape, rows: Record<string, unknown>
           const dimName = DIM_LABEL[dimKey!] ?? dimKey!;
           return `No single ${dimName} dominates - the largest, ${labelText(top[dimKey!])}, has ${topCount} of ${sampleN} postings.`;
         }
+        // A top-two tie (both above the floor) is not a leader - say "level", never a false "leads with"
+        // superlative (018 review-fix; extends rec 9's salary tie to count rankings). Rows are count-DESC,
+        // so rows[1] equal to the top means the lead is shared.
+        const runnerUp = rows[1];
+        if (runnerUp !== undefined && num(runnerUp.count) === topCount) {
+          return `${labelText(top[dimKey!])} and ${labelText(runnerUp[dimKey!])} are level, each ${topCount} of ${sampleN} postings.`;
+        }
         return `${labelText(top[dimKey!])} leads with ${topCount} of ${sampleN} postings.`;
       }
       if (counts.every((c) => c >= topCount)) return `${labelText(top[dimKey!])} has the fewest, with ${topCount} of ${sampleN} postings.`;
@@ -639,11 +646,22 @@ export type ModelMessage = { role: MessageRole; content: string };
  * verdict already carries its headline number in prose, so plain text is a faithful, compact record of
  * what the assistant said). Empty-content rows are dropped so a refused/errored turn - persisted with
  * empty content - never emits an invalid empty model message.
+ *
+ * Dropping an empty error/refusal row can leave two SAME-ROLE rows adjacent - e.g. an errored turn
+ * between two user questions rebuilds as user,user - which Bedrock's strict role-alternation rejects
+ * (018 review-fix). So after the empty-drop, consecutive same-role rows are COALESCED into one (their
+ * text joined). This heals only the rebuilt model input; persistence is untouched (the store still holds
+ * the empty error row), so no schema/migration change - and a normally-alternating history is unaffected.
  */
 export function buildModelHistory(messages: { role: MessageRole; content: string }[]): ModelMessage[] {
-  return messages
-    .filter((m) => m.content.trim().length > 0)
-    .map((m) => ({ role: m.role, content: m.content }));
+  const kept = messages.filter((m) => m.content.trim().length > 0);
+  const merged: ModelMessage[] = [];
+  for (const m of kept) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === m.role) prev.content = `${prev.content}\n${m.content}`;
+    else merged.push({ role: m.role, content: m.content });
+  }
+  return merged;
 }
 
 /**

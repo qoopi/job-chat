@@ -13,7 +13,7 @@ import {
   type User,
 } from "@shared/store";
 import { getAgentLimits } from "@shared/env";
-import { createChatRun, type StreamModelArgs } from "../trigger/run";
+import { createChatRun, type StreamModel, type StreamModelArgs } from "../trigger/run";
 import { buildCatalogTools, CATALOG_TOOL_NAMES, type EmitPart } from "../trigger/tools";
 import { persistAssistantTurn } from "../trigger/parts";
 import { ADVISER_V1 } from "../trigger/prompts/adviser-v1";
@@ -217,18 +217,55 @@ export interface Observed {
 }
 
 /**
- * Drive a case through createChatRun with the real model, capturing tool calls, text, and parts. A case
- * with `context` runs those prior user turns first (persisting each answer so the scored follow-up
- * inherits their filters via the rebuilt history, 018 strand 4); only the LAST turn is scored.
+ * The streamed-result shape `runCase` consumes - a SUBSET of streamText's result (consumeStream to drive
+ * tool execution, steps for the tool calls, text for the answer). The live Bedrock seam returns a full
+ * streamText result (a superset); an offline test's fake model returns exactly this shape.
  */
-async function runCase(model: EvalModel, system: string, evalCase: EvalCase): Promise<Observed> {
+export interface EvalStreamResult {
+  consumeStream(): PromiseLike<unknown>;
+  steps: PromiseLike<{ toolCalls: { toolName: string; input?: unknown }[] }[]>;
+  text: PromiseLike<string>;
+}
+
+/** The injectable model seam `runCase` drives: real = Bedrock via streamText; offline test = a fake. */
+export type EvalStreamModel = StreamModel<EvalStreamResult>;
+
+/**
+ * The live Bedrock model seam: streamText bound to the model and the agent's step cap. Built ONCE in
+ * `main` and threaded into `runCase`, so the context-turn replay loop can be driven by a fake model
+ * offline (no Bedrock) - it mirrors trigger/chat.ts minus the Trigger-runtime plumbing.
+ */
+export function bedrockStreamModel(model: EvalModel): EvalStreamModel {
+  const limits = getAgentLimits();
+  return ({ system, messages, tools, signal }: StreamModelArgs) =>
+    streamText({
+      model,
+      system,
+      messages,
+      tools,
+      abortSignal: signal,
+      stopWhen: stepCountIs(limits.maxSteps),
+    });
+}
+
+/**
+ * Drive a case through createChatRun with the injected model seam, capturing tool calls, text, and parts.
+ * A case with `context` runs those prior user turns first (persisting each answer so the scored follow-up
+ * inherits their filters via the rebuilt history, 018 strand 4); only the LAST turn is scored. The model
+ * seam is a DEPENDENCY (not hard-wired to Bedrock) so the replay mechanism is testable offline (018
+ * review-fix R2).
+ */
+export async function runCase(
+  streamModel: EvalStreamModel,
+  system: string,
+  evalCase: EvalCase,
+): Promise<Observed> {
   const store = createMemoryStore();
   const guestId = `eval-${crypto.randomUUID()}`;
   await store.getOrCreateUser(guestId);
   const turns = [...(evalCase.context ?? []), evalCase.question];
   const conv = await store.createConversation(guestId, turns[0]);
   await store.appendMessage(conv.id, "user", turns[0], null); // mirror startConversation (turn 1)
-  const limits = getAgentLimits();
   const cumulative: { role: "user"; content: string }[] = [];
 
   const buildRun = (emit: (part: EmitPart) => void) =>
@@ -240,16 +277,7 @@ async function runCase(model: EvalModel, system: string, evalCase: EvalCase): Pr
       now: () => new Date(),
       system,
       coverageProfile: fakeCoverageProfile, // 018 strand 5: inject the DATA SCOPE note, as production does
-      // The model seam, mirroring trigger/chat.ts minus the Trigger-runtime plumbing.
-      streamModel: ({ system: sys, messages, tools: turnTools, signal }: StreamModelArgs) =>
-        streamText({
-          model,
-          system: sys,
-          messages,
-          tools: turnTools,
-          abortSignal: signal,
-          stopWhen: stepCountIs(limits.maxSteps),
-        }),
+      streamModel,
     });
 
   let observed: Observed = { toolCalls: [], text: "", hasInsight: false };
@@ -536,7 +564,7 @@ async function main(): Promise<void> {
   if (prompt === "v1") {
     console.warn("[eval] WARNING: --prompt v1 is a STALE baseline - report_unanswerable was retired from the catalog; v1's tool/mode numbers are not comparable to v2, and v1 is not to be re-tuned.");
   }
-  const model = buildModel();
+  const streamModel = bedrockStreamModel(buildModel());
 
   console.log(HEAVY);
   console.log(`Job.Chat eval harness  |  prompt=${prompt}  |  model=${MODEL_ID}`);
@@ -545,7 +573,7 @@ async function main(): Promise<void> {
 
   const scored: ScoredCase[] = [];
   for (let i = 0; i < EVAL_SET.length; i++) {
-    const observed = await runCase(model, system, EVAL_SET[i]);
+    const observed = await runCase(streamModel, system, EVAL_SET[i]);
     const s = scoreCase(EVAL_SET[i], observed);
     scored.push(s);
     printCase(i + 1, EVAL_SET[i], s);

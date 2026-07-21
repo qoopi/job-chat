@@ -60,7 +60,10 @@ export function InsightCard({
   // A stable element reference (keyed on the insight identity, not on tab/sqlOpen) so React bails out
   // of re-rendering the Recharts subtree when only the Show-query reveal toggles.
   const chartEl = useMemo(
-    () => (insight.kind === "chart" ? <InsightChart chartType={insight.chartType} series={insight.series} /> : null),
+    () =>
+      insight.kind === "chart" ? (
+        <InsightChart chartType={insight.chartType} series={insight.series} currency={insight.meta.currency} />
+      ) : null,
     [insight],
   );
 

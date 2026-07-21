@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { assertEvalEnabled, scoreCase, type Observed } from "../../evals/run";
-import { CHART_BEARING, EVAL_SET } from "../../evals/eval-set";
+import { assertEvalEnabled, runCase, scoreCase, type EvalStreamModel, type Observed } from "../../evals/run";
+import { CHART_BEARING, EVAL_SET, type EvalCase } from "../../evals/eval-set";
+import type { ModelMessage } from "../../trigger/parts";
 
 // AC-6 offline smoke for the eval harness (dev tooling - deliberately minimal; AC-7 is the real, live
 // gate). Two behaviours, both offline (no Bedrock): the runner REFUSES without JOBCHAT_EVAL=1, and its
@@ -61,6 +62,46 @@ describe("eval harness (offline smoke)", () => {
     expect(CHART_BEARING).toHaveLength(12);
     // Every chart-bearing case is a query_postings case (the only path with a RAW agent pick, AC-4).
     expect(CHART_BEARING.every((c) => c.expect.tool === "query_postings")).toBe(true);
+  });
+});
+
+// 018 review-fix R2: the eval's context-turn replay loop (runCase) had no offline coverage - its model
+// seam was hard-wired to Bedrock. The seam is now injectable, so a FAKE model drives a 2-turn case
+// (context Q1 -> scored Q2) with zero network. The point being proven: a follow-up inherits the prior
+// turn through the STORE (persistAssistantTurn -> buildModelHistory rebuild), not an SDK cross-turn replay.
+describe("runCase context-turn replay (offline, fake model - 018 review-fix R2)", () => {
+  it("replays a context turn's PERSISTED verdict into the next turn's rebuilt model input (store, not SDK)", async () => {
+    const captured: ModelMessage[][] = [];
+    const TURN1_VERDICT = "Google leads with 4 of 8 postings.";
+    // Capture the exact rebuilt `messages` handed to the model each turn; answer turn 1 with the verdict
+    // (runCase persists it). No Bedrock, no tool calls, no JOBCHAT_EVAL flag needed.
+    const fakeModel: EvalStreamModel = ({ messages }) => {
+      const turn = captured.push(messages.map((m) => ({ ...m }))); // push returns the new 1-based length
+      return {
+        consumeStream: async () => {},
+        steps: Promise.resolve([]),
+        text: Promise.resolve(turn === 1 ? TURN1_VERDICT : "Of those, a handful are in San Francisco."),
+      };
+    };
+    const twoTurn: EvalCase = {
+      id: "R2",
+      question: "How many of those are in SF?",
+      context: ["Which companies are hiring the most?"],
+      expect: { mode: "data", tool: "query_postings" },
+    };
+
+    await runCase(fakeModel, "SYSTEM PROMPT", twoTurn);
+
+    expect(captured).toHaveLength(2);
+    // Turn 1 sees only its own user question - nothing prior.
+    expect(captured[0].map((m) => m.role)).toEqual(["user"]);
+    expect(captured[0][0].content).toContain("Which companies");
+    // Turn 2's rebuilt history carries the PERSISTED turn-1 verdict as the assistant slot, in valid
+    // user/assistant/user alternation - so the follow-up inherits through the store, not the SDK replay.
+    const turn2 = captured[1];
+    expect(turn2.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(turn2[1]).toEqual({ role: "assistant", content: TURN1_VERDICT });
+    expect(turn2[2].content).toContain("SF");
   });
 });
 

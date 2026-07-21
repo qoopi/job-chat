@@ -337,7 +337,9 @@ export const ComposedQueryParams = z
     city: z.string().min(1).optional(),
     // A multi-city filter for "openings in LA or NYC" (one number over both). Each value is
     // chStr-escaped into an IN-list; kept alongside single `city` for compat (018 strand 4). Bounded so
-    // the interpolated list stays small.
+    // the interpolated list stays small. SEMANTICS when both are set: `cities` WINS and the single `city`
+    // is ignored (the FOLLOW-UP INHERITANCE rule replaces a filter, never AND-s it into a possibly-empty
+    // intersection - see buildComposedSql, 018 review-fix).
     cities: z.array(z.string().min(1)).min(1).max(20).optional(),
     region: z.string().min(1).optional(),
     country: z.string().min(1).optional(),
@@ -428,8 +430,12 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   }
   if (p.role) filters.push(roleFilter(p.role));
   if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
-  if (p.city) filters.push(`city = ${chStr(p.city)}`);
+  // `cities` (the multi-city IN-list) WINS over a coexisting single `city`: the FOLLOW-UP INHERITANCE rule
+  // REPLACES a filter rather than AND-ing it, so a coexisting pair is a refinement to the list, not an
+  // intersection (which could be empty). Smallest correct semantics: prefer cities, drop the single city
+  // (018 review-fix; documented on ComposedQueryParams.cities).
   if (p.cities) filters.push(`city IN (${p.cities.map((c) => chStr(c)).join(", ")})`);
+  else if (p.city) filters.push(`city = ${chStr(p.city)}`);
   if (p.region) filters.push(`region = ${chStr(p.region)}`);
   if (p.country) filters.push(`country = ${chStr(p.country)}`);
   if (p.experience_level) filters.push(`experience_level = ${chStr(p.experience_level)}`);
@@ -503,8 +509,9 @@ export interface Analytics {
   runComposedQuery(params: unknown): Promise<QueryResult>;
   /**
    * The corpus shape for the DATA SCOPE prompt note (018 strand 5). ONE cheap query, memoized on the
-   * analytics instance - which is a per-process singleton (trigger/chat.ts), so it runs once per run,
-   * never per turn.
+   * analytics instance - which is a per-process singleton (trigger/chat.ts), so it runs once per PROCESS
+   * (isolate lifetime), never per turn. Only a fulfilled result is cached; a transient failure is retried
+   * on the next call (018 review-fix S5).
    */
   coverageProfile(): Promise<CoverageProfile>;
 }
@@ -558,8 +565,14 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     };
   }
 
-  // Memoized on the instance: the first call runs the query, later callers reuse the same promise, so a
-  // long-lived analytics singleton computes the corpus shape ONCE (018 strand 5).
+  // Memoized on the instance: the first call runs the query, later callers reuse the same promise. The
+  // analytics instance is a module-level singleton (trigger/chat.ts), so this cache lives for the PROCESS
+  // (the warm Trigger isolate serves many conversations), NOT a single run - it is computed once per
+  // isolate lifetime, never per turn (018 strand 5). Accepted staleness: after a re-ingest a warm isolate
+  // serves the prior corpus's DATA SCOPE note until it recycles; harmless for the static demo corpus, and
+  // the note is advisory (it only shapes scope-qualification prose, never a query). A REJECTED promise is
+  // NOT cached (see coverageProfile below): one transient ClickHouse error must not poison the memo for the
+  // whole isolate life and silently drop the scope note on every later turn (018 review-fix S5).
   let coverageCache: Promise<CoverageProfile> | undefined;
   async function computeCoverage(): Promise<CoverageProfile> {
     const openSet = openSetFilter(table);
@@ -597,6 +610,12 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
   return {
     runQuery: (name, params) => executeBuilt(buildTemplateSql(name, params, table)),
     runComposedQuery: (params) => executeBuilt(buildComposedSql(params, table)),
-    coverageProfile: () => (coverageCache ??= computeCoverage()),
+    // Cache only a FULFILLED result: on rejection, clear the memo so the next call retries (never a
+    // permanently-poisoned rejected promise, 018 review-fix S5).
+    coverageProfile: () =>
+      (coverageCache ??= computeCoverage().catch((err) => {
+        coverageCache = undefined;
+        throw err;
+      })),
   };
 }

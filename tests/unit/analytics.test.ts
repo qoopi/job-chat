@@ -262,6 +262,24 @@ describe("Should_RejectUnknownParams_When_ComposedQueryBuilt (AC-2)", () => {
     const { sql } = buildComposedSql({ measures: ["count"], city: "trail\\" }, "postings");
     expect(sql).toContain("city = 'trail\\\\'");
   });
+
+  // 018 review-fix (nit, strand 4): `city` and `cities` coexisting used to AND (`city = X AND city IN (...)`),
+  // a possibly-empty intersection. The FOLLOW-UP INHERITANCE rule REPLACES a filter rather than adding, so
+  // when both are present `cities` (the multi-city list) WINS and the single `city` is dropped - never an
+  // empty-intersection surprise. Documented in the schema; pinned here.
+  it("prefers cities over a coexisting single city (no AND-ed empty intersection)", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], city: "Berlin", cities: ["Los Angeles", "New York"] },
+      "postings",
+    );
+    expect(sql).toContain("city IN ('Los Angeles', 'New York')");
+    expect(sql).not.toContain("city = 'Berlin'"); // the single city loses to the list
+  });
+
+  it("still applies a single city when no cities list is present", () => {
+    const { sql } = buildComposedSql({ measures: ["count"], city: "Berlin" }, "postings");
+    expect(sql).toContain("city = 'Berlin'");
+  });
 });
 
 describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
@@ -594,6 +612,46 @@ describe("executeBuilt fires the rows and meta queries concurrently (perf)", () 
     expect(p1.salaryCoverage).toBe(0.65);
     expect(calls).toBe(1); // memoized: the second call reuses the cached promise
     expect(p2).toBe(p1);
+  });
+
+  // 018 review-fix (should-fix S5): a REJECTED coverage query must NOT be cached forever. The `??=` memo
+  // stored the promise eagerly, so one transient ClickHouse error poisoned the cache for the whole isolate
+  // life and silently dropped the DATA SCOPE note on every later turn. The cache must clear on rejection so
+  // the next call retries. Driven through the REAL memo (not an injected profile): first query throws,
+  // second succeeds.
+  it("does NOT cache a rejected coverage query - the next call retries and succeeds", async () => {
+    let calls = 0;
+    const client = {
+      query: () => {
+        calls++;
+        if (calls === 1) return Promise.reject(new Error("clickhouse hiccup"));
+        return Promise.resolve({
+          json: async () => [
+            {
+              total: 3488,
+              distinctCompanies: 7,
+              freshestAt: "2026-07-20 06:00:00",
+              salaryCoverage: 0.65,
+              topCompany: "Google",
+              topCompanyCount: 3257,
+            },
+          ],
+        });
+      },
+    } as unknown as ClickHouseClient;
+
+    const analytics = createAnalytics({ client, table: "postings" });
+    // First call rejects (transient error) - and must not poison the cache.
+    await expect(analytics.coverageProfile()).rejects.toThrow("clickhouse hiccup");
+    // Second call retries the query and resolves with the real shape.
+    const p = await analytics.coverageProfile();
+    expect(p.total).toBe(3488);
+    expect(p.topCompany).toBe("Google");
+    expect(calls).toBe(2); // the rejected promise was cleared, so a real retry happened
+    // A THIRD call is served from the now-fulfilled cache (no extra query).
+    const p3 = await analytics.coverageProfile();
+    expect(p3).toBe(p);
+    expect(calls).toBe(2);
   });
 
   it("rejects with the failing query's error and leaves no unhandled rejection", async () => {
