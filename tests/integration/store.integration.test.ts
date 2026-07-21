@@ -386,6 +386,31 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(owner);
   });
 
+  // Multi-row tail: the NOT EXISTS row-constructor is evaluated per-row (created_at, id) against
+  // getConversation's OWN read order (ORDER BY created_at ASC, id ASC), not a single "latest assistant"
+  // lookup - so it must pop EVERY trailing assistant row, not just the most recent one. Pins that against
+  // real Postgres (the in-memory fake's `while` loop in regenerate-supersede.test.ts never proves this).
+  it("deleteTrailingAssistant pops ALL trailing assistant rows when more than one trails the last user, not just the newest", async () => {
+    const owner = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(owner);
+    const conv = await store.createConversation(owner, "multi-tail regenerate");
+    await store.appendMessage(conv.id, "user", "q1", null);
+    await store.appendMessage(conv.id, "assistant", "a1", { id: "p1", kind: "table" });
+    await store.appendMessage(conv.id, "user", "q2 - the turn being retried twice", null);
+    // Two consecutive assistant rows trailing q2 (e.g. a synthesized error card, then a second
+    // malformed/partial row from a prior bug) - both must go, leaving only q1/a1/q2.
+    await store.appendMessage(conv.id, "assistant", "", { kind: "system" });
+    await store.appendMessage(conv.id, "assistant", "", { kind: "system" });
+
+    await store.deleteTrailingAssistant(conv.id);
+
+    const loaded = await store.getConversation(conv.id);
+    expect(loaded!.messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(loaded!.messages.map((m) => m.content)).toEqual(["q1", "a1", "q2 - the turn being retried twice"]);
+
+    await purge(owner);
+  });
+
   // No-op contracts: nothing trails the last user (a normal submit state), and a malformed id.
   it("deleteTrailingAssistant is a no-op when the tail is already a user turn, or the id is malformed", async () => {
     const owner = `test-guest-${crypto.randomUUID()}`;
