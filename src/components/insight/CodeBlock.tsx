@@ -6,6 +6,9 @@ import { Fragment, useState, type ReactNode } from "react";
 // #2 s1 - light grey + dark tokens on light, dark grey + light tokens on dark) with a Copy action
 // ("Copied" for 1.5s). Read-only. Syntax tint (kw/fn/str/num) via a small tokenizer - React nodes only,
 // no dangerouslySetInnerHTML.
+// Pure keywords only: function names (count, round, max, now, toString, ...) are classified by the
+// `.fn` paren-check below (which runs first), so a bare identifier like a `count` column reads as an
+// identifier, not a keyword (the refresh #2 s1 fix). Keeping those function-words here would be dead.
 const KEYWORDS = new Set([
   "SELECT",
   "FROM",
@@ -30,16 +33,7 @@ const KEYWORDS = new Set([
   "JOIN",
   "DESC",
   "ASC",
-  "COUNT",
   "FINAL",
-  "NOW",
-  "TOSTRING",
-  "TODATE",
-  "ROUND",
-  "FLOOR",
-  "MAX",
-  "MIN",
-  "SELECT",
 ]);
 
 function highlight(sql: string): ReactNode[] {
