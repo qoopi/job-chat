@@ -18,6 +18,20 @@ export function truncateLabel(label: string, max = 26): string {
 }
 
 /**
+ * AC-18: a single-scalar answer - a one-row, one-cell table whose only content is the number the
+ * verdict already states (a no-dimension single-measure query: `{ count: N }`, `{ median_salary: N }`).
+ * Rendered as the verdict sentence alone: a one-cell table card is degenerate. Charts and multi-cell
+ * tables are never scalars.
+ */
+export function isSingleScalar(insight: DataInsight): boolean {
+  return (
+    insight.kind === "table" &&
+    insight.rows.length === 1 &&
+    Object.keys(insight.rows[0]).length === 1
+  );
+}
+
+/**
  * When a bars insight renders as a capped top-N vertical chart, the number of bars shown (BARS_CAP);
  * null otherwise (grouped/multi-measure bars, a non-bars chart, or a series at/under BARS_CAP). Lets the
  * source line disclose "showing top N" in agreement with the chart, never letting the visible slice pose

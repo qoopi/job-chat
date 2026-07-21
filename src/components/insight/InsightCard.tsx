@@ -5,6 +5,7 @@ import type { DataInsight } from "@shared/insight";
 import {
   barsChartCapsAt,
   freshnessLabel,
+  isSingleScalar,
   splitFirstNumber,
 } from "@/lib/insight-format";
 import { LCP_TABLE_PREVIEW_ROWS, tablePlacement } from "@/lib/table-placement";
@@ -48,6 +49,9 @@ export function InsightCard({
   pending?: boolean;
 }) {
   const isChart = insight.kind === "chart";
+  // AC-18: a single-scalar answer renders as the verdict sentence alone - no one-cell table body, no
+  // Chart|Table tabs. Chips and Show query stay (handled in the foot / body below).
+  const scalar = isSingleScalar(insight);
   const [tab, setTab] = useState<Tab>(isChart ? "chart" : "table");
   const [sqlOpen, setSqlOpen] = useState(false);
 
@@ -104,40 +108,44 @@ export function InsightCard({
     <div className="insight">
       <div className="insight-head">
         <Verdict text={insight.verdict} />
-        <div className="tabs" role="tablist" aria-label="Result view">
-          <button
-            id={chartTabId}
-            role="tab"
-            aria-selected={tab === "chart"}
-            aria-controls={panelId}
-            className={tab === "chart" ? "tab active" : "tab"}
-            type="button"
-            disabled={!isChart}
-            onClick={() => setTab("chart")}
-          >
-            Chart
-          </button>
-          <button
-            id={tableTabId}
-            role="tab"
-            aria-selected={tab === "table"}
-            aria-controls={panelId}
-            className={tab === "table" ? "tab active" : "tab"}
-            type="button"
-            onClick={() => setTab("table")}
-          >
-            Table
-          </button>
-        </div>
+        {scalar ? null : (
+          <div className="tabs" role="tablist" aria-label="Result view">
+            <button
+              id={chartTabId}
+              role="tab"
+              aria-selected={tab === "chart"}
+              aria-controls={panelId}
+              className={tab === "chart" ? "tab active" : "tab"}
+              type="button"
+              disabled={!isChart}
+              onClick={() => setTab("chart")}
+            >
+              Chart
+            </button>
+            <button
+              id={tableTabId}
+              role="tab"
+              aria-selected={tab === "table"}
+              aria-controls={panelId}
+              className={tab === "table" ? "tab active" : "tab"}
+              type="button"
+              onClick={() => setTab("table")}
+            >
+              Table
+            </button>
+          </div>
+        )}
       </div>
 
       <div
         className="insight-body"
         id={panelId}
-        role="tabpanel"
-        aria-labelledby={tab === "chart" ? chartTabId : tableTabId}
+        role={scalar ? undefined : "tabpanel"}
+        aria-labelledby={scalar ? undefined : tab === "chart" ? chartTabId : tableTabId}
       >
-        {isChart && tab === "chart" ? (
+        {/* A single scalar is fully stated by the verdict - render no table/chart body, only the optional
+            Show-query reveal. */}
+        {scalar ? null : isChart && tab === "chart" ? (
           chartEl
         ) : previewTable ? (
           <div className="table-preview">
