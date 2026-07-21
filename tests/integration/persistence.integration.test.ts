@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres, { type Sql } from "postgres";
 import { createStore, type Store } from "@shared/store";
-import { buildInsight, extractAssistantPersistence, persistAssistantTurn } from "../../trigger/parts";
+import { buildInsight } from "../../trigger/parts";
+import { extractAssistantPersistence, persistAssistantTurn } from "../../trigger/persistence";
 
 // AC-13: when a turn completes the agent persists the assistant message + full card payload, so a
 // returning guest's conversation restores from the store without re-running queries. Integration

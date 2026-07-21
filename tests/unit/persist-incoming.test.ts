@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Store, Message } from "@shared/store";
-import { persistIncomingUserTurns } from "../../trigger/parts";
+import { persistIncomingUserTurns } from "../../trigger/persistence";
 import { MAX_INPUT_CHARS } from "../../trigger/guard";
 
 // The single persist site for a follow-up user turn (mechanism a, 004 round 3). Because a follow-up is

@@ -66,11 +66,18 @@ export interface Store {
     userId: string,
     firstQuestion: string,
   ): Promise<Conversation>;
+  /**
+   * Append a message. `id` is optional: when supplied the insert is idempotent - re-persisting the
+   * SAME id (a replayed or re-executed completion reaching persistence twice) inserts exactly once
+   * (`ON CONFLICT (id) DO NOTHING`, first write wins). Omit it to let Postgres mint a fresh uuid (the
+   * row can then never conflict).
+   */
   appendMessage(
     conversationId: string,
     role: MessageRole,
     content: string,
     parts: Json | null,
+    id?: string,
   ): Promise<Message>;
   getConversation(
     conversationId: string,
@@ -153,13 +160,23 @@ export function createStore(sql: Sql): Store {
       return rows[0];
     },
 
-    async appendMessage(conversationId, role, content, parts) {
-      const rows = await sql<Message[]>`
-        INSERT INTO messages (conversation_id, role, content, parts)
-        VALUES (${conversationId}, ${role}, ${content}, ${
-          parts === null ? null : sql.json(parts as never)
-        })
-        RETURNING id, conversation_id, role, content, parts, created_at`;
+    async appendMessage(conversationId, role, content, parts, id) {
+      const partsValue = parts === null ? null : sql.json(parts as never);
+      // A caller-supplied id makes the write idempotent: ON CONFLICT (id) DO NOTHING inserts once for a
+      // replayed/re-executed completion. RETURNING then yields nothing on a conflict (the silent no-op);
+      // the only id-supplying caller (assistant-turn persist) ignores the return. With no id the DB mints
+      // a fresh uuid, so the row can never conflict and RETURNING always yields it.
+      const rows =
+        id === undefined
+          ? await sql<Message[]>`
+              INSERT INTO messages (conversation_id, role, content, parts)
+              VALUES (${conversationId}, ${role}, ${content}, ${partsValue})
+              RETURNING id, conversation_id, role, content, parts, created_at`
+          : await sql<Message[]>`
+              INSERT INTO messages (id, conversation_id, role, content, parts)
+              VALUES (${id}, ${conversationId}, ${role}, ${content}, ${partsValue})
+              ON CONFLICT (id) DO NOTHING
+              RETURNING id, conversation_id, role, content, parts, created_at`;
       return rows[0];
     },
 
