@@ -29,6 +29,7 @@ const AssistantMessage = memo(function AssistantMessage({
   onOpenLcp,
   onSignIn,
   pending,
+  retryable,
 }: {
   message: UIMessage;
   usedFollowups: Set<string>;
@@ -40,6 +41,10 @@ const AssistantMessage = memo(function AssistantMessage({
    *  `pending` only flips at turn boundaries (not per stream chunk), so settled cards still bail on the
    *  per-chunk re-map; the chart subtree stays memoized on the insight ref, so the flip is cheap. */
   pending: boolean;
+  /** This turn's error card may offer Retry: it is the TAIL error card (regenerate re-answers the tail).
+   *  Computed as `isTail && hasErrorCard`, so it stays `false` for every non-error turn - a settled
+   *  insight card never re-renders just because a later turn appended after it (the memo still bails). */
+  retryable: boolean;
 }) {
   const text = messageText(message);
   const cards = dataParts(message);
@@ -90,7 +95,7 @@ const AssistantMessage = memo(function AssistantMessage({
         if (cls.kind === "error") {
           return (
             <div key={id} className="msg ai">
-              <ErrorCard kind={cls.errorKind} onRetry={onRetry} />
+              <ErrorCard kind={cls.errorKind} onRetry={retryable ? onRetry : undefined} />
             </div>
           );
         }
@@ -116,6 +121,12 @@ const UserBubble = memo(function UserBubble({ message }: { message: UIMessage })
   return <Bubble role="user">{messageText(message)}</Bubble>;
 });
 
+/** Whether a message renders an error card (a `data-error` part). Used to gate the tail-only Retry and
+ *  to suppress the live error card when a streamed part already covers it. */
+function hasErrorCard(message: UIMessage): boolean {
+  return dataParts(message).some(({ data }) => classifyCardData(data).kind === "error");
+}
+
 export function MessageList({
   messages,
   pending,
@@ -124,6 +135,7 @@ export function MessageList({
   onRetry,
   onOpenLcp,
   onSignIn,
+  liveError = false,
 }: {
   messages: UIMessage[];
   /** A turn is in flight and has yet to produce content - streaming OR the pre-stream run-wake gap. */
@@ -135,6 +147,10 @@ export function MessageList({
   onOpenLcp: (messageId: string, partId: string) => void;
   /** AC-13: open the auth dialog from a guest cap notice. Absent (signed-in) hides the affordance. */
   onSignIn?: () => void;
+  /** AC-7 (live): useChat is in its error state - a turn errored at the SDK level, which streams NO
+   *  data-error part. Render the error card + Retry from this signal too, unless a data-error part
+   *  already covers the tail (do not double-render). */
+  liveError?: boolean;
 }) {
   const last = messages[messages.length - 1];
   // AC-8 (006 ruling): the answering indicator stands in for the pending answer while the turn is in
@@ -145,6 +161,10 @@ export function MessageList({
   // indicator drops.
   const lastEmptyAssistant = last?.role === "assistant" && !messageText(last) && dataParts(last).length === 0;
   const showTrailingIndicator = pending && (!last || last.role === "user" || lastEmptyAssistant);
+  // AC-7 (live): show the error card from useChat's error state, but only when a data-error part did NOT
+  // already stream for the tail (tool failures stream the part - do not double-render). This card is the
+  // tail by construction, so it always offers Retry.
+  const showLiveError = liveError && !(last?.role === "assistant" && hasErrorCard(last));
 
   return (
     <div className="thread">
@@ -161,9 +181,18 @@ export function MessageList({
             onOpenLcp={onOpenLcp}
             onSignIn={onSignIn}
             pending={pending}
+            // Retry only on the TAIL error card - regenerate re-answers the tail. `retryable` is false for
+            // every non-error turn, so it never defeats the settled-card memo (it does not change when a
+            // later turn appends after a settled insight card).
+            retryable={m.id === last?.id && hasErrorCard(m)}
           />
         ),
       )}
+      {showLiveError ? (
+        <div className="msg ai">
+          <ErrorCard kind="system" onRetry={onRetry} />
+        </div>
+      ) : null}
       {showTrailingIndicator ? <AnsweringIndicator /> : null}
     </div>
   );
