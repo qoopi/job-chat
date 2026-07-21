@@ -98,13 +98,14 @@ export function createChatRun<R>(deps: ChatRunDeps<R>) {
     }
 
     // Append the DATA SCOPE note so the agent qualifies whole-market questions honestly. A profile
-    // failure must never block the turn - fall back to the base prompt.
+    // failure must never block the turn - `system` still holds the base prompt (set above), so on any
+    // error we simply skip the note.
     let system = deps.system;
     if (deps.coverageProfile) {
       try {
         system = `${deps.system}\n\n${dataScopeNote(await deps.coverageProfile())}`;
       } catch {
-        system = deps.system;
+        // keep the base prompt
       }
     }
 
