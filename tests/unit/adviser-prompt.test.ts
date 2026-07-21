@@ -143,6 +143,15 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toContain("cities");
   });
 
+  // 018 strand 5: a data-scope honesty rule - qualify whole-market questions to the sample, never present
+  // the sample as the entire market (the concrete numbers arrive at runtime via the DATA SCOPE note).
+  it("encodes the data-scope honesty rule (qualify whole-market questions to the sample)", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toContain("data scope");
+    expect(p).toMatch(/whole job market|entire market|whole market/);
+    expect(p).toMatch(/qualify/);
+  });
+
   // 2026-07-21 vision refinement (answer-anything-then-steer): the agent answers ANY question, then
   // politely steers back to jobs. These pins hold the taxonomy + guardrails the prompt now encodes.
   it("encodes the answer-anything-then-steer vision", () => {

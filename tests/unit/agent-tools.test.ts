@@ -26,6 +26,7 @@ describe("buildCatalogTools", () => {
         meta: { sampleN: 10, freshestAt: "2026-07-18 06:00:00" },
       })),
       runComposedQuery: vi.fn(),
+      coverageProfile: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.top_companies.execute!({}, opts);
@@ -47,6 +48,7 @@ describe("buildCatalogTools", () => {
         meta: { sampleN: 0, freshestAt: "1970-01-01 00:00:00" },
       })),
       runComposedQuery: vi.fn(),
+      coverageProfile: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.salary_distribution.execute!({ city: "SF" }, opts);
@@ -67,6 +69,7 @@ describe("buildCatalogTools", () => {
         throw new Error("ClickHouse unreachable");
       }),
       runComposedQuery: vi.fn(),
+      coverageProfile: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.salary_distribution.execute!({ city: "SF" }, opts);
@@ -82,7 +85,8 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
   function composedAnalytics(rows: Record<string, unknown>[], openSet = true): Analytics {
     return {
       runQuery: vi.fn(),
-      runComposedQuery: vi.fn(async () => ({
+      coverageProfile: vi.fn(),
+      runComposedQuery: vi.fn(async () =>({
         sql: "SELECT company, count() AS count FROM postings FINAL WHERE country = 'United States'",
         rows,
         meta: { sampleN: rows.reduce((s, r) => s + Number(r.count ?? 1), 0), freshestAt: "2026-07-18 06:00:00", ...(openSet ? { openSet: true } : {}) },
@@ -161,7 +165,8 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
     const emitted: EmitPart[] = [];
     const analytics: Analytics = {
       runQuery: vi.fn(),
-      runComposedQuery: vi.fn(async () => {
+      coverageProfile: vi.fn(),
+      runComposedQuery: vi.fn(async () =>{
         throw new Error("ClickHouse unreachable");
       }),
     };

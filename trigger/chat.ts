@@ -76,6 +76,9 @@ const chatRun = createChatRun({
   emit,
   now: () => new Date(),
   system: ADVISER_V2,
+  // The corpus shape for the DATA SCOPE prompt note (018 strand 5), memoized on the analytics singleton
+  // so it costs one ClickHouse query per process, not per turn.
+  coverageProfile: () => analytics().coverageProfile(),
   streamModel,
 });
 

@@ -144,6 +144,18 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
     expect(res.rows).toEqual([]); // no fixture city is garbage, so a real filter matches nothing
   });
 
+  // 018 strand 5: coverageProfile runs against real ClickHouse over the seeded fixture (10 rows, one
+// snapshot). Google leads (4 of 10); 8 of 10 carry a salary range; 4 distinct companies.
+  it("coverageProfile returns the corpus shape from the seeded fixture (AC / 018 strand 5)", async () => {
+    const profile = await analytics.coverageProfile();
+    expect(profile.total).toBe(10);
+    expect(profile.distinctCompanies).toBe(4);
+    expect(profile.topCompany).toBe("Google");
+    expect(profile.topCompanyShare).toBeCloseTo(0.4, 5);
+    expect(profile.salaryCoverage).toBeCloseTo(0.8, 5);
+    expect(profile.freshestAt).toBe(FIXTURE_INGESTED_AT);
+  });
+
   for (const q of LAUNCH_QUESTIONS) {
     it(`${q.id}: runs ${q.tool}, returns the executed SQL, and matches the fixture (AC-6, AC-11)`, async () => {
       executed.length = 0;

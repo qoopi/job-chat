@@ -29,6 +29,9 @@ export interface EvalExpect {
   chartType?: ChartType | "table";
   /** Apply the AC-5 plain-tone conformance check to the answer text (<= 2 sentences, no "!", no filler). */
   formatRules?: boolean;
+  /** Market-wide scope case (018 strand 5): the answer should QUALIFY the scope to the sample (name the
+   *  sample / its dominant employer) rather than present it as the whole market. Informational, never gates. */
+  scopeQualified?: boolean;
 }
 
 export interface EvalCase {
@@ -257,6 +260,17 @@ const OFF_DOMAIN_CASES: EvalCase[] = [
   expect: { mode: "plain", formatRules: true },
 }));
 
+// 018 strand 5 (+1): a market-wide question the sample cannot honestly answer as "the whole market" -
+// the agent stays in plain mode and QUALIFIES the scope to its sample (mostly Google). The scope
+// qualification is checked informationally (the DATA SCOPE note is injected into the eval's system prompt).
+const SCOPE_CASES: EvalCase[] = [
+  {
+    id: "M1",
+    question: "Is your data representative of the entire job market?",
+    expect: { mode: "plain", formatRules: true, scopeQualified: true },
+  },
+];
+
 export const EVAL_SET: EvalCase[] = [
   ...LAUNCH_CASES,
   ...COMPOSED_CASES,
@@ -264,6 +278,7 @@ export const EVAL_SET: EvalCase[] = [
   ...P2_CASES,
   ...CONVERSATIONAL_CASES,
   ...OFF_DOMAIN_CASES,
+  ...SCOPE_CASES,
 ];
 
 /** The AC-4 chart-bearing sample: every case carrying a RAW chartType expectation (pinned at 12). */

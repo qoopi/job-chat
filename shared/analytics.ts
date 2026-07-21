@@ -483,11 +483,30 @@ export interface QueryResult {
   meta: { sampleN: number; freshestAt: string; openSet?: boolean; currency?: string };
 }
 
+/**
+ * The corpus shape (018 strand 5): what the product is actually answering from, so the agent can be
+ * honest about scope. Computed over the current open set (one snapshot). Shares (0..1) are fractions.
+ */
+export interface CoverageProfile {
+  total: number; // open postings
+  distinctCompanies: number;
+  topCompany: string;
+  topCompanyShare: number; // topCompany's share of `total` (0..1)
+  freshestAt: string; // max(ingested_at), CH text form
+  salaryCoverage: number; // fraction of postings carrying a salary range (0..1)
+}
+
 export interface Analytics {
   runQuery(name: TemplateName, params: unknown): Promise<QueryResult>;
   // The execution seam for query_postings (009's tool calls this). Tools receive Analytics, never a raw
   // client, so the composed path must live on the interface too.
   runComposedQuery(params: unknown): Promise<QueryResult>;
+  /**
+   * The corpus shape for the DATA SCOPE prompt note (018 strand 5). ONE cheap query, memoized on the
+   * analytics instance - which is a per-process singleton (trigger/chat.ts), so it runs once per run,
+   * never per turn.
+   */
+  coverageProfile(): Promise<CoverageProfile>;
 }
 
 /**
@@ -539,8 +558,45 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     };
   }
 
+  // Memoized on the instance: the first call runs the query, later callers reuse the same promise, so a
+  // long-lived analytics singleton computes the corpus shape ONCE (018 strand 5).
+  let coverageCache: Promise<CoverageProfile> | undefined;
+  async function computeCoverage(): Promise<CoverageProfile> {
+    const openSet = openSetFilter(table);
+    const sql = assemble([
+      "SELECT",
+      "  count() AS total,",
+      "  uniqExact(company) AS distinctCompanies,",
+      "  max(ingested_at) AS freshestAt,",
+      "  round(countIf(salary_min IS NOT NULL AND salary_max IS NOT NULL) / count(), 4) AS salaryCoverage,",
+      `  (SELECT company FROM ${table} FINAL WHERE ${openSet} GROUP BY company ORDER BY count() DESC, company ASC LIMIT 1) AS topCompany,`,
+      `  (SELECT count() FROM ${table} FINAL WHERE ${openSet} GROUP BY company ORDER BY count() DESC, company ASC LIMIT 1) AS topCompanyCount`,
+      `FROM ${table} FINAL`,
+      `WHERE ${openSet}`,
+    ]);
+    const rs = await client.query({ query: sql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS });
+    const [row] = await rs.json<{
+      total: number;
+      distinctCompanies: number;
+      freshestAt: string;
+      salaryCoverage: number;
+      topCompany: string | null;
+      topCompanyCount: number;
+    }>();
+    const total = Number(row.total);
+    return {
+      total,
+      distinctCompanies: Number(row.distinctCompanies),
+      topCompany: String(row.topCompany ?? ""),
+      topCompanyShare: total > 0 ? Number(row.topCompanyCount) / total : 0,
+      freshestAt: String(row.freshestAt),
+      salaryCoverage: Number(row.salaryCoverage),
+    };
+  }
+
   return {
     runQuery: (name, params) => executeBuilt(buildTemplateSql(name, params, table)),
     runComposedQuery: (params) => executeBuilt(buildComposedSql(params, table)),
+    coverageProfile: () => (coverageCache ??= computeCoverage()),
   };
 }

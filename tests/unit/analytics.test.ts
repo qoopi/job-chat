@@ -550,6 +550,40 @@ describe("executeBuilt fires the rows and meta queries concurrently (perf)", () 
     expect(res.meta.currency).toBeUndefined();
   });
 
+  // 018 strand 5: coverageProfile returns the corpus shape from ONE query and memoizes on the instance.
+  it("computes the corpus shape and memoizes (one query per instance)", async () => {
+    let calls = 0;
+    const client = {
+      query: () => {
+        calls++;
+        return Promise.resolve({
+          json: async () => [
+            {
+              total: 3488,
+              distinctCompanies: 7,
+              freshestAt: "2026-07-20 06:00:00",
+              salaryCoverage: 0.65,
+              topCompany: "Google",
+              topCompanyCount: 3257,
+            },
+          ],
+        });
+      },
+    } as unknown as ClickHouseClient;
+
+    const analytics = createAnalytics({ client, table: "postings" });
+    const p1 = await analytics.coverageProfile();
+    const p2 = await analytics.coverageProfile();
+
+    expect(p1.total).toBe(3488);
+    expect(p1.distinctCompanies).toBe(7);
+    expect(p1.topCompany).toBe("Google");
+    expect(p1.topCompanyShare).toBeCloseTo(3257 / 3488, 4);
+    expect(p1.salaryCoverage).toBe(0.65);
+    expect(calls).toBe(1); // memoized: the second call reuses the cached promise
+    expect(p2).toBe(p1);
+  });
+
   it("rejects with the failing query's error and leaves no unhandled rejection", async () => {
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown): void => {

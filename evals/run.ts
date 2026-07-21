@@ -1,7 +1,7 @@
 import { streamText, stepCountIs } from "ai";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
-import type { Analytics, QueryResult } from "@shared/analytics";
+import type { Analytics, CoverageProfile, QueryResult } from "@shared/analytics";
 import { DataInsightSchema } from "@shared/insight";
 import {
   deriveTitle,
@@ -188,7 +188,23 @@ function fakeAnalytics(): Analytics {
   return {
     runQuery: async (name) => result(`-- fake template ${name}`),
     runComposedQuery: async () => result(`-- fake query_postings`),
+    coverageProfile: fakeCoverageProfile,
   };
+}
+
+/**
+ * The corpus shape the eval injects into the system prompt (018 strand 5), matching the live ground
+ * truth so a market-wide question exercises the SAME DATA SCOPE note production ships (mostly Google).
+ */
+function fakeCoverageProfile(): Promise<CoverageProfile> {
+  return Promise.resolve({
+    total: 3488,
+    distinctCompanies: 7,
+    topCompany: "Google",
+    topCompanyShare: 0.93,
+    freshestAt: FIXTURE_INGESTED_AT,
+    salaryCoverage: 0.65,
+  });
 }
 
 // ---- drive one case -----------------------------------------------------------------------------
@@ -223,6 +239,7 @@ async function runCase(model: EvalModel, system: string, evalCase: EvalCase): Pr
       emit,
       now: () => new Date(),
       system,
+      coverageProfile: fakeCoverageProfile, // 018 strand 5: inject the DATA SCOPE note, as production does
       // The model seam, mirroring trigger/chat.ts minus the Trigger-runtime plumbing.
       streamModel: ({ system: sys, messages, tools: turnTools, signal }: StreamModelArgs) =>
         streamText({
@@ -294,6 +311,8 @@ export interface ScoredCase {
   paramsPass?: boolean;
   formatChecked: boolean;
   formatPass?: boolean;
+  scopeChecked: boolean;
+  scopePass?: boolean;
   error?: string;
 }
 
@@ -340,6 +359,14 @@ function formatOk(text: string): boolean {
   return countSentences(text) <= 2 && !text.includes("!") && !startsWithBannedOpener(text);
 }
 
+// 018 strand 5 (informational): a scope-qualified answer names the sample / its dominance rather than
+// presenting the corpus as the whole market. Heuristic over the answer text - never gates a run.
+function scopeQualifiedOk(text: string): boolean {
+  return /\bsample\b|\bmostly\b|\bgoogle\b|\balphabet\b|dominat|one (company|employer)|not.*(representative|whole|entire|full)/i.test(
+    text,
+  );
+}
+
 export function scoreCase(evalCase: EvalCase, observed: Observed): ScoredCase {
   const { expect } = evalCase;
   const observedTools = observed.toolCalls.map((t) => t.name);
@@ -368,6 +395,8 @@ export function scoreCase(evalCase: EvalCase, observed: Observed): ScoredCase {
     paramsPass: paramsChecked ? paramsSubsetMatch(expect.params!, expectedCall!.input) : undefined,
     formatChecked: Boolean(expect.formatRules),
     formatPass: expect.formatRules ? formatOk(observed.text) : undefined,
+    scopeChecked: Boolean(expect.scopeQualified),
+    scopePass: expect.scopeQualified ? scopeQualifiedOk(observed.text) : undefined,
     error: observed.error,
   };
 }
@@ -387,6 +416,8 @@ export interface Aggregate {
   paramsPass: number;
   formatTotal: number;
   formatPass: number;
+  scopeTotal: number;
+  scopePass: number;
   errors: number;
 }
 
@@ -403,6 +434,8 @@ export function aggregate(scored: ScoredCase[]): Aggregate {
     paramsPass: count((s) => s.paramsPass === true),
     formatTotal: count((s) => s.formatChecked),
     formatPass: count((s) => s.formatPass === true),
+    scopeTotal: count((s) => s.scopeChecked),
+    scopePass: count((s) => s.scopePass === true),
     errors: count((s) => s.error !== undefined),
   };
 }
@@ -463,6 +496,7 @@ function printReport(prompt: PromptVersion, scored: ScoredCase[]): void {
   );
   console.log(`  params    : ${agg.paramsPass}/${agg.paramsTotal}  (${pct(agg.paramsPass, agg.paramsTotal)})   (informational; subset match on the expected tool call)`);
   console.log(`  format    : ${agg.formatPass}/${agg.formatTotal}  (${pct(agg.formatPass, agg.formatTotal)})   (informational; AC-5 tone gate is the offline vitest test)`);
+  console.log(`  scope     : ${agg.scopePass}/${agg.scopeTotal}  (${pct(agg.scopePass, agg.scopeTotal)})   (informational; 018 strand 5 market-wide scope qualification)`);
   console.log(`  errors    : ${agg.errors} case(s) hit a runtime/model error`);
 
   const failures = scored.filter((s) => !s.toolModePass || (s.chartBearing && s.chartPass === false));
