@@ -218,4 +218,36 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
     expect(element.props.conversations).toHaveLength(1); // history still seeded for the signed-in account
     expect(element.props.signedIn).toBe(true);
   });
+
+  // refresh #2 s10/s7: the landing's "Your profile" navigates to `/chat/new?profile=1`, which must open
+  // the profile on arrival - prove the searchParams wiring itself (ChatClient's own open-on-arrival
+  // behavior is covered separately in lcp.test.tsx).
+  it("Should_ArmProfileOnArrival_When_ProfileParamIsOne", async () => {
+    resolveViewerMock.mockResolvedValue(
+      viewer({
+        signedIn: true,
+        ownerIds: ["account-1"],
+        accountUserId: "account-1",
+      }),
+    );
+    listOwnerConversationsMock.mockResolvedValue([]);
+
+    const element = (await ChatPage({
+      params: Promise.resolve({ id: "new" }),
+      searchParams: Promise.resolve({ profile: "1" }),
+    })) as unknown as { props: { profileOnArrival?: boolean } };
+
+    expect(element.props.profileOnArrival).toBe(true);
+  });
+
+  it("Should_NotArmProfileOnArrival_When_NoProfileParam", async () => {
+    loadConversationMock.mockResolvedValue(null);
+    resolveViewerMock.mockResolvedValue(viewer({ ownerIds: ["guest-1"] }));
+
+    const props = await renderPage();
+
+    expect(
+      (props as unknown as { profileOnArrival?: boolean }).profileOnArrival,
+    ).toBe(false);
+  });
 });

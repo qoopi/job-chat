@@ -251,4 +251,64 @@ describe("profile LCP (refresh #2 s7)", () => {
     expect(screen.queryByText("No profile yet")).toBeNull(); // the profile gave way to the table
     expect(document.querySelector(".lcp")).toBeTruthy();
   });
+
+  // Audit (05-testing): the mutual-exclusion pair above only exercised profile-then-table. Ruling 3 (one
+  // panel, one at a time) must hold in the OTHER direction too - opening the profile while a table LCP is
+  // already open must replace it, not stack a second panel.
+  test("opening the profile replaces an open table LCP (reverse direction, one at a time)", () => {
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={threadWithTable(9)}
+        e2e={false}
+        signedIn
+        accountName="Ada"
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open full table (9 rows)" }),
+    );
+    expect(screen.getByRole("region", { name: "Full table" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Account: Ada/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Your profile" }));
+
+    // the table gave way to the profile - only one LCP body at a time
+    expect(screen.queryByRole("region", { name: "Full table" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Your profile" })).toBeTruthy();
+  });
+});
+
+// Audit (05-testing, ruling 4): "the account menu is a transient - Esc/outside-click closes the MENU
+// first when open (menu > LCP; dialog > menu)". Both the LCP's table view and the profile view dock the
+// canvas but the TitleBar (and its account menu) stay mounted throughout, so a user CAN have the menu open
+// above an open LCP. A single Esc must close only the topmost layer (the menu), leaving the LCP for a
+// second Esc - exactly like the dialog-above-LCP case already covered in auth-dialog.test.tsx.
+describe("Esc layer priority: account menu above the LCP (ruling 4)", () => {
+  test("Should_CloseMenuFirst_LeavingLcpOpen_When_BothAreOpen", async () => {
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={threadWithTable(9)}
+        e2e={false}
+        signedIn
+        accountName="Ada"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open full table (9 rows)" }),
+    );
+    expect(document.querySelector(".lcp")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Account: Ada/ }));
+    expect(screen.getByText("Personal account")).toBeTruthy();
+
+    pressEsc();
+    // the menu (topmost) closes on this Esc; the LCP beneath it must stay open
+    expect(screen.queryByText("Personal account")).toBeNull();
+    expect(document.querySelector(".lcp")).toBeTruthy();
+
+    pressEsc(); // with the menu gone, Esc now reaches the LCP
+    expect(document.querySelector(".lcp")).toBeNull();
+  });
 });

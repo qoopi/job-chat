@@ -158,6 +158,73 @@ test("Should_AutoSendQueuedDraft_When_SignInSucceedsAfterCap", async () => {
   ).toBeNull(); // cleared (once)
 });
 
+// Audit (05-testing, ruling 1 mutation check): takeQueuedDraft is a read-ONCE-and-clear. Prove the
+// exactly-once guarantee lives at the sessionStorage layer itself, not just in the component's one-time
+// mount ref - a SECOND ChatClient mount for the same conversation (a StrictMode double-invoke, or a real
+// client remount) after the first already consumed the draft must NOT send it again.
+test("Should_NotDoubleSend_When_TheSameConversationMountsASecondTime", async () => {
+  sessionStorage.setItem(
+    `jobchat_queued_draft:${CONVERSATION_ID}`,
+    "Queued question",
+  );
+  sendMessageMock.mockResolvedValue({ ok: true, publicAccessToken: "tok" });
+  const first = render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+      signedIn
+      accountName="Ada"
+    />,
+  );
+  await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+  first.unmount();
+
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+      signedIn
+      accountName="Ada"
+    />,
+  );
+  // give the second mount's microtask a turn to run, then confirm it did NOT re-send: the storage key
+  // was already cleared by the first mount, so takeQueuedDraft returns null the second time.
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(sendMessageMock).toHaveBeenCalledTimes(1);
+});
+
+// Audit (05-testing, ruling 1): a refused/failed auto-send of the queued draft must not lose the text -
+// it has to land back in the composer exactly like any other failed send (failSend), not vanish.
+test("Should_KeepTextInComposer_When_AutoSentQueuedDraftIsRefused", async () => {
+  sessionStorage.setItem(
+    `jobchat_queued_draft:${CONVERSATION_ID}`,
+    "Queued question",
+  );
+  sendMessageMock.mockResolvedValue({ ok: false, reason: "invalid_input" });
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+      signedIn
+      accountName="Ada"
+    />,
+  );
+  await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+
+  const box = screen.getByRole("textbox", {
+    name: "Ask a follow-up",
+  }) as HTMLTextAreaElement;
+  await waitFor(() => expect(box.value).toBe("Queued question"));
+  // cleared from storage regardless of outcome (read-once) - a retry types/sends again, it never re-fires itself
+  expect(
+    sessionStorage.getItem(`jobchat_queued_draft:${CONVERSATION_ID}`),
+  ).toBeNull();
+});
+
 test("Should_ShowRegisterCardAndKeepComposerEnabled_When_Capped: landing composer", async () => {
   startConversationMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
   render(<LandingComposer e2e={false} />);

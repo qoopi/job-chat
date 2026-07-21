@@ -145,6 +145,35 @@ describe("sidebar foot removed (refresh #2 s5)", () => {
     expect(container.querySelector(".sb-foot")).toBeNull();
     expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
   });
+
+  // AC-D20 is explicit ("neither guest nor signed-in") - the above only covered signed-in.
+  test("no sb-foot in the guest render either", () => {
+    const { container } = render(<Sidebar signedIn={false} />);
+    expect(container.querySelector(".sb-foot")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
+  });
+
+  // Corrected premise (task 019, s6 delta): "the collapsed-rail avatar goes with the foot - it does, per
+  // 'identity only in the TitleBar'". Collapse the sidebar and check the rail for a leftover avatar chip
+  // in both auth states.
+  test("the collapsed rail has no avatar (identity lives only in the TitleBar) - signed-in", () => {
+    const { container } = render(
+      <Sidebar
+        signedIn
+        accountName="Ada"
+        conversations={convs}
+        activeId={convs[0].id}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(container.querySelector(".avatar")).toBeNull();
+  });
+
+  test("the collapsed rail has no avatar - guest", () => {
+    const { container } = render(<Sidebar signedIn={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(container.querySelector(".avatar")).toBeNull();
+  });
 });
 
 // AC-20: the wordmark is a way home.

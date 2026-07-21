@@ -136,6 +136,27 @@ describe("google-only auth dialog (017)", () => {
     expect(screen.queryByRole("button", { name: "Create account" })).toBeNull();
   });
 
+  // Audit (05-testing, AC-D33): the dialog's aria-label proved the TITLE; nothing asserted the sub-line
+  // or the adoption note verbatim - both are load-bearing contract copy.
+  test("Should_ShowGoogleOnlyRefreshCopy_When_DialogOpens (AC-D33 exact copy)", () => {
+    render(
+      <ChatClient
+        conversationId={CONVERSATION_ID}
+        initialMessages={[]}
+        e2e={false}
+      />,
+    );
+    clickSidebarSignIn();
+
+    expect(
+      screen.getByText("Keep this conversation, your history and profile."),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Your guest conversation is saved to the new account."),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
+  });
+
   test("Should_StartClientGoogleRedirect_When_ContinueTapped", () => {
     render(<AuthDialog onClose={vi.fn()} />);
     fireEvent.click(
