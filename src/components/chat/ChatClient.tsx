@@ -527,7 +527,6 @@ export function ChatClient({
     <div className="app" style={{ height: "100vh" }}>
       <Sidebar
         signedIn={signedIn}
-        accountName={accountName}
         conversations={conversations}
         activeId={conversationId}
         activeTitle={titleState}

@@ -137,7 +137,6 @@ describe("sidebar foot removed (refresh #2 s5)", () => {
     const { container } = render(
       <Sidebar
         signedIn
-        accountName="Ada"
         conversations={convs}
         activeId={convs[0].id}
       />,
@@ -160,7 +159,6 @@ describe("sidebar foot removed (refresh #2 s5)", () => {
     const { container } = render(
       <Sidebar
         signedIn
-        accountName="Ada"
         conversations={convs}
         activeId={convs[0].id}
       />,

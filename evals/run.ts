@@ -28,7 +28,6 @@ import {
   type EmitPart,
 } from "../trigger/tools";
 import { persistAssistantTurn } from "../trigger/persistence";
-import { ADVISER_V1 } from "../trigger/prompts/adviser-v1";
 import { ADVISER_V2 } from "../trigger/prompts/adviser-v2";
 import { FIXTURE_INGESTED_AT } from "../tests/fixtures/postings.fixture";
 import {
@@ -51,7 +50,7 @@ import {
 // Postgres) and a fixture-derived Analytics (the tools' only path to data; no real ClickHouse - scoring
 // judges the agent's choices, not the numbers). Cost: ~one agent turn per case, on-demand only; guarded
 // by JOBCHAT_EVAL=1 so it can never run in CI or by accident. NOT a vitest test (evals/ sits outside the
-// vitest globs); run with `JOBCHAT_EVAL=1 bun run eval --prompt v1|v2`.
+// vitest globs); run with `JOBCHAT_EVAL=1 bun run eval`.
 
 // The shipped model - kept in step with trigger/chat.ts (the production seam). Redefined here rather than
 // imported because importing trigger/chat.ts would register the chat.agent() task outside the Trigger
@@ -95,17 +94,6 @@ export function assertEvalEnabled(
       "refusing to run: missing Bedrock env (need AWS_REGION and either AWS_ACCESS_KEY_ID+AWS_SECRET_ACCESS_KEY or AWS_PROFILE).",
     );
   }
-}
-
-export type PromptVersion = "v1" | "v2";
-
-export function parsePrompt(argv: string[]): PromptVersion {
-  const i = argv.indexOf("--prompt");
-  const value = i >= 0 ? argv[i + 1] : "v2";
-  if (value !== "v1" && value !== "v2") {
-    throw new Error(`--prompt must be "v1" or "v2" (got: ${String(value)})`);
-  }
-  return value;
 }
 
 // ---- faked seams (no real Postgres, no real ClickHouse) -----------------------------------------
@@ -671,13 +659,13 @@ function printCase(index: number, evalCase: EvalCase, s: ScoredCase): void {
   console.log(`        act: ${actBits}`);
 }
 
-function printReport(prompt: PromptVersion, scored: ScoredCase[]): void {
+function printReport(scored: ScoredCase[]): void {
   const agg = aggregate(scored);
   const ac7 = agg.toolModePass / agg.total >= GATE;
   const ac4 = agg.chartTotal > 0 && agg.chartPass / agg.chartTotal >= GATE;
 
   console.log(RULE);
-  console.log(`AGGREGATE (prompt ${prompt})`);
+  console.log(`AGGREGATE`);
   console.log(
     `  tool+mode : ${agg.toolModePass}/${agg.total}  (${pct(agg.toolModePass, agg.total)})   AC-7 gate >= 90% : ${ac7 ? "PASS" : "FAIL"}`,
   );
@@ -719,7 +707,7 @@ function printReport(prompt: PromptVersion, scored: ScoredCase[]): void {
   }
   console.log(HEAVY);
   console.log(
-    `RESULT prompt=${prompt}  AC-7(tool+mode)=${ac7 ? "PASS" : "FAIL"} ${agg.toolModePass}/${agg.total}  AC-4(chart)=${ac4 ? "PASS" : "FAIL"} ${agg.chartPass}/${agg.chartTotal}`,
+    `RESULT  AC-7(tool+mode)=${ac7 ? "PASS" : "FAIL"} ${agg.toolModePass}/${agg.total}  AC-4(chart)=${ac4 ? "PASS" : "FAIL"} ${agg.chartPass}/${agg.chartTotal}`,
   );
   console.log(HEAVY);
 }
@@ -727,33 +715,19 @@ function printReport(prompt: PromptVersion, scored: ScoredCase[]): void {
 // ---- main ---------------------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const prompt = parsePrompt(process.argv.slice(2));
   try {
     assertEvalEnabled();
   } catch (err) {
     console.error(`[eval] ${(err as Error).message}`);
-    console.error(
-      `[eval] parsed prompt: ${prompt} - nothing ran, no Bedrock calls made.`,
-    );
+    console.error(`[eval] nothing ran, no Bedrock calls made.`);
     process.exit(1);
   }
 
-  const system = prompt === "v1" ? ADVISER_V1 : ADVISER_V2;
-  // STALE BASELINE guard: v1 is frozen/unshipped and its text still instructs report_unanswerable, which
-  // was RETIRED from the shared catalog (016) - a v1 run scores a prompt whose escape-hatch tool no longer
-  // exists, so its tool/mode numbers are not comparable to v2. Do NOT re-tune v1; read v1 results as a
-  // stale baseline only. (v2 is the shipped prompt; trigger/chat.ts wires it.)
-  if (prompt === "v1") {
-    console.warn(
-      "[eval] WARNING: --prompt v1 is a STALE baseline - report_unanswerable was retired from the catalog; v1's tool/mode numbers are not comparable to v2, and v1 is not to be re-tuned.",
-    );
-  }
+  const system = ADVISER_V2; // the shipped prompt (trigger/chat.ts wires it)
   const streamModel = bedrockStreamModel(buildModel());
 
   console.log(HEAVY);
-  console.log(
-    `Job.Chat eval harness  |  prompt=${prompt}  |  model=${MODEL_ID}`,
-  );
+  console.log(`Job.Chat eval harness  |  model=${MODEL_ID}`);
   console.log(
     `${EVAL_SET.length} cases  |  ${CHART_BEARING.length} chart-bearing (AC-4 sample)`,
   );
@@ -766,7 +740,7 @@ async function main(): Promise<void> {
     scored.push(s);
     printCase(i + 1, EVAL_SET[i], s);
   }
-  printReport(prompt, scored);
+  printReport(scored);
 }
 
 if ((import.meta as { main?: boolean }).main === true) {

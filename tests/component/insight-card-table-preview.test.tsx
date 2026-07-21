@@ -30,15 +30,18 @@ afterEach(cleanup);
 
 describe("InsightCard table preview (AC-8)", () => {
   test("Should_PreviewAndAfford_When_TableExceedsThreshold", () => {
-    const onOpenTable = vi.fn();
-    const { container } = render(<InsightCard insight={tableInsight(9)} onOpenTable={onOpenTable} />);
+    const onOpenLcp = vi.fn();
+    const { container } = render(
+      <InsightCard insight={tableInsight(9)} onOpenLcp={onOpenLcp} messageId="m1" partId="p1" />,
+    );
 
     // Only the first 5 of the 9 rows render in the preview card.
     expect(bodyRows(container)).toBe(5);
 
     const affordance = screen.getByRole("button", { name: "Open full table (9 rows)" });
     fireEvent.click(affordance);
-    expect(onOpenTable).toHaveBeenCalledOnce();
+    // F13: the card opens the LCP by its stable message + part id, not a closure.
+    expect(onOpenLcp).toHaveBeenCalledWith("m1", "p1");
   });
 
   test("Should_RenderFullInline_When_TableAtThreshold", () => {
@@ -60,8 +63,10 @@ describe("InsightCard table preview (AC-8)", () => {
   }
 
   test("Ruling 27: Should_PreviewAndOpenLcp_When_ChartTableTabExceedsThreshold", () => {
-    const onOpenTable = vi.fn();
-    const { container } = render(<InsightCard insight={chartInsight(12)} onOpenTable={onOpenTable} />);
+    const onOpenLcp = vi.fn();
+    const { container } = render(
+      <InsightCard insight={chartInsight(12)} onOpenLcp={onOpenLcp} messageId="m2" partId="p2" />,
+    );
     // Chart tab shows the chart, no table preview.
     expect(screen.getByTestId("chart-subtree")).toBeTruthy();
 
@@ -70,7 +75,7 @@ describe("InsightCard table preview (AC-8)", () => {
     expect(bodyRows(container)).toBe(5);
     const affordance = screen.getByRole("button", { name: "Open full table (12 rows)" });
     fireEvent.click(affordance);
-    expect(onOpenTable).toHaveBeenCalledOnce();
+    expect(onOpenLcp).toHaveBeenCalledWith("m2", "p2");
   });
 
   test("Ruling 27: a chart's Table tab at/under the threshold renders every row inline", () => {

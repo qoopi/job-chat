@@ -123,9 +123,12 @@ describe("series key detection (charts read DataPoint[] by convention)", () => {
     { city: "Los Angeles", median: 139000, n: 359 },
   ];
 
-  it("labelKeyOf picks the first string-valued column", () => {
+  it("labelKeyOf picks the first non-numeric column (null-tolerant; principles 8 one home)", () => {
     expect(labelKeyOf(companies)).toBe("company");
     expect(labelKeyOf(compare)).toBe("city");
+    // A null label in row 0 still resolves to its column (first NON-number) - a "first string" rule
+    // would skip it to a later string column, splitting the chart's label column from the model view.
+    expect(labelKeyOf([{ city: null, label: "SF", count: 5 }])).toBe("city");
   });
 
   it("valueKeyOf prefers the primary measure over a secondary count", () => {

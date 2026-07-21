@@ -74,7 +74,9 @@ const AssistantMessage = memo(function AssistantMessage({
                 insight={cls.insight}
                 usedFollowups={used}
                 onFollowup={(text) => onFollowup(cls.insight.id, text)}
-                onOpenTable={() => onOpenLcp(message.id, id)}
+                onOpenLcp={onOpenLcp}
+                messageId={message.id}
+                partId={id}
                 pending={pending}
               />
             </div>

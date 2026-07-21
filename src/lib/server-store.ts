@@ -7,6 +7,7 @@ import {
   type Store,
 } from "@shared/store";
 import { auth as authServer } from "@/lib/auth";
+import { GUEST_COOKIE } from "@/lib/guest-cookie";
 
 // Server-only Postgres access for the chat page's resume render (AC-13). A lazy singleton pool (no
 // connection until first query, so the build passes with no .env), mirroring the actions layer. Kept
@@ -20,8 +21,6 @@ function store(): Store {
     (globalForSql.__jobchatSql ??= postgres(process.env.DATABASE_URL!)),
   );
 }
-
-const GUEST_COOKIE = "jobchat_guest";
 
 /** The current caller resolved for the resume render - read-only (NO adoption; that binds to the
  *  sign-in transition action). `ownerIds` is who may resume a conversation (guest cookie + the linked

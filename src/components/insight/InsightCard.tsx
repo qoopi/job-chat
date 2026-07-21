@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { DataInsight } from "@shared/insight";
 import {
   barsChartCapsAt,
@@ -36,14 +36,20 @@ export function InsightCard({
   insight,
   usedFollowups = [],
   onFollowup,
-  onOpenTable,
+  onOpenLcp,
+  messageId,
+  partId,
   pending = false,
 }: {
   insight: DataInsight;
   usedFollowups?: string[];
   onFollowup?: (text: string) => void;
-  /** AC-8: open the full table in the LCP. Called from the over-threshold preview affordance. */
-  onOpenTable?: () => void;
+  /** AC-8: open this card's full table in the LCP, keyed by its STABLE message + part id (F13). The
+   *  caller passes the ids, not a fresh closure per render, so the chart-subtree memo stays stable
+   *  without a ref hack. Fired from the over-threshold preview affordance and the capped bars "+ N more". */
+  onOpenLcp?: (messageId: string, partId: string) => void;
+  messageId?: string;
+  partId?: string;
   /** A turn is in flight: follow-up chips are disabled while it streams, consistent with the composer's
    *  streaming-disabled state, so a chip cannot fire a concurrent send that races the live turn. */
   pending?: boolean;
@@ -70,17 +76,12 @@ export function InsightCard({
   const topN = barsChartCapsAt(insight);
   const showTopN = isChart && tab === "chart" && topN !== null;
 
-  // Ref-stabilize `onOpenTable` (ruling s2): MessageList hands a FRESH inline `onOpenTable` on every
-  // render and flips `pending` at each turn boundary, so a settled card re-renders per turn. Depending the
-  // chartEl memo on that ref-unstable prop would recompute (and re-render) the whole Recharts subtree for
-  // every prior card at each turn boundary. Keep the latest callback in a ref (updated in an effect, not
-  // during render) behind a stable wrapper, so the memo depends only on the insight identity while
-  // `openTable` still invokes the current onOpenTable (it only fires from user events, post-commit).
-  const openTableRef = useRef(onOpenTable);
-  useEffect(() => {
-    openTableRef.current = onOpenTable;
-  }, [onOpenTable]);
-  const openTable = useCallback(() => openTableRef.current?.(), []);
+  // F13: the caller passes stable ids, so `openTable` is stable on `[onOpenLcp, messageId, partId]` (all
+  // ref-stable across a turn) - the chartEl memo below can depend on it without recomputing the Recharts
+  // subtree at each turn boundary, and no ref indirection is needed. Fires only from user events.
+  const openTable = useCallback(() => {
+    if (onOpenLcp && messageId !== undefined && partId !== undefined) onOpenLcp(messageId, partId);
+  }, [onOpenLcp, messageId, partId]);
 
   // A stable element reference (keyed on the insight identity, not on tab/sqlOpen/onOpenTable) so React
   // bails out of re-rendering the Recharts subtree when only the Show-query reveal or `pending` toggles.

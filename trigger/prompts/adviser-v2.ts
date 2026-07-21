@@ -1,4 +1,4 @@
-// System prompt v2 for the Job.Chat adviser agent. Extends v1 (adviser-v1.ts, kept in-repo, frozen):
+// System prompt v2 for the Job.Chat adviser agent (the shipped prompt; the frozen v1 baseline was retired):
 // same two answer modes, city aliases, honesty, and empty-result plain mode - PLUS composition guidance
 // for the seventh tool (query_postings), chart-choice rules mirroring chartTypeForShape, and a tightened
 // clarify-path tone. A versioned, designed artifact (brief decision: response-is-the-product) - bump the

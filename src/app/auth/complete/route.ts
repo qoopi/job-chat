@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { completeSignIn } from "@/app/actions";
-
-// The name of the unsigned guest bearer cookie (mirrors actions.ts / server-store.ts - a "use server"
-// module cannot export a non-async const, so it is repeated here as those modules already do).
-const GUEST_COOKIE = "jobchat_guest";
+import { GUEST_COOKIE } from "@/lib/guest-cookie";
 
 // Only ever redirect to a same-origin PATH - an attacker-supplied `next` must never become an open
 // redirect. The redirect target is built with `new URL(next, origin)`, and WHATWG URL parsing normalizes

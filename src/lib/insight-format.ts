@@ -1,8 +1,13 @@
 import type { DataInsight, DataPoint, ErrorKind, RefusalReason } from "@shared/insight";
+import { labelKeyOf } from "@shared/insight";
 
 // The error / refusal taxonomy lives in `@shared/insight` (its one home); re-exported here so the UI copy
 // helpers and their callers keep importing the kinds from the insight-format layer.
 export type { ErrorKind, RefusalReason };
+
+// The label-column decision has one home in `@shared/insight` (principles finding 8) - re-exported so the
+// chart components keep reading it from this layer while trigger/parts.ts reads the same helper.
+export { labelKeyOf };
 
 // Pure presentation helpers for the insight surfaces. Kept free of React/"use client" so the copy
 // contracts (AC-10) and the chart series-reading conventions are unit-testable in isolation.
@@ -108,13 +113,6 @@ export function freshnessLabel(chTs: string): string {
 
 function isNumeric(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
-}
-
-/** The label column: the first key whose value is a string (company, city, day, label...). */
-export function labelKeyOf(rows: DataPoint[]): string {
-  const first = rows[0] ?? {};
-  const key = Object.keys(first).find((k) => typeof first[k] === "string");
-  return key ?? Object.keys(first)[0] ?? "label";
 }
 
 // `n` is a SAMPLE-SIZE context column (salary_compare returns {city, median, n}), never a series to
