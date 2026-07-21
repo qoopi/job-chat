@@ -122,11 +122,19 @@ export function AuthDialog({
       // (landing -> /chat/new; a chat -> that chat); errorCallbackURL returns to THIS page so the ?error
       // handler above can show what failed. Fall back to the current page when a host omits `next`.
       const dest = next ?? window.location.pathname + window.location.search;
-      await authClient.signIn.social({
+      const res = await authClient.signIn.social({
         provider: "google",
         callbackURL: `/auth/complete?next=${encodeURIComponent(dest)}`,
         errorCallbackURL: window.location.pathname,
       });
+      // The better-auth client RESOLVES with { error } on HTTP failures (e.g. a 403 INVALID_ORIGIN) -
+      // it does NOT throw, so without this check nothing surfaces and the button stays dead in
+      // `loading`. On success the full-page redirect is already underway; loading stays true until
+      // the browser navigates away.
+      if (res?.error) {
+        setError("Google sign-in is unavailable right now.");
+        setLoading(false);
+      }
     } catch {
       setError("Google sign-in is unavailable right now.");
       setLoading(false);

@@ -16,7 +16,10 @@ describe("auth config: google-only + reviewer should-fixes", () => {
 
   it("Should_SetTrustedOrigins_When_Configured", () => {
     expect(auth.options.trustedOrigins).toContain("http://localhost:3000");
+    // BOTH prod hosts: Vercel 308s the apex to www, so www is the canonical browser origin - omitting
+    // it 403'd every prod sign-in (INVALID_ORIGIN).
     expect(auth.options.trustedOrigins).toContain("https://jobchat.dev");
+    expect(auth.options.trustedOrigins).toContain("https://www.jobchat.dev");
   });
 
   it("Should_PlaceNextCookiesLast_When_PluginsConfigured", () => {

@@ -48,8 +48,10 @@ export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL,
   database: authPool,
   // Every frontend origin that may start an OAuth flow - guards state/callback CSRF and prevents the
-  // `state_mismatch` class (gold standard s2.4). Localhost in dev, the custom domain in prod.
-  trustedOrigins: ["http://localhost:3000", "https://jobchat.dev"],
+  // `state_mismatch` class (gold standard s2.4). Localhost in dev; in prod BOTH custom-domain hosts:
+  // Vercel 308s the apex to www, so www.jobchat.dev is the canonical browser origin - omitting it
+  // 403'd every prod sign-in (INVALID_ORIGIN). The apex stays trusted alongside it.
+  trustedOrigins: ["http://localhost:3000", "https://jobchat.dev", "https://www.jobchat.dev"],
   // Account linking kept harmless under Google-only: there is no email/password path left to link, but
   // Google stays a TRUSTED provider (it verifies emails) so a returning account resolves cleanly.
   // The CVE-2026-53516 gate defaults are LEFT untouched - allowDifferentEmails omitted (false) and

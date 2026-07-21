@@ -167,6 +167,25 @@ describe("google-only auth dialog (017)", () => {
       provider: "google",
     });
   });
+
+  // Prod defect (2026-07-21): the better-auth client RESOLVES with { error } on HTTP failures (the 403
+  // INVALID_ORIGIN class) - it does not throw, so the old try/catch surfaced nothing and left the button
+  // dead in `loading` forever. The dialog must show the error and re-enable the button.
+  test("Should_ShowErrorAndReenableButton_When_SignInResolvesWithError", async () => {
+    signInSocialMock.mockResolvedValue({ error: { status: 403 } });
+    render(<AuthDialog onClose={vi.fn()} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: /Continue with Google/i }),
+    );
+
+    expect(
+      await screen.findByText("Google sign-in is unavailable right now."),
+    ).toBeTruthy();
+    const button = screen.getByRole("button", {
+      name: /Continue with Google/i,
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false); // loading reset - the user can retry
+  });
 });
 
 // 017 fix round 2 (must-fix 1): the HOST decides the post-sign-in destination it hands /auth/complete.
