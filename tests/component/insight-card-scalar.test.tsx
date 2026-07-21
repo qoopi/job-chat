@@ -21,6 +21,18 @@ const scalarInsight: DataInsight = {
   meta: { sql: "SELECT count() FROM postings", sampleN: 3488, updatedAt: "2026-07-18 19:12:00" },
 };
 
+// Boundary: the single cell holds a formatted MONEY value, not a count - isSingleScalar is a shape
+// check (one row, one cell), so a money scalar must render the same verdict-only way, with the money
+// token still bolded by Verdict/splitFirstNumber.
+const moneyScalarInsight: DataInsight = {
+  id: "s2",
+  kind: "table",
+  verdict: "The average salary is $182k.",
+  rows: [{ avg_salary: 182000 }],
+  followups: [],
+  meta: { sql: "SELECT avg(salary) FROM postings", sampleN: 3488, updatedAt: "2026-07-18 19:12:00" },
+};
+
 afterEach(cleanup);
 
 describe("InsightCard single-scalar (AC-18)", () => {
@@ -47,5 +59,16 @@ describe("InsightCard single-scalar (AC-18)", () => {
     // reassembled <pre> text).
     fireEvent.click(screen.getByRole("button", { name: "Show query" }));
     expect(container.querySelector(".codeblock pre")?.textContent).toBe("SELECT count() FROM postings");
+  });
+
+  test("a money-valued single-scalar (avg_salary, one row one cell) also renders verdict-only, money bolded", () => {
+    const { container } = render(<InsightCard insight={moneyScalarInsight} />);
+
+    expect(container.querySelector(".verdict")?.textContent).toBe("The average salary is $182k.");
+    // The money token is the emphasized number inside the verdict (splitFirstNumber/Verdict), same as any
+    // other scalar - scalar-ness does not depend on the cell being a count.
+    expect(container.querySelector(".verdict b")?.textContent).toBe("$182k");
+    expect(container.querySelector("table")).toBeNull();
+    expect(container.querySelector('[role="tablist"]')).toBeNull();
   });
 });

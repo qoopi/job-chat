@@ -164,6 +164,30 @@ describe("isSingleScalar (AC-18 - a one-cell table is fully stated by the verdic
       }),
     ).toBe(false);
   });
+  it("is false for a one-row, TWO-cell table (e.g. label+count) - the boundary just past scalar", () => {
+    expect(
+      isSingleScalar({
+        id: "s",
+        kind: "table",
+        verdict: "Amazon leads with 214 postings.",
+        rows: [{ company: "Amazon", count: 214 }],
+        followups: [],
+        meta,
+      }),
+    ).toBe(false);
+  });
+  it("is true for a one-row, one-cell table whose cell is a money value (scalar-ness is shape, not value type)", () => {
+    expect(
+      isSingleScalar({
+        id: "s",
+        kind: "table",
+        verdict: "The average salary is $182k.",
+        rows: [{ avg_salary: 182000 }],
+        followups: [],
+        meta,
+      }),
+    ).toBe(true);
+  });
   it("is false for a multi-row table and for any chart", () => {
     expect(
       isSingleScalar({
