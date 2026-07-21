@@ -19,23 +19,12 @@ declare global {
     /** The next turn's chunk script (consumed by `sendMessages`). Set by the e2e spec before a send. */
     __CHAT_SCRIPT__?: ScriptStep[];
     /**
-     * An optional persisted-tail replay for `reconnectToStream` (resume / reconnect). The real Trigger
-     * transport, on a fresh reconnect with no `lastEventId` cursor, replays the session's `.out` log
-     * from the start - which re-emits already-hydrated turns under their original ids. Set this to make
-     * the mock reproduce that replay honestly. Absent -> reconnect no-ops (returns null), the default
-     * every existing e2e path relies on (E2E arrival streams via `sendMessages`, never a reconnect).
+     * An optional persisted-tail replay for `reconnectToStream` (resume of a still-streaming turn).
+     * When a test arms it, the mock replays it as the session's `.out` tail - the honest way to
+     * reproduce the real transport's resume-of-live-turn. Absent (or when the persisted session is
+     * settled) -> reconnect no-ops (returns null), the default every existing e2e path relies on.
      */
     __CHAT_REPLAY__?: ScriptStep[];
-    /**
-     * The PRIOR turn's `.out` chunks the server re-delivers on a follow-up `sendMessages` when the
-     * subscription opens with NO `lastEventId` cursor (the real transport reads `state.lastEventId` as
-     * the `.out` SSE cursor - undefined replays the session log from the start). Armed with this, the
-     * mock prepends these chunks to the current turn's script IFF the session has no cursor, mirroring
-     * the live-stream replay artifact (006). When the session DOES carry a cursor (the client threaded
-     * the prior turn's `lastEventId` into `setSession`), the prior tail is suppressed - only the new
-     * turn streams. Absent -> the current turn's script streams alone, as every existing path expects.
-     */
-    __CHAT_PRIOR_TAIL__?: ScriptStep[];
   }
 }
 
@@ -80,12 +69,11 @@ const DEFAULT_SCRIPT: ScriptStep[] = [
 interface MockSession {
   publicAccessToken: string;
   isStreaming?: boolean;
-  lastEventId?: string;
 }
 
 export class MockChatTransport implements ChatTransport<UIMessage> {
-  // Mirrors the real transport's per-chat session cache: `setSession`/`getSession` read and write it,
-  // and `sendMessages` reads its `lastEventId` as the `.out` subscription cursor (see below).
+  // The per-chat session state the arrival attach writes via `setSession`. `reconnectToStream` reads its
+  // `isStreaming` flag: a settled session no-ops (as the real transport does), a live one may resume.
   private readonly sessions = new Map<string, MockSession>();
 
   private next(): ScriptStep[] {
@@ -95,36 +83,30 @@ export class MockChatTransport implements ChatTransport<UIMessage> {
   sendMessages = async (
     options: { abortSignal?: AbortSignal; chatId?: string },
   ): Promise<ReadableStream<UIMessageChunk>> => {
-    // Model the real transport's `.out` cursor exactly. `TriggerChatTransport.subscribeToSessionStream`
-    // opens the SSE with `lastEventId: state.lastEventId`; when that cursor is undefined the server
-    // replays the session log from the START, re-delivering the PRIOR turn's chunks ahead of this
-    // turn's - the 006 live-stream artifact. A follow-up that threads the prior turn's `lastEventId`
-    // into `setSession` (the fix) carries a cursor, so the prior tail is never re-sent.
-    const cursor = options.chatId ? this.sessions.get(options.chatId)?.lastEventId : undefined;
-    const prior = typeof window !== "undefined" ? window.__CHAT_PRIOR_TAIL__ : undefined;
-    const script = prior && prior.length > 0 && !cursor ? [...prior, ...this.next()] : this.next();
-    return replay(script, options.abortSignal);
+    // The transport owns the `.out` cursor internally now (R1/F1), so a follow-up subscribes from the
+    // right point with no app-level threading: the mock just streams this turn's scripted chunks.
+    return replay(this.next(), options.abortSignal);
   };
 
-  reconnectToStream = async (): Promise<ReadableStream<UIMessageChunk> | null> => {
-    // E2E arrival is driven by a mount-time send (not a resumed stream), so by default there is nothing
-    // to reconnect to. When a test arms `__CHAT_REPLAY__`, replay it as the session's `.out` tail - the
-    // honest way to reproduce the real transport's replay-on-reconnect (which re-delivers hydrated turns).
+  reconnectToStream = async (
+    options: { chatId?: string },
+  ): Promise<ReadableStream<UIMessageChunk> | null> => {
+    // Honor the persisted session: a settled turn (isStreaming: false) must not replay anything on a
+    // reload - reconnect no-ops, exactly as the real transport does.
+    if (options.chatId && this.sessions.get(options.chatId)?.isStreaming === false) return null;
+    // Resume of a still-streaming turn: when a test arms `__CHAT_REPLAY__`, replay it as the `.out` tail
+    // (the real transport's resume-of-live-turn). Absent -> nothing to reconnect to.
     const tail = typeof window !== "undefined" ? window.__CHAT_REPLAY__ : undefined;
     if (!tail || tail.length === 0) return null;
     return replay(tail, undefined);
   };
 
-  // Session state parity with the real transport (the `JobChatTransport` seam ChatClient drives). E2E
-  // arrival streams via `sendMessages`, so these are inert on the pure e2e path; they exist so the
-  // non-e2e component tests exercise the SAME cursor-threading contract the production transport uses.
-  getSession = (chatId: string): MockSession | undefined => this.sessions.get(chatId);
-
+  // The arrival attach hydrates a freshly-minted token + `isStreaming` so `reconnectToStream` resumes
+  // the just-triggered run (inert on the pure e2e path, which streams arrival via `sendMessages`).
   setSession = (chatId: string, session: MockSession): void => {
     this.sessions.set(chatId, {
       publicAccessToken: session.publicAccessToken,
       isStreaming: session.isStreaming,
-      lastEventId: session.lastEventId,
     });
   };
 
