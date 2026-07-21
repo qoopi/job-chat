@@ -22,7 +22,7 @@ import {
   resolveInsightTarget,
   type LcpTarget,
 } from "@/lib/chat-ui";
-import { isAuthDialogOpen } from "@/lib/layers";
+import { isAuthDialogOpen, isMenuOpen } from "@/lib/layers";
 import { queueDraft, takeQueuedDraft } from "@/lib/queued-draft";
 import {
   closeAuthDialog,
@@ -473,15 +473,16 @@ export function ChatClient({
     [targetMessage, lcpTarget],
   );
 
-  // AC-9 close-on-Esc, honoring the layer priority (interaction-spec): the open auth dialog sits above
-  // the LCP and takes Esc first. This handler yields while `isAuthDialogOpen()` is true; independently,
-  // the dialog's own Esc handler calls `stopImmediatePropagation`, so if it happens to run first this
-  // handler never fires at all - order-independent either way. Otherwise Esc closes the LCP. Bound once;
-  // the functional setState reads current.
+  // AC-9 close-on-Esc, honoring the layer priority (interaction-spec + refresh #2 ruling 4): dialog >
+  // menu > LCP. The auth dialog and the account menu both sit ABOVE the LCP and take Esc first, so this
+  // handler yields while either `isAuthDialogOpen()` or `isMenuOpen()` is true (the menu closes on the
+  // same keydown, leaving the LCP for a second Esc). The dialog's own Esc handler also calls
+  // `stopImmediatePropagation`, so if it runs first this handler never fires - order-independent either
+  // way. Otherwise Esc closes the LCP. Bound once; the functional setState reads current.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      if (isAuthDialogOpen()) return; // a layer above the LCP consumes Esc first
+      if (isAuthDialogOpen() || isMenuOpen()) return; // a layer above the LCP consumes Esc first
       // Close whichever LCP view is open (table or profile). They are mutually exclusive, so at most one
       // of these does anything; the other is already closed.
       setProfileOpen(false);

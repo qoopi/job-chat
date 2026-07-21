@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MoonIcon, PersonIcon, SignOutIcon } from "@/components/icons";
-import { isAuthDialogOpen } from "@/lib/layers";
+import { isAuthDialogOpen, setMenuOpen } from "@/lib/layers";
 import { useTheme } from "@/lib/theme";
 
 // refresh #2 s4: the signed-in account affordance, VISIBLE in the title bar (the old bottom-left foot
@@ -31,6 +31,13 @@ export function AccountMenu({
   const firstName = name.split(/\s+/)[0] || "Account";
   const initial = name[0]?.toUpperCase() ?? "A";
   const dark = theme === "Dark";
+
+  // Publish the menu's open state to the layer seam (ruling 4) so the LCP's Esc handler yields while the
+  // menu is up (Esc order: dialog > menu > LCP). Reset on close/unmount so the flag never sticks true.
+  useEffect(() => {
+    setMenuOpen(open);
+    return () => setMenuOpen(false);
+  }, [open]);
 
   // Close on outside click / Esc while open. Below the dialog in layer priority: yield Esc while the
   // auth dialog is up (the dialog's own handler also stops propagation, so this is order-independent).

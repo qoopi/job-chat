@@ -58,7 +58,6 @@ function relativeDate(createdAt: Date): string {
 
 export function Sidebar({
   signedIn = false,
-  accountName,
   conversations = [],
   activeId,
   activeTitle,
@@ -67,6 +66,8 @@ export function Sidebar({
   onDeleteConversation,
 }: {
   signedIn?: boolean;
+  // refresh #2 s5/s6: identity moved to the TitleBar (AccountMenu); the sidebar no longer renders a name
+  // or avatar. Accepted-and-ignored so the shared caller prop shape stays stable.
   accountName?: string;
   conversations?: HistoryItem[];
   activeId?: string;
@@ -112,11 +113,6 @@ export function Sidebar({
         >
           <PlusIcon size={15} />
         </button>
-        <div className="sb-icon" style={{ marginTop: "auto" }}>
-          <div className="avatar" style={{ width: 28, height: 28 }}>
-            {signedIn ? (accountName?.[0]?.toUpperCase() ?? "A") : "?"}
-          </div>
-        </div>
       </aside>
     );
   }
