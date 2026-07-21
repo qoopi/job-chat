@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 // overrides it anyway), so the cache point must ride a STRUCTURED SystemModelMessage passed straight
 // to streamText. This test asserts the structured message actually REACHES streamText - asserting an
 // option was passed to toStreamTextOptions would pass on the silent no-op.
-const streamTextSpy = vi.fn((_opts: unknown) => ({}) as unknown);
+const streamTextSpy = vi.fn<(opts: unknown) => unknown>(() => ({}));
 vi.mock("ai", () => ({
   streamText: (opts: unknown) => streamTextSpy(opts),
   stepCountIs: (n: number) => n,
