@@ -61,3 +61,20 @@ export const DataInsightSchema = z.discriminatedUnion("kind", [
   TableInsightSchema,
 ]);
 export type DataInsight = z.infer<typeof DataInsightSchema>;
+
+// The agent's error / refusal taxonomy - the ONE home for the kinds streamed as `data-error` /
+// `data-refusal` parts, persisted as their markers, and rendered by the UI. Defined here (shared) so the
+// agent (trigger/parts.ts, trigger/guard.ts) and the web (src/lib/insight-format.ts, src/lib/chat-ui.ts)
+// read one definition, with no drifting per-layer copies.
+
+/** A `data-error` card kind: a tool/infra failure (`system`) vs a question the data cannot answer. */
+export type ErrorKind = "system" | "unanswerable";
+
+/** The cap/budget guard refusal reasons: the per-user message cap (`guest_cap`, whichever cap applied -
+ *  the reason name is the UI contract; the cap VALUE differs by kind) and the global daily-budget kill
+ *  switch (`daily_budget`). */
+export type GuardRefusal = "guest_cap" | "daily_budget";
+
+/** A `data-refusal` card reason: the cap/budget guard plus the over-length (`too_long`) input backstop
+ *  refused at the agent-run ingress before persist/model. The UI renders every one as a polite notice. */
+export type RefusalReason = GuardRefusal | "too_long";

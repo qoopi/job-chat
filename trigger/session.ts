@@ -35,7 +35,10 @@ export interface SessionDeps {
   now: () => Date;
 }
 
-export type RefusalReason = "guest_cap" | "daily_budget" | "not_found" | "invalid_input";
+// The action layer's own refusal reason - a DISTINCT taxonomy from the insight-card `RefusalReason`
+// (@shared/insight): a start/send action can also fail validation (`not_found`, `invalid_input`), not
+// just the cap/budget guard. Named apart so the card taxonomy keeps its single shared home.
+export type ActionRefusalReason = "guest_cap" | "daily_budget" | "not_found" | "invalid_input";
 
 export type SessionOk = {
   ok: true;
@@ -44,7 +47,7 @@ export type SessionOk = {
   publicAccessToken: string;
   runId: string;
 };
-export type SessionResult = SessionOk | { ok: false; reason: RefusalReason };
+export type SessionResult = SessionOk | { ok: false; reason: ActionRefusalReason };
 
 /**
  * A follow-up send's outcome. On success it carries ONLY the session-scoped token the client transport
@@ -53,7 +56,7 @@ export type SessionResult = SessionOk | { ok: false; reason: RefusalReason };
  * wait - the only SDK 4.5.4 path that streams a freshly-triggered follow-up live (see `sendMessage`).
  */
 export type SendOk = { ok: true; publicAccessToken: string };
-export type SendResult = SendOk | { ok: false; reason: RefusalReason };
+export type SendResult = SendOk | { ok: false; reason: ActionRefusalReason };
 
 export type MintResult = { ok: true; token: string } | { ok: false; reason: "not_found" };
 

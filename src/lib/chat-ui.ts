@@ -1,6 +1,11 @@
 import type { UIMessage } from "ai";
-import { DataInsightSchema, type ChartType, type DataInsight } from "@shared/insight";
-import type { ErrorKind, RefusalReason } from "@/lib/insight-format";
+import {
+  DataInsightSchema,
+  type ChartType,
+  type DataInsight,
+  type ErrorKind,
+  type RefusalReason,
+} from "@shared/insight";
 
 // The client-side reading of a chat turn. `useChat` (via the Trigger transport) exposes messages as
 // `UIMessage[]` whose `parts` mix text with `data-*` parts; the store persists the same card payloads

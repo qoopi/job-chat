@@ -192,12 +192,13 @@ export function ChatClient({
   // that queued send. Shared by the follow-up and the fresh-chat send paths (DRY).
   const showRefusal = useCallback(
     (reason: "guest_cap" | "daily_budget", text: string) => {
+      const id = crypto.randomUUID();
       setMessages((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id,
           role: "assistant",
-          parts: [{ type: "data-refusal", data: { reason } }],
+          parts: [{ type: "data-refusal", id: `${id}-refusal`, data: { reason } }],
         } as UIMessage,
       ]);
       setDraft(text); // the blocked draft stays in the composer (the queued message; survives cancel)

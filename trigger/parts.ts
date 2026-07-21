@@ -1,7 +1,13 @@
-import { DataInsightSchema, type ChartType, type DataInsight, type DataPoint } from "@shared/insight";
+import {
+  DataInsightSchema,
+  type ChartType,
+  type DataInsight,
+  type DataPoint,
+  type ErrorKind,
+  type RefusalReason,
+} from "@shared/insight";
 import type { QueryResult, TemplateName } from "@shared/analytics";
 import type { MessageRole } from "@shared/store";
-import type { GuardRefusal } from "./guard";
 
 // The agent's part vocabulary: turning an analytics QueryResult into the ONE `data-insight` part per
 // answer (built via the strict shared insight schema), the loading skeleton written before the tool
@@ -499,42 +505,34 @@ export function toModelOutput(insight: DataInsight): {
   };
 }
 
-export type AgentErrorKind = "system" | "unanswerable";
-
 export interface ErrorPart {
   type: "data-error";
   id: string;
-  data: { kind: AgentErrorKind };
+  data: { kind: ErrorKind };
 }
 
 /**
  * The error part (AC-10). `system` = a tool/infra failure ("something went wrong on my side");
  * `unanswerable` = a question the data cannot answer. The user-facing copy lives in the UI (005/006);
- * the agent only tags the kind so retry/copy can branch.
+ * the agent only tags the kind so retry/copy can branch. `ErrorKind` is defined in `@shared/insight`.
  */
-export function errorPart(id: string, kind: AgentErrorKind): ErrorPart {
+export function errorPart(id: string, kind: ErrorKind): ErrorPart {
   return { type: "data-error", id, data: { kind } };
 }
-
-// The reasons the agent streams as a data-refusal part: the cap/budget guard backstop (GuardRefusal)
-// plus the input-size backstop (`too_long`) refused at the run() ingress before persist/model. The UI
-// renders every one of these as a polite RefusalNotice (src/lib/chat-ui.ts classifier + refusalCopy),
-// so this union must stay in step with that handling.
-export type RefusalPartReason = GuardRefusal | "too_long";
 
 export interface RefusalPart {
   type: "data-refusal";
   id: string;
-  data: { reason: RefusalPartReason };
+  data: { reason: RefusalReason };
 }
 
 /**
  * The refusal part (AC-15 cap / AC-20 daily budget, plus `too_long` for an over-length turn), streamed
  * by the agent-side backstop when a turn is refused before the model. A DISTINCT taxonomy from
  * `data-error`: not a failure, but a polite limit - the client renders it like the server action's
- * typed refusal, not the error card.
+ * typed refusal, not the error card. `RefusalReason` is defined in `@shared/insight`.
  */
-export function refusalPart(id: string, reason: RefusalPartReason): RefusalPart {
+export function refusalPart(id: string, reason: RefusalReason): RefusalPart {
   return { type: "data-refusal", id, data: { reason } };
 }
 

@@ -2,13 +2,9 @@ import type { ToolSet } from "ai";
 import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
 import type { CoverageProfile } from "@shared/analytics";
+import type { RefusalReason } from "@shared/insight";
 import { checkConversationGuards } from "./guard";
-import {
-  buildModelHistory,
-  refusalPart,
-  type ModelMessage,
-  type RefusalPartReason,
-} from "./parts";
+import { buildModelHistory, refusalPart, type ModelMessage } from "./parts";
 import { persistIncomingUserTurns, type RunMessage } from "./persistence";
 import type { EmitPart } from "./tools";
 
@@ -54,7 +50,7 @@ export interface ChatRunDeps<R> {
   streamModel: StreamModel<R>;
 }
 
-type Gate = { kind: "refuse"; reason: RefusalPartReason } | { kind: "run"; history: ModelMessage[] };
+type Gate = { kind: "refuse"; reason: RefusalReason } | { kind: "run"; history: ModelMessage[] };
 
 /** The one-line DATA SCOPE note appended to the system prompt from the corpus profile (018 strand 5). */
 function dataScopeNote(p: CoverageProfile): string {
