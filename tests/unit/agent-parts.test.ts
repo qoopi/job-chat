@@ -124,6 +124,31 @@ describe("buildModelHistory substitutes the verdict for card turns (F8)", () => 
     ]);
     expect(rebuilt[1].content).toBe(`${c1.verdict} ${c2.verdict}`);
   });
+
+  // 05-testing audit (022): the test above compares against `card.verdict` - a value computed by the
+  // SAME builder call under test, so a wrong-but-consistent verdict would still pass. This pins the
+  // model-facing text against an INDEPENDENT literal (verdictFor's top_companies branch, trigger/parts.ts
+  // line ~163: "${company} is hiring the most, with ${count} openings.") over a fixed two-turn history,
+  // proving byte-identical model input for a card turn without relying on the code's own output as the
+  // expectation.
+  it("pins the model-facing verdict for a top_companies card to a known-good literal, not the persisted prose", () => {
+    const card = buildInsight({
+      id: "m1",
+      tool: "top_companies",
+      params: {},
+      result: result([{ company: "Google", count: 4 }], 10),
+    });
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "Who is hiring the most?" },
+      { role: "assistant", content: "Apple and Meta are also ramping up hiring.", parts: card }, // persisted verbatim prose
+      { role: "user", content: "How many in SF?" },
+    ]);
+    expect(rebuilt).toEqual([
+      { role: "user", content: "Who is hiring the most?" },
+      { role: "assistant", content: "Google is hiring the most, with 4 openings." }, // independent literal
+      { role: "user", content: "How many in SF?" },
+    ]);
+  });
 });
 
 describe("chartTypeFor maps each catalog tool to its designated visual (AC-11)", () => {

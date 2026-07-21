@@ -205,7 +205,10 @@ describe("createChatRun gate: dedup + refuse-before-persist (R3)", () => {
 
     expect(res).toBe("answered");
     expect(streamModel).toHaveBeenCalledTimes(1);
-    expect(appended.filter((m) => m.role === "user")).toEqual([]);
+    // Row-count stability, not merely "no error": nothing at all is appended during a regenerate (run()
+    // never persists an assistant row either - that's onTurnComplete's job) - so the store's row count
+    // is UNCHANGED across the retry, not just absent a duplicate user row.
+    expect(appended).toEqual([]);
   });
 
   it("Should_PersistNothing_When_BackstopRefuses (AC-9): the cap backstop refuses BEFORE the incoming user row persists", async () => {
@@ -235,6 +238,37 @@ describe("createChatRun gate: dedup + refuse-before-persist (R3)", () => {
     expect(appended).toEqual([]); // NOTHING persisted - the refused turn never enters the thread
     expect(counts).toHaveBeenCalled(); // guards ran first
     expect(emitted).toHaveLength(1); // exactly the refusal part
+    expect((emitted[0] as { type: string; data: { reason: string } }).type).toBe("data-refusal");
+    expect((emitted[0] as { data: { reason: string } }).data.reason).toBe("guest_cap");
+  });
+
+  // Documented edge (022 Completion Report, Open issues): guards run BEFORE the already-answered skip
+  // check, so a REDELIVERED submit envelope for a turn that is already answered - landing when the
+  // caller is EXACTLY at the cap (the crash-continuation-at-cap corner) - is refused instead of silently
+  // skipped. This is harmless ONLY if the refusal is stream-only: nothing persists, so neither a
+  // duplicate of the existing answer nor a spurious refusal row ever lands in the thread, and the
+  // notice re-derives cleanly on the next real send.
+  it("Should_PersistNothing_When_AlreadyAnsweredSubmitArrivesAtCap: a redelivered answered turn refuses harmlessly (stream-only, nothing persists)", async () => {
+    const { store, appended, counts } = recordingStore(
+      [{ role: "user", content: "q1" }, { role: "assistant", content: "a1" }],
+      1, // exactly at the cap: one prior user turn already counted
+    );
+    const streamModel = vi.fn(() => "answered" as const);
+    const emitted: unknown[] = [];
+    const run = runWith(store, {
+      guards: { guestCap: 1, dailyBudget: 1_000_000_000 },
+      emit: (p) => emitted.push(p),
+      streamModel,
+    });
+
+    // The redelivered envelope: the SAME already-answered question, not a new one.
+    const res = await run(argsFor("submit-message", [{ role: "user", content: "q1" }]));
+
+    expect(res).toBeUndefined();
+    expect(streamModel).not.toHaveBeenCalled();
+    expect(counts).toHaveBeenCalled(); // the guard ran before the already-answered tail was ever consulted
+    expect(appended).toEqual([]); // nothing persists - the answered row is untouched, no refusal row either
+    expect(emitted).toHaveLength(1); // the harmless stream-only refusal
     expect((emitted[0] as { type: string; data: { reason: string } }).type).toBe("data-refusal");
     expect((emitted[0] as { data: { reason: string } }).data.reason).toBe("guest_cap");
   });
