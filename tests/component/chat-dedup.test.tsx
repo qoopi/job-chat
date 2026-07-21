@@ -71,12 +71,14 @@ test("a follow-up that replays the hydrated tail renders the existing card exact
   // The follow-up's `sendMessages` subscribe replays the session `.out` tail from the start: the SAME
   // assistant turn (id = ASSISTANT_ID) that is already hydrated, plus a marker text so the test can await
   // the replay having been fully processed.
+  // The replayed card turn carries NO prose (018 strand 2: a card is the whole answer, model prose is
+  // suppressed), so a trailing text marker on it would not render. Instead the replay re-emits the card
+  // with a DISTINCT verdict; reconcile replaces the hydrated turn in place, so waiting for that verdict
+  // to appear confirms the replay was fully consumed - and the count then proves it landed exactly once.
+  const replayedInsight: DataInsight = { ...insight, verdict: "Amazon leads hiring with 214 replayed roles." };
   window.__CHAT_SCRIPT__ = [
     { chunk: { type: "start", messageId: ASSISTANT_ID } },
-    { chunk: { type: "data-insight", id: `${ASSISTANT_ID}-card-0`, data: insight } },
-    { chunk: { type: "text-start", id: "rt" } },
-    { chunk: { type: "text-delta", id: "rt", delta: "replayed-tail-marker" } },
-    { chunk: { type: "text-end", id: "rt" } },
+    { chunk: { type: "data-insight", id: `${ASSISTANT_ID}-card-0`, data: replayedInsight } },
     { chunk: { type: "finish" } },
   ];
 
@@ -88,8 +90,8 @@ test("a follow-up that replays the hydrated tail renders the existing card exact
     fireEvent.change(box, { target: { value: "Only remote roles" } });
     fireEvent.keyDown(box, { key: "Enter" });
 
-    // Wait until the reconnect replay has been fully consumed (the marker is the last text part).
-    await screen.findByText("replayed-tail-marker");
+    // Wait until the replay has been fully consumed (the card's verdict updates to the replayed one).
+    await screen.findByText(/replayed roles/);
 
     // The hydrated turn must render exactly once - not a second re-appended copy under the same key.
     expect(document.querySelectorAll(".verdict").length).toBe(1);

@@ -29,11 +29,17 @@ export interface EvalExpect {
   chartType?: ChartType | "table";
   /** Apply the AC-5 plain-tone conformance check to the answer text (<= 2 sentences, no "!", no filler). */
   formatRules?: boolean;
+  /** Market-wide scope case (018 strand 5): the answer should QUALIFY the scope to the sample (name the
+   *  sample / its dominant employer) rather than present it as the whole market. Informational, never gates. */
+  scopeQualified?: boolean;
 }
 
 export interface EvalCase {
   id: string;
   question: string;
+  /** Prior user turns to run (unscored) BEFORE `question`, establishing the history a follow-up inherits
+   *  from (018 strand 4). The runner drives each in order, persisting the answer, then scores `question`. */
+  context?: string[];
   expect: EvalExpect;
 }
 
@@ -174,6 +180,59 @@ const COMPOSED_CASES: EvalCase[] = [
   },
 ];
 
+// 018 strand 4/5 (+5): contextual follow-ups (a two-turn inheritance case + a multi-city case), a
+// fragmentation case (title grouping), a salary/currency case, and a market-wide scope case. Kept
+// non-chart-bearing (no `chartType`) so they exercise tool/mode/params without touching the AC-4 chart
+// gate; the verdict/currency/scope correctness is proven in the offline unit + integration suites.
+const FOLLOWUP_CASES: EvalCase[] = [
+  {
+    // Inheritance: "those" = the companies from the prior turn. ADVISER_V2's own FOLLOW-UP INHERITANCE
+    // example is verbatim "how many of those are in SF? -> the same company grouping plus city", so the
+    // prompt-MANDATED route is to re-issue top_companies (which already groups by company) with the city
+    // added, resolving SF -> San Francisco. The assertion keeps proving the SF inheritance via params.city
+    // (018 review-fix R1: corrected from the old query_postings(measures,city) expectation, which the
+    // strict scorer never matched to the mandated top_companies route).
+    id: "C13",
+    question: "How many of those are in SF?",
+    context: ["Which companies are hiring the most?"],
+    expect: {
+      mode: "data",
+      tool: "top_companies",
+      params: { city: "San Francisco" },
+    },
+  },
+  {
+    // Multi-city: one number over both cities via the cities IN-list.
+    id: "C14",
+    question: "How many job openings are there in LA or NYC?",
+    expect: {
+      mode: "data",
+      tool: "query_postings",
+      params: { cities: ["Los Angeles", "New York"] },
+    },
+  },
+  {
+    // Fragmentation: a title grouping (the verdict says "no single role dominates" - proven in unit tests).
+    id: "C15",
+    question: "Is there one job title that dominates hiring, or is it spread across many?",
+    expect: {
+      mode: "data",
+      tool: "query_postings",
+      params: { measures: ["count"], dimensions: ["title"] },
+    },
+  },
+  {
+    // Salary/currency: a composed salary aggregate (the dominant-currency filter is unit/integration-tested).
+    id: "C16",
+    question: "What is the median salary by employment type?",
+    expect: {
+      mode: "data",
+      tool: "query_postings",
+      params: { measures: ["median_salary"], dimensions: ["employment_type"] },
+    },
+  },
+];
+
 // P2-intent (find-me-a-job / what-fits-me): applying, matching, and personal fit are out of scope, so the
 // adviser holds the clarify-path tone in plain mode - no tool, no card. Drawn from the 009 fixture (DRY).
 const P2_CASES: EvalCase[] = P2_INTENT_PROMPTS.slice(0, 4).map((question, i) => ({
@@ -205,12 +264,25 @@ const OFF_DOMAIN_CASES: EvalCase[] = [
   expect: { mode: "plain", formatRules: true },
 }));
 
+// 018 strand 5 (+1): a market-wide question the sample cannot honestly answer as "the whole market" -
+// the agent stays in plain mode and QUALIFIES the scope to its sample (mostly Google). The scope
+// qualification is checked informationally (the DATA SCOPE note is injected into the eval's system prompt).
+const SCOPE_CASES: EvalCase[] = [
+  {
+    id: "M1",
+    question: "Is your data representative of the entire job market?",
+    expect: { mode: "plain", formatRules: true, scopeQualified: true },
+  },
+];
+
 export const EVAL_SET: EvalCase[] = [
   ...LAUNCH_CASES,
   ...COMPOSED_CASES,
+  ...FOLLOWUP_CASES,
   ...P2_CASES,
   ...CONVERSATIONAL_CASES,
   ...OFF_DOMAIN_CASES,
+  ...SCOPE_CASES,
 ];
 
 /** The AC-4 chart-bearing sample: every case carrying a RAW chartType expectation (pinned at 12). */

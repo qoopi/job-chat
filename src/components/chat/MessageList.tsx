@@ -43,11 +43,16 @@ const AssistantMessage = memo(function AssistantMessage({
 }) {
   const text = messageText(message);
   const cards = dataParts(message);
-  // AC-25 single refusal surface: when this turn carries an error card, the card is the one surface -
-  // suppress the accompanying model prose so the same failure is never rendered twice (card + prose).
-  // Mirrors the persistence-layer drop in trigger/parts.ts, so live and resumed turns render identically.
-  const hasErrorCard = cards.some(({ data }) => classifyCardData(data).kind === "error");
-  const showText = Boolean(text) && !hasErrorCard;
+  // 018 strand 2 (extends AC-25's single-surface rule to SUCCESS cards): when this turn carries any
+  // rendered card - a data insight, an error, or a refusal - the CARD is the one answer surface, so the
+  // model's accompanying prose is suppressed (a card + a fabricated sentence is never shown together).
+  // A still-loading skeleton does NOT suppress (the card is not the answer yet). Mirrors the
+  // persistence-layer drop in trigger/parts.ts, so live and resumed turns render identically.
+  const hasCard = cards.some(({ data }) => {
+    const kind = classifyCardData(data).kind;
+    return kind === "insight" || kind === "error" || kind === "refusal";
+  });
+  const showText = Boolean(text) && !hasCard;
 
   return (
     <>

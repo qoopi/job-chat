@@ -24,6 +24,9 @@ const MetaSchema = z
     // reads "N open postings" (AC-3). OPTIONAL so every P1-persisted payload stays valid under strict;
     // absent = full history. Never default-inject it.
     openSet: z.boolean().optional(),
+    // The currency a salary aggregate was filtered to (018 strand 3) - the source line discloses the
+    // base and the money formatter uses it. OPTIONAL (only salary insights carry it); never injected.
+    currency: z.string().optional(),
   })
   .strict();
 export type InsightMeta = z.infer<typeof MetaSchema>;

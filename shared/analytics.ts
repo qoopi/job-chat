@@ -119,6 +119,25 @@ export interface BuiltQuery {
   sql: string; // the main rows query (revealed by Show query)
   where: string; // the shared WHERE clause, reused for the sampleN/freshestAt meta query
   openSet: boolean; // whether the open-set predicate was applied (current-state read) - carried to meta
+  // A chronological trend selects the NEWEST slice via `ORDER BY <time> DESC LIMIT n` so a window
+  // wider than the LIMIT keeps today and drops the oldest (never the reverse). The rows come back
+  // newest-first; executeBuilt reverses them so the display axis stays oldest -> newest. Absent = the
+  // query's own order is the display order.
+  reverse?: boolean;
+  // A salary aggregate: it is filtered to the dominant salary_currency (never averaging mixed
+  // currencies), so the meta query resolves that currency for the source line / money formatter.
+  salary?: boolean;
+}
+
+/**
+ * The dominant-currency predicate (018 strand 3): keep only rows whose salary_currency is the most
+ * common one among the salaried rows matching the SAME base filters, so a median/percentile is never
+ * computed across mixed currencies. An `IN (... LIMIT 1)` (not `=`) so an empty salaried set yields no
+ * rows gracefully rather than throwing on an empty scalar subquery.
+ */
+function dominantCurrencyFilter(table: string, baseFilters: string[]): string {
+  const inner = whereClause([...baseFilters, "salary_currency IS NOT NULL"]);
+  return `salary_currency IN (SELECT salary_currency FROM ${table} FINAL ${inner} GROUP BY salary_currency ORDER BY count() DESC, salary_currency ASC LIMIT 1)`;
 }
 
 /**
@@ -134,6 +153,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       if (p.city) filters.push(`city = ${chStr(p.city)}`);
       if (p.country) filters.push(`country = ${chStr(p.country)}`);
       filters.push(openSetFilter(table));
+      filters.push(dominantCurrencyFilter(table, filters)); // single-currency salaried set only
       const where = whereClause(filters);
       const sql = assemble([
         "WITH salaried AS (",
@@ -150,7 +170,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "ORDER BY bucket",
         `LIMIT ${LIMITS.salary_distribution}`,
       ]);
-      return { sql, where, openSet: true };
+      return { sql, where, openSet: true, salary: true };
     }
     case "salary_compare": {
       const p = SalaryCompareParams.parse(rawParams);
@@ -161,6 +181,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       ];
       if (p.role) filters.push(roleFilter(p.role));
       filters.push(openSetFilter(table));
+      filters.push(dominantCurrencyFilter(table, filters)); // compare within one currency only
       const where = whereClause(filters);
       const sql = assemble([
         "SELECT",
@@ -173,7 +194,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "ORDER BY median DESC, city ASC",
         `LIMIT ${LIMITS.salary_compare}`,
       ]);
-      return { sql, where, openSet: true };
+      return { sql, where, openSet: true, salary: true };
     }
     case "postings_trend": {
       const p = PostingsTrendParams.parse(rawParams);
@@ -187,11 +208,13 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         `FROM ${table} FINAL`,
         where,
         "GROUP BY day",
-        "ORDER BY day",
+        // Newest-first + LIMIT so a window wider than the cap keeps the recent days and drops the
+        // oldest (ORDER BY day ASC LIMIT would drop TODAY); executeBuilt reverses for chronological display.
+        "ORDER BY day DESC",
         `LIMIT ${LIMITS.postings_trend}`,
       ]);
       // Trend keeps full history (closed postings are legitimate history) - no open-set predicate.
-      return { sql, where, openSet: false };
+      return { sql, where, openSet: false, reverse: true };
     }
     case "top_companies": {
       const p = TopCompaniesParams.parse(rawParams);
@@ -312,6 +335,12 @@ export const ComposedQueryParams = z
     role: z.string().min(1).optional(),
     company: z.string().min(1).optional(),
     city: z.string().min(1).optional(),
+    // A multi-city filter for "openings in LA or NYC" (one number over both). Each value is
+    // chStr-escaped into an IN-list; kept alongside single `city` for compat (018 strand 4). Bounded so
+    // the interpolated list stays small. SEMANTICS when both are set: `cities` WINS and the single `city`
+    // is ignored (the FOLLOW-UP INHERITANCE rule replaces a filter, never AND-s it into a possibly-empty
+    // intersection - see buildComposedSql, 018 review-fix).
+    cities: z.array(z.string().min(1)).min(1).max(20).optional(),
     region: z.string().min(1).optional(),
     country: z.string().min(1).optional(),
     experience_level: z.string().min(1).optional(),
@@ -394,13 +423,19 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
     throw new Error(`sort.by must be a selected measure or dimension: ${sort.by}`);
   }
 
+  const isSalary = p.measures.some((m) => SALARY_MEASURES.has(m));
   const filters: string[] = [];
-  if (p.measures.some((m) => SALARY_MEASURES.has(m))) {
+  if (isSalary) {
     filters.push("salary_min IS NOT NULL", "salary_max IS NOT NULL");
   }
   if (p.role) filters.push(roleFilter(p.role));
   if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
-  if (p.city) filters.push(`city = ${chStr(p.city)}`);
+  // `cities` (the multi-city IN-list) WINS over a coexisting single `city`: the FOLLOW-UP INHERITANCE rule
+  // REPLACES a filter rather than AND-ing it, so a coexisting pair is a refinement to the list, not an
+  // intersection (which could be empty). Smallest correct semantics: prefer cities, drop the single city
+  // (018 review-fix; documented on ComposedQueryParams.cities).
+  if (p.cities) filters.push(`city IN (${p.cities.map((c) => chStr(c)).join(", ")})`);
+  else if (p.city) filters.push(`city = ${chStr(p.city)}`);
   if (p.region) filters.push(`region = ${chStr(p.region)}`);
   if (p.country) filters.push(`country = ${chStr(p.country)}`);
   if (p.experience_level) filters.push(`experience_level = ${chStr(p.experience_level)}`);
@@ -411,12 +446,22 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   const openSet = p.days === undefined;
   if (openSet) filters.push(openSetFilter(table));
   else filters.push(trendWindow(table, p.days!));
+  // Salary measures aggregate within the dominant currency only - never a mixed-currency median (added
+  // last so its subquery scopes over the salaried + user + open-set/window filters, 018 strand 3).
+  if (isSalary) filters.push(dominantCurrencyFilter(table, filters));
   const where = whereClause(filters);
 
   const sortExpr = p.measures.includes(sort.by as ComposedMeasure)
     ? sort.by
     : dims.find((d) => d.alias === sort.by)!.group;
-  const orderParts = [`${sortExpr} ${sort.dir.toUpperCase()}`];
+  // A pure chronological trend (a time bucket, no other dimension, default bucket-ASC sort) must keep
+  // the NEWEST buckets when the series is longer than the LIMIT: order bucket DESC + LIMIT here, then
+  // reverse the rows for display (executeBuilt). A bucketed cross-tab (a dimension alongside the bucket)
+  // is a table, not a trend, so it keeps its existing order.
+  const chronologicalTrend =
+    p.bucket !== undefined && p.dimensions.length === 0 && sort.by === "bucket" && sort.dir === "asc";
+  const primaryDir = chronologicalTrend ? "DESC" : sort.dir.toUpperCase();
+  const orderParts = [`${sortExpr} ${primaryDir}`];
   for (const d of dims) {
     if (d.alias === sort.by) continue;
     orderParts.push(`${d.group} ASC`);
@@ -432,15 +477,29 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
     `ORDER BY ${orderParts.join(", ")}`,
     `LIMIT ${p.limit}`,
   ]);
-  return { sql, where, openSet };
+  return { sql, where, openSet, reverse: chronologicalTrend, salary: isSalary };
 }
 
 export interface QueryResult {
   sql: string;
   rows: Record<string, unknown>[];
-  // `openSet` is present (true) only on a current-state read; absent = full history (AC-3). Optional so
-  // every persisted P1 payload stays valid and it is never default-injected.
-  meta: { sampleN: number; freshestAt: string; openSet?: boolean };
+  // `openSet` is present (true) only on a current-state read; absent = full history (AC-3). `currency`
+  // is present only on a salary aggregate (the dominant currency it was filtered to). Both optional so
+  // every persisted P1 payload stays valid and neither is default-injected.
+  meta: { sampleN: number; freshestAt: string; openSet?: boolean; currency?: string };
+}
+
+/**
+ * The corpus shape (018 strand 5): what the product is actually answering from, so the agent can be
+ * honest about scope. Computed over the current open set (one snapshot). Shares (0..1) are fractions.
+ */
+export interface CoverageProfile {
+  total: number; // open postings
+  distinctCompanies: number;
+  topCompany: string;
+  topCompanyShare: number; // topCompany's share of `total` (0..1)
+  freshestAt: string; // max(ingested_at), CH text form
+  salaryCoverage: number; // fraction of postings carrying a salary range (0..1)
 }
 
 export interface Analytics {
@@ -448,6 +507,13 @@ export interface Analytics {
   // The execution seam for query_postings (009's tool calls this). Tools receive Analytics, never a raw
   // client, so the composed path must live on the interface too.
   runComposedQuery(params: unknown): Promise<QueryResult>;
+  /**
+   * The corpus shape for the DATA SCOPE prompt note (018 strand 5). ONE cheap query, memoized on the
+   * analytics instance - which is a per-process singleton (trigger/chat.ts), so it runs once per PROCESS
+   * (isolate lifetime), never per turn. Only a fulfilled result is cached; a transient failure is retried
+   * on the next call (018 review-fix S5).
+   */
+  coverageProfile(): Promise<CoverageProfile>;
 }
 
 /**
@@ -462,28 +528,30 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
   // Run a BuiltQuery: the rows query AND the sampleN/freshestAt meta query over the SAME `where` (so
   // the count matches the set the rows came from). Shared by both the template and composed paths.
   async function executeBuilt(built: BuiltQuery): Promise<QueryResult> {
-    const metaSql = assemble([
-      "SELECT",
-      "  count() AS sampleN,",
-      "  max(ingested_at) AS freshestAt",
-      `FROM ${table} FINAL`,
-      built.where,
-    ]);
+    // A salary aggregate additionally resolves the dominant currency it was filtered to (any() over the
+    // now single-currency set), so the source line / money formatter can disclose the real base.
+    const metaSelect = ["  count() AS sampleN", "  max(ingested_at) AS freshestAt"];
+    if (built.salary) metaSelect.push("  any(salary_currency) AS currency");
+    const metaSql = assemble(["SELECT", metaSelect.join(",\n"), `FROM ${table} FINAL`, built.where]);
 
     // The rows and meta reads are independent (neither consumes the other's result), so fire them
     // concurrently - on the per-turn ClickHouse Cloud hot path this is max- not sum-latency.
     // Promise.all attaches a rejection handler to BOTH promises up front, so if one query fails the
     // sibling's rejection is still handled (no unhandled rejection) and the error surface matches the
     // old sequential path: the whole call rejects with whichever query failed first.
-    const [rows, metaRow] = await Promise.all([
+    const [fetched, metaRow] = await Promise.all([
       client
         .query({ query: built.sql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })
         .then((rs) => rs.json<Record<string, unknown>>()),
       client
         .query({ query: metaSql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })
-        .then((rs) => rs.json<{ sampleN: number; freshestAt: string }>())
+        .then((rs) => rs.json<{ sampleN: number; freshestAt: string; currency?: string }>())
         .then((metaRows) => metaRows[0]),
     ]);
+
+    // A newest-first trend slice is reversed back to chronological order for the display axis (the
+    // fetched array is freshly built by json(), so the in-place reverse is safe).
+    const rows = built.reverse ? fetched.reverse() : fetched;
 
     return {
       sql: built.sql,
@@ -492,12 +560,62 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
         sampleN: Number(metaRow.sampleN),
         freshestAt: String(metaRow.freshestAt),
         ...(built.openSet ? { openSet: true } : {}),
+        ...(built.salary && metaRow.currency ? { currency: String(metaRow.currency) } : {}),
       },
+    };
+  }
+
+  // Memoized on the instance: the first call runs the query, later callers reuse the same promise. The
+  // analytics instance is a module-level singleton (trigger/chat.ts), so this cache lives for the PROCESS
+  // (the warm Trigger isolate serves many conversations), NOT a single run - it is computed once per
+  // isolate lifetime, never per turn (018 strand 5). Accepted staleness: after a re-ingest a warm isolate
+  // serves the prior corpus's DATA SCOPE note until it recycles; harmless for the static demo corpus, and
+  // the note is advisory (it only shapes scope-qualification prose, never a query). A REJECTED promise is
+  // NOT cached (see coverageProfile below): one transient ClickHouse error must not poison the memo for the
+  // whole isolate life and silently drop the scope note on every later turn (018 review-fix S5).
+  let coverageCache: Promise<CoverageProfile> | undefined;
+  async function computeCoverage(): Promise<CoverageProfile> {
+    const openSet = openSetFilter(table);
+    const sql = assemble([
+      "SELECT",
+      "  count() AS total,",
+      "  uniqExact(company) AS distinctCompanies,",
+      "  max(ingested_at) AS freshestAt,",
+      "  round(countIf(salary_min IS NOT NULL AND salary_max IS NOT NULL) / count(), 4) AS salaryCoverage,",
+      `  (SELECT company FROM ${table} FINAL WHERE ${openSet} GROUP BY company ORDER BY count() DESC, company ASC LIMIT 1) AS topCompany,`,
+      `  (SELECT count() FROM ${table} FINAL WHERE ${openSet} GROUP BY company ORDER BY count() DESC, company ASC LIMIT 1) AS topCompanyCount`,
+      `FROM ${table} FINAL`,
+      `WHERE ${openSet}`,
+    ]);
+    const rs = await client.query({ query: sql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS });
+    const [row] = await rs.json<{
+      total: number;
+      distinctCompanies: number;
+      freshestAt: string;
+      salaryCoverage: number;
+      topCompany: string | null;
+      topCompanyCount: number;
+    }>();
+    const total = Number(row.total);
+    return {
+      total,
+      distinctCompanies: Number(row.distinctCompanies),
+      topCompany: String(row.topCompany ?? ""),
+      topCompanyShare: total > 0 ? Number(row.topCompanyCount) / total : 0,
+      freshestAt: String(row.freshestAt),
+      salaryCoverage: Number(row.salaryCoverage),
     };
   }
 
   return {
     runQuery: (name, params) => executeBuilt(buildTemplateSql(name, params, table)),
     runComposedQuery: (params) => executeBuilt(buildComposedSql(params, table)),
+    // Cache only a FULFILLED result: on rejection, clear the memo so the next call retries (never a
+    // permanently-poisoned rejected promise, 018 review-fix S5).
+    coverageProfile: () =>
+      (coverageCache ??= computeCoverage().catch((err) => {
+        coverageCache = undefined;
+        throw err;
+      })),
   };
 }

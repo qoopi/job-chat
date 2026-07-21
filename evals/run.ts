@@ -1,7 +1,7 @@
 import { streamText, stepCountIs } from "ai";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
-import type { Analytics, QueryResult } from "@shared/analytics";
+import type { Analytics, CoverageProfile, QueryResult } from "@shared/analytics";
 import { DataInsightSchema } from "@shared/insight";
 import {
   deriveTitle,
@@ -13,8 +13,9 @@ import {
   type User,
 } from "@shared/store";
 import { getAgentLimits } from "@shared/env";
-import { createChatRun, type StreamModelArgs } from "../trigger/run";
+import { createChatRun, type StreamModel, type StreamModelArgs } from "../trigger/run";
 import { buildCatalogTools, CATALOG_TOOL_NAMES, type EmitPart } from "../trigger/tools";
+import { persistAssistantTurn } from "../trigger/parts";
 import { ADVISER_V1 } from "../trigger/prompts/adviser-v1";
 import { ADVISER_V2 } from "../trigger/prompts/adviser-v2";
 import { FIXTURE_INGESTED_AT } from "../tests/fixtures/postings.fixture";
@@ -187,7 +188,23 @@ function fakeAnalytics(): Analytics {
   return {
     runQuery: async (name) => result(`-- fake template ${name}`),
     runComposedQuery: async () => result(`-- fake query_postings`),
+    coverageProfile: fakeCoverageProfile,
   };
+}
+
+/**
+ * The corpus shape the eval injects into the system prompt (018 strand 5), matching the live ground
+ * truth so a market-wide question exercises the SAME DATA SCOPE note production ships (mostly Google).
+ */
+function fakeCoverageProfile(): Promise<CoverageProfile> {
+  return Promise.resolve({
+    total: 3488,
+    distinctCompanies: 7,
+    topCompany: "Google",
+    topCompanyShare: 0.93,
+    freshestAt: FIXTURE_INGESTED_AT,
+    salaryCoverage: 0.65,
+  });
 }
 
 // ---- drive one case -----------------------------------------------------------------------------
@@ -199,62 +216,111 @@ export interface Observed {
   error?: string;
 }
 
-/** Drive one question through createChatRun with the real model, capturing tool calls, text, and parts. */
-async function runCase(model: EvalModel, system: string, evalCase: EvalCase): Promise<Observed> {
+/**
+ * The streamed-result shape `runCase` consumes - a SUBSET of streamText's result (consumeStream to drive
+ * tool execution, steps for the tool calls, text for the answer). The live Bedrock seam returns a full
+ * streamText result (a superset); an offline test's fake model returns exactly this shape.
+ */
+export interface EvalStreamResult {
+  consumeStream(): PromiseLike<unknown>;
+  steps: PromiseLike<{ toolCalls: { toolName: string; input?: unknown }[] }[]>;
+  text: PromiseLike<string>;
+}
+
+/** The injectable model seam `runCase` drives: real = Bedrock via streamText; offline test = a fake. */
+export type EvalStreamModel = StreamModel<EvalStreamResult>;
+
+/**
+ * The live Bedrock model seam: streamText bound to the model and the agent's step cap. Built ONCE in
+ * `main` and threaded into `runCase`, so the context-turn replay loop can be driven by a fake model
+ * offline (no Bedrock) - it mirrors trigger/chat.ts minus the Trigger-runtime plumbing.
+ */
+export function bedrockStreamModel(model: EvalModel): EvalStreamModel {
+  const limits = getAgentLimits();
+  return ({ system, messages, tools, signal }: StreamModelArgs) =>
+    streamText({
+      model,
+      system,
+      messages,
+      tools,
+      abortSignal: signal,
+      stopWhen: stepCountIs(limits.maxSteps),
+    });
+}
+
+/**
+ * Drive a case through createChatRun with the injected model seam, capturing tool calls, text, and parts.
+ * A case with `context` runs those prior user turns first (persisting each answer so the scored follow-up
+ * inherits their filters via the rebuilt history, 018 strand 4); only the LAST turn is scored. The model
+ * seam is a DEPENDENCY (not hard-wired to Bedrock) so the replay mechanism is testable offline (018
+ * review-fix R2).
+ */
+export async function runCase(
+  streamModel: EvalStreamModel,
+  system: string,
+  evalCase: EvalCase,
+): Promise<Observed> {
   const store = createMemoryStore();
   const guestId = `eval-${crypto.randomUUID()}`;
   await store.getOrCreateUser(guestId);
-  const conv = await store.createConversation(guestId, evalCase.question);
-  await store.appendMessage(conv.id, "user", evalCase.question, null); // mirror startConversation (turn 1)
+  const turns = [...(evalCase.context ?? []), evalCase.question];
+  const conv = await store.createConversation(guestId, turns[0]);
+  await store.appendMessage(conv.id, "user", turns[0], null); // mirror startConversation (turn 1)
+  const cumulative: { role: "user"; content: string }[] = [];
 
-  const emitted: EmitPart[] = [];
-  const emit = (part: EmitPart) => emitted.push(part);
-  const tools = buildCatalogTools({ analytics: fakeAnalytics(), emit });
-  const limits = getAgentLimits();
-
-  const chatRun = createChatRun({
-    withStore: (fn) => fn(store),
-    // Generous caps: the eval is not testing the guard, so no case is ever refused before the model.
-    guards: { guestCap: Number.MAX_SAFE_INTEGER, dailyBudget: Number.MAX_SAFE_INTEGER },
-    emit,
-    now: () => new Date(),
-    system,
-    // The model seam, mirroring trigger/chat.ts minus the Trigger-runtime plumbing (chat.toStreamTextOptions
-    // is unavailable outside a run): real Bedrock, the rebuilt history, the case's tools, the step ceiling.
-    streamModel: ({ system: sys, messages, tools: turnTools, signal }: StreamModelArgs) =>
-      streamText({
-        model,
-        system: sys,
-        messages,
-        tools: turnTools,
-        abortSignal: signal,
-        stopWhen: stepCountIs(limits.maxSteps),
-      }),
-  });
-
-  try {
-    const result = await chatRun({
-      chatId: conv.id,
-      messages: [{ role: "user", content: evalCase.question }],
-      tools,
-      signal: new AbortController().signal,
+  const buildRun = (emit: (part: EmitPart) => void) =>
+    createChatRun({
+      withStore: (fn) => fn(store),
+      // Generous caps: the eval is not testing the guard, so no case is ever refused before the model.
+      guards: { guestCap: Number.MAX_SAFE_INTEGER, dailyBudget: Number.MAX_SAFE_INTEGER },
+      emit,
+      now: () => new Date(),
+      system,
+      coverageProfile: fakeCoverageProfile, // 018 strand 5: inject the DATA SCOPE note, as production does
+      streamModel,
     });
-    if (!result) {
-      return { toolCalls: [], text: "", hasInsight: false, error: "run refused before the model (unexpected)" };
+
+  let observed: Observed = { toolCalls: [], text: "", hasInsight: false };
+  for (let t = 0; t < turns.length; t++) {
+    cumulative.push({ role: "user", content: turns[t] });
+    const emitted: EmitPart[] = [];
+    const emit = (part: EmitPart) => emitted.push(part);
+    const tools = buildCatalogTools({ analytics: fakeAnalytics(), emit });
+    try {
+      const result = await buildRun(emit)({
+        chatId: conv.id,
+        messages: cumulative.map((m) => ({ ...m })),
+        tools,
+        signal: new AbortController().signal,
+      });
+      if (!result) {
+        observed = { toolCalls: [], text: "", hasInsight: false, error: "run refused before the model (unexpected)" };
+        break;
+      }
+      await result.consumeStream(); // drive tool execution + finish
+      const steps = await result.steps;
+      const toolCalls = steps
+        .flatMap((s) => s.toolCalls)
+        .map((tc) => ({ name: tc.toolName, input: (tc.input ?? {}) as Record<string, unknown> }));
+      const text = (await result.text).trim();
+      const hasInsight = emitted.some(
+        (p) => p.type === "data-insight" && DataInsightSchema.safeParse((p as { data: unknown }).data).success,
+      );
+      observed = { toolCalls, text, hasInsight };
+      // Persist the assistant turn (mirror onTurnComplete) so a later turn's rebuilt history carries it.
+      const responseMessage = {
+        parts: [
+          { type: "text", text },
+          ...emitted.map((p) => ({ type: p.type, id: p.id, data: (p as { data: unknown }).data })),
+        ],
+      };
+      await persistAssistantTurn(store, { conversationId: conv.id, responseMessage });
+    } catch (err) {
+      observed = { toolCalls: [], text: "", hasInsight: false, error: (err as Error).message };
+      break;
     }
-    await result.consumeStream(); // drive tool execution + finish
-    const steps = await result.steps;
-    const toolCalls = steps
-      .flatMap((s) => s.toolCalls)
-      .map((tc) => ({ name: tc.toolName, input: (tc.input ?? {}) as Record<string, unknown> }));
-    const text = (await result.text).trim();
-    const hasInsight = emitted.some(
-      (p) => p.type === "data-insight" && DataInsightSchema.safeParse((p as { data: unknown }).data).success,
-    );
-    return { toolCalls, text, hasInsight };
-  } catch (err) {
-    return { toolCalls: [], text: "", hasInsight: false, error: (err as Error).message };
   }
+  return observed;
 }
 
 // ---- scoring (pure, deterministic) --------------------------------------------------------------
@@ -273,6 +339,8 @@ export interface ScoredCase {
   paramsPass?: boolean;
   formatChecked: boolean;
   formatPass?: boolean;
+  scopeChecked: boolean;
+  scopePass?: boolean;
   error?: string;
 }
 
@@ -319,6 +387,14 @@ function formatOk(text: string): boolean {
   return countSentences(text) <= 2 && !text.includes("!") && !startsWithBannedOpener(text);
 }
 
+// 018 strand 5 (informational): a scope-qualified answer names the sample / its dominance rather than
+// presenting the corpus as the whole market. Heuristic over the answer text - never gates a run.
+function scopeQualifiedOk(text: string): boolean {
+  return /\bsample\b|\bmostly\b|\bgoogle\b|\balphabet\b|dominat|one (company|employer)|not.*(representative|whole|entire|full)/i.test(
+    text,
+  );
+}
+
 export function scoreCase(evalCase: EvalCase, observed: Observed): ScoredCase {
   const { expect } = evalCase;
   const observedTools = observed.toolCalls.map((t) => t.name);
@@ -347,6 +423,8 @@ export function scoreCase(evalCase: EvalCase, observed: Observed): ScoredCase {
     paramsPass: paramsChecked ? paramsSubsetMatch(expect.params!, expectedCall!.input) : undefined,
     formatChecked: Boolean(expect.formatRules),
     formatPass: expect.formatRules ? formatOk(observed.text) : undefined,
+    scopeChecked: Boolean(expect.scopeQualified),
+    scopePass: expect.scopeQualified ? scopeQualifiedOk(observed.text) : undefined,
     error: observed.error,
   };
 }
@@ -366,6 +444,8 @@ export interface Aggregate {
   paramsPass: number;
   formatTotal: number;
   formatPass: number;
+  scopeTotal: number;
+  scopePass: number;
   errors: number;
 }
 
@@ -382,6 +462,8 @@ export function aggregate(scored: ScoredCase[]): Aggregate {
     paramsPass: count((s) => s.paramsPass === true),
     formatTotal: count((s) => s.formatChecked),
     formatPass: count((s) => s.formatPass === true),
+    scopeTotal: count((s) => s.scopeChecked),
+    scopePass: count((s) => s.scopePass === true),
     errors: count((s) => s.error !== undefined),
   };
 }
@@ -442,6 +524,7 @@ function printReport(prompt: PromptVersion, scored: ScoredCase[]): void {
   );
   console.log(`  params    : ${agg.paramsPass}/${agg.paramsTotal}  (${pct(agg.paramsPass, agg.paramsTotal)})   (informational; subset match on the expected tool call)`);
   console.log(`  format    : ${agg.formatPass}/${agg.formatTotal}  (${pct(agg.formatPass, agg.formatTotal)})   (informational; AC-5 tone gate is the offline vitest test)`);
+  console.log(`  scope     : ${agg.scopePass}/${agg.scopeTotal}  (${pct(agg.scopePass, agg.scopeTotal)})   (informational; 018 strand 5 market-wide scope qualification)`);
   console.log(`  errors    : ${agg.errors} case(s) hit a runtime/model error`);
 
   const failures = scored.filter((s) => !s.toolModePass || (s.chartBearing && s.chartPass === false));
@@ -481,7 +564,7 @@ async function main(): Promise<void> {
   if (prompt === "v1") {
     console.warn("[eval] WARNING: --prompt v1 is a STALE baseline - report_unanswerable was retired from the catalog; v1's tool/mode numbers are not comparable to v2, and v1 is not to be re-tuned.");
   }
-  const model = buildModel();
+  const streamModel = bedrockStreamModel(buildModel());
 
   console.log(HEAVY);
   console.log(`Job.Chat eval harness  |  prompt=${prompt}  |  model=${MODEL_ID}`);
@@ -490,7 +573,7 @@ async function main(): Promise<void> {
 
   const scored: ScoredCase[] = [];
   for (let i = 0; i < EVAL_SET.length; i++) {
-    const observed = await runCase(model, system, EVAL_SET[i]);
+    const observed = await runCase(streamModel, system, EVAL_SET[i]);
     const s = scoreCase(EVAL_SET[i], observed);
     scored.push(s);
     printCase(i + 1, EVAL_SET[i], s);

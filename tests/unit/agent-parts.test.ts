@@ -5,6 +5,7 @@ import {
   buildComposedInsight,
   buildComposedSkeleton,
   buildInsight,
+  buildModelHistory,
   buildSkeleton,
   chartTypeFor,
   chartTypeForShape,
@@ -23,6 +24,47 @@ import {
 function result(rows: Record<string, unknown>[], sampleN: number): QueryResult {
   return { sql: "SELECT 1", rows, meta: { sampleN, freshestAt: "2026-07-18 06:00:00" } };
 }
+
+// 018 review-fix (BOUNDED confirm): an error/refusal turn persists EMPTY content, and buildModelHistory
+// drops empty rows - so an error turn immediately followed by a user follow-up used to rebuild as two
+// CONSECUTIVE user messages, which Bedrock's strict role-alternation rejects. This pins that the rebuilt
+// model input stays validly alternating (no two same-role messages adjacent) across that error->followup
+// shape, WITHOUT restructuring persistence (the store still holds the empty error row).
+describe("buildModelHistory keeps valid role alternation across a dropped error turn (018 review-fix)", () => {
+  const alternates = (msgs: { role: string }[]) =>
+    msgs.every((m, i) => i === 0 || m.role !== msgs[i - 1].role);
+
+  it("an error turn (empty content) between two user turns does NOT leave consecutive user messages", () => {
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "Who is hiring the most?" },
+      { role: "assistant", content: "" }, // the errored turn - persisted empty, dropped by the filter
+      { role: "user", content: "How many of those are in SF?" },
+    ]);
+    // Both user questions survive (nothing lost), and the sequence alternates for Bedrock.
+    expect(rebuilt.map((m) => m.role)).toEqual(["user"]); // the two users coalesce into one alternation-safe turn
+    expect(alternates(rebuilt)).toBe(true);
+    expect(rebuilt[0].content).toContain("Who is hiring the most?");
+    expect(rebuilt[0].content).toContain("How many of those are in SF?");
+  });
+
+  it("a normal alternating history is unchanged (no spurious coalescing)", () => {
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "q2" },
+      { role: "assistant", content: "a2" },
+      { role: "user", content: "q3" },
+    ]);
+    expect(rebuilt).toEqual([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "q2" },
+      { role: "assistant", content: "a2" },
+      { role: "user", content: "q3" },
+    ]);
+    expect(alternates(rebuilt)).toBe(true);
+  });
+});
 
 describe("chartTypeFor maps each catalog tool to its designated visual (AC-11)", () => {
   it("pins the visuals from the brief case table", () => {
@@ -179,14 +221,27 @@ describe("emptyPart clears a tool's skeleton on a 0-row result (empty = plain mo
   });
 });
 
-describe("toModelOutput is compact - the model sees the verdict, not the raw rows", () => {
-  it("returns the verdict, sample size, and row count only", () => {
-    const r = result([{ company: "Google", count: 4 }], 10);
+describe("toModelOutput is compact - the model sees the verdict + labels, not the raw rows", () => {
+  it("returns the verdict, sample size, row count, and entity labels only", () => {
+    const r = result([{ company: "Google", count: 4 }, { company: "YouTube", count: 2 }], 10);
     const insight = buildInsight({ id: "m4", tool: "top_companies", params: {}, result: r });
     const out = toModelOutput(insight);
     expect(out.verdict).toBe(insight.verdict);
     expect(out.sampleN).toBe(10);
     expect(out).not.toHaveProperty("series");
+    // 018 strand 2: the row LABELS (entities) ground the model's chip/follow-up reasoning.
+    expect(out.labels).toEqual(["Google", "YouTube"]);
+  });
+
+  it("coalesces a null/empty entity label to 'unspecified' (never a bare null)", () => {
+    const r = result([{ city: null, count: 5 }, { city: "", count: 3 }], 8);
+    const insight = buildComposedInsight({
+      id: "m4b",
+      params: { measures: ["count"], dimensions: ["city"] },
+      chartType: "bars",
+      result: r,
+    });
+    expect(toModelOutput(insight).labels).toEqual(["unspecified", "unspecified"]);
   });
 });
 
@@ -227,7 +282,10 @@ describe("refusalPart carries the guard reason for the UI to render like an acti
 });
 
 describe("extractAssistantPersistence pulls the persisted content + card payload (AC-13)", () => {
-  it("joins text parts and keeps the single data-insight payload", () => {
+  // 018 strand 2: a turn that emits a data card persists the code-derived VERDICT as its content, NOT
+  // the model's accompanying prose (which could name entities/numbers with no DB rows behind them). The
+  // card is the single answer surface; the honest verdict keeps the rebuilt history accurate + alternating.
+  it("persists the code-derived verdict (not the model's prose) and keeps the data-insight payload", () => {
     const insight = buildInsight({
       id: "i1",
       tool: "top_companies",
@@ -237,12 +295,13 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
     const message = {
       role: "assistant",
       parts: [
-        { type: "text", text: "Here is what I found." },
+        { type: "text", text: "Apple, Amazon, and Meta are also hiring aggressively right now." },
         { type: "data-insight", id: "i1", data: insight },
       ],
     };
     const { content, parts } = extractAssistantPersistence(message);
-    expect(content).toBe("Here is what I found.");
+    expect(content).toBe(insight.verdict); // the fabricated prose is dropped
+    expect(content).not.toContain("Apple");
     expect(parts).toEqual(insight);
   });
 
@@ -403,7 +462,44 @@ describe("Should_FallBackToFitChartType_When_RawPickUnfit (chartTypeForShape, AC
   it("restricts donut to a count measure - a non-count share-of-whole falls back to bars (ruling 29)", () => {
     expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["median_salary"] }, "donut", 4)).toBe("bars");
     expect(chartTypeForShape({ dimensions: ["location_kind"], measures: ["p25_salary"] }, "donut", 3)).toBe("bars");
-    expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["count", "median_salary"] }, "donut", 4)).toBe("bars");
+  });
+
+  // 018 strand 3: two measures on one categorical axis have no shared scale (a count next to a salary),
+  // so a single-dimension 2-measure result routes to a TABLE, never grouped shared-axis bars.
+  it("routes a two-measure single-dimension result to a table (no shared-axis nonsense)", () => {
+    expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["count", "median_salary"] }, "donut", 4)).toBe("table");
+    expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["p25_salary", "p75_salary"] }, "bars", 4)).toBe("table");
+  });
+
+  // 018 strand 3: a trend needs >= 3 points to read as a line; fewer routes to a table.
+  it("routes a time bucket with fewer than 3 points to a table (a trend needs >= 3 points)", () => {
+    expect(chartTypeForShape({ dimensions: [], bucket: "month" }, "trend", 2)).toBe("table");
+    expect(chartTypeForShape({ dimensions: [], bucket: "month" }, "trend", 1)).toBe("table");
+    expect(chartTypeForShape({ dimensions: [], bucket: "month" }, "trend", 3)).toBe("trend");
+  });
+
+  // 018 strand 3: a donut is honest only for a TRUE whole - its slices must sum to the sample. A
+  // truncated top-N (slices summing below sampleN) falls back to bars even at <= 6 slices.
+  it("serves a donut only when the slices sum to the sample (a true whole), else bars", () => {
+    expect(
+      chartTypeForShape({ dimensions: ["location_kind"], measures: ["count"] }, "donut", 3, { sliceSum: 10, sampleN: 10 }),
+    ).toBe("donut");
+    expect(
+      chartTypeForShape({ dimensions: ["company"], measures: ["count"] }, "donut", 5, { sliceSum: 40, sampleN: 3488 }),
+    ).toBe("bars");
+  });
+
+  // 05-testing audit gap fill: donutIsWhole uses a strict `sliceSum === sampleN` equality. The case above
+  // only exercises a slice sum far below the sample (40 of 3488); this pins the exact boundary - slices
+  // summing to EXACTLY the sample (a true whole) vs one short of it (a truncated top-N, however small the
+  // shortfall) so an off-by-one wholeness check would be caught.
+  it("pins the donut wholeness boundary: slices == sampleN is a whole, one short of it is not", () => {
+    expect(
+      chartTypeForShape({ dimensions: ["experience_level"], measures: ["count"] }, "donut", 3, { sliceSum: 10, sampleN: 10 }),
+    ).toBe("donut");
+    expect(
+      chartTypeForShape({ dimensions: ["experience_level"], measures: ["count"] }, "donut", 3, { sliceSum: 9, sampleN: 10 }),
+    ).toBe("bars");
   });
 
   it("corrects an unfit pick on a single-dimension shape to bars", () => {
@@ -630,6 +726,202 @@ describe("buildComposedInsight builds a strict-valid insight for the seventh too
     expect(insight.verdict.toLowerCase()).toContain("lowest");
     expect(insight.verdict).toContain("60000");
     expect(insight.verdict).not.toContain("San Francisco"); // the real max is NOT named as the leader
+  });
+});
+
+// 018 strand 1: sampleN (the whole) is the ONE denominator every verdict shows, never the sum of the
+// shown rows - a top-N LIMIT truncates that sum below the true total, and the source line shows sampleN,
+// so the two would disagree. These pin the verdict "of N" to sampleN when the shown rows sum LESS.
+describe("Strand 1: sampleN is the sole denominator (verdict matches the source line)", () => {
+  const truncated = (
+    rows: Record<string, unknown>[],
+    sampleN: number,
+  ): QueryResult => ({ sql: "SELECT 1", rows, meta: { sampleN, freshestAt: "2026-07-18 06:00:00", openSet: true } });
+
+  it("composed count-ranked names the leader over sampleN, not the sum of the shown top-N", () => {
+    // 20 titles shown summing to 300, but 3,257 postings total (many titles below the LIMIT).
+    const insight = buildComposedInsight({
+      id: "d1",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      result: truncated([{ company: "Google", count: 200 }, { company: "Meta", count: 100 }], 3257),
+    });
+    expect(insight.verdict).toContain("of 3257");
+    expect(insight.verdict).not.toContain("of 300");
+  });
+
+  it("composed non-ranked count totals sampleN, not the shown sum", () => {
+    const insight = buildComposedInsight({
+      id: "d2",
+      params: { measures: ["count"], dimensions: ["company", "city"] },
+      chartType: "table",
+      result: truncated([{ company: "Google", city: "NYC", count: 50 }], 3488),
+    });
+    expect(insight.verdict).toContain("3488 postings in total");
+  });
+
+  it("template share_split uses sampleN as the share base, not the sum of the shown slices", () => {
+    const insight = buildInsight({
+      id: "d3",
+      tool: "share_split",
+      params: { dimension: "experience" },
+      result: truncated([{ label: "Senior", count: 40 }, { label: "Junior", count: 30 }], 3488),
+    });
+    // "of 3488", never "of 70" (the shown slices) - matches the source line's sampleN.
+    expect(insight.verdict).toContain("of 3488");
+    expect(insight.verdict).not.toContain("of 70");
+  });
+
+  it("template postings_trend totals sampleN, not the sum of the shown (LIMITed) day buckets", () => {
+    const insight = buildInsight({
+      id: "d4",
+      tool: "postings_trend",
+      params: { days: 3650 },
+      result: { sql: "SELECT 1", rows: [{ day: "2026-07-20", count: 9 }], meta: { sampleN: 3315, freshestAt: "2026-07-18 06:00:00" } },
+    });
+    expect(insight.verdict).toContain("3315 new postings");
+  });
+
+  it("composed range names it as the span across the shown rows, not an implied full-corpus range", () => {
+    const insight = buildComposedInsight({
+      id: "d5",
+      params: { measures: ["median_salary"], bucket: "month" },
+      chartType: "trend",
+      result: truncated([{ bucket: "2026-05-01", median_salary: 150000 }, { bucket: "2026-06-01", median_salary: 170000 }], 900),
+    });
+    expect(insight.verdict).toContain("across the 2 shown");
+  });
+});
+
+// 018 strand 3: signal-quality gates - fragmentation, honest ties, currency threading, and the
+// template-side visual corrections (min trend points, donut only for a true whole).
+describe("Strand 3: signal-quality gates", () => {
+  const composed = (
+    rows: Record<string, unknown>[],
+    sampleN: number,
+    extra: Partial<QueryResult["meta"]> = {},
+  ): QueryResult => ({ sql: "SELECT 1", rows, meta: { sampleN, freshestAt: "2026-07-18 06:00:00", openSet: true, ...extra } });
+
+  it("does NOT crown a fragmented grouping - the leader's share is below the floor (no dominant group)", () => {
+    // The top title holds 40 of 3,257 (~1.2%), far below the floor: many near-equal titles, no leader.
+    const insight = buildComposedInsight({
+      id: "f1",
+      params: { measures: ["count"], dimensions: ["title"] },
+      chartType: "bars",
+      result: composed([{ title: "Software Engineer", count: 40 }, { title: "Data Scientist", count: 35 }], 3257),
+    });
+    expect(insight.verdict.toLowerCase()).toContain("no single role");
+    expect(insight.verdict).not.toContain("leads");
+    expect(insight.verdict).toContain("40 of 3257");
+    // The card still renders the top-N bars, honestly labeled.
+    if (insight.kind === "chart") expect(insight.series.length).toBe(2);
+  });
+
+  // 05-testing audit gap fill: the two tests above sit far below (1.2%) and far above (93%) the 0.1
+  // floor; neither pins the BOUNDARY itself. minLeaderShare compares with strict `<`, so a share exactly
+  // AT the floor must NOT fragment (it is not LESS than the floor) and a share just below it must.
+  it("pins the fragmentation floor boundary: exactly at 0.1 is a normal leader, just below it fragments", () => {
+    const atFloor = buildComposedInsight({
+      id: "fb1",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      result: composed([{ company: "Google", count: 10 }, { company: "Meta", count: 5 }], 100),
+    });
+    expect(atFloor.verdict).toContain("Google leads with 10 of 100");
+    expect(atFloor.verdict.toLowerCase()).not.toContain("no single");
+
+    const justBelow = buildComposedInsight({
+      id: "fb2",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      result: composed([{ company: "Google", count: 9 }, { company: "Meta", count: 5 }], 100),
+    });
+    expect(justBelow.verdict.toLowerCase()).toContain("no single company");
+    expect(justBelow.verdict).not.toContain("leads");
+  });
+
+  it("keeps the normal leader verdict when one group genuinely dominates (share above the floor)", () => {
+    const insight = buildComposedInsight({
+      id: "f2",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      result: composed([{ company: "Google", count: 3257 }, { company: "YouTube", count: 135 }], 3488),
+    });
+    expect(insight.verdict).toContain("Google leads with 3257 of 3488");
+    expect(insight.verdict.toLowerCase()).not.toContain("no single");
+  });
+
+  // 018 review-fix (nit, rec 9 spirit for counts): a top-two count tie above the fragmentation floor still
+  // said "<X> leads with N" - a false superlative. rec 9 gives salary_compare an explicit "about the same"
+  // tie; the count-ranked path now has the equivalent. When the top two counts are equal, phrase it as a
+  // tie ("<X> and <Y> are level"), never "leads".
+  it("a top-two count tie is reported as level, never a false 'leads with' superlative (rec 9 for counts)", () => {
+    const insight = buildComposedInsight({
+      id: "tie1",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      // Google and Meta both at 40 of 100 (share 0.4, well above the 0.1 floor - not fragmented, a real tie).
+      result: composed([{ company: "Google", count: 40 }, { company: "Meta", count: 40 }, { company: "Amazon", count: 20 }], 100),
+    });
+    expect(insight.verdict).not.toContain("leads");
+    expect(insight.verdict.toLowerCase()).toContain("level");
+    expect(insight.verdict).toContain("Google");
+    expect(insight.verdict).toContain("Meta");
+    expect(insight.verdict).toContain("40 of 100");
+  });
+
+  it("salary_compare on an exact tie says 'about the same', never a false 'pays more'", () => {
+    const insight = buildInsight({
+      id: "t1",
+      tool: "salary_compare",
+      params: {},
+      result: composed([{ city: "San Francisco", median: 180000, n: 10 }, { city: "Los Angeles", median: 180000, n: 8 }], 18),
+    });
+    expect(insight.verdict.toLowerCase()).toContain("about the same");
+    expect(insight.verdict).not.toContain("pays more");
+  });
+
+  it("threads the salary currency into the insight meta (for the source line + money formatter)", () => {
+    const insight = buildComposedInsight({
+      id: "c1",
+      params: { measures: ["median_salary"], dimensions: ["experience_level"] },
+      chartType: "bars",
+      result: composed([{ experience_level: "Senior", median_salary: 180000 }], 500, { currency: "USD" }),
+    });
+    expect(insight.meta.currency).toBe("USD");
+  });
+
+  it("corrects a template trend with < 3 points to a table, and a non-whole share_split donut to bars", () => {
+    const trend = buildInsight({
+      id: "v1",
+      tool: "postings_trend",
+      params: { days: 7 },
+      result: composed([{ day: "2026-07-20", count: 9 }, { day: "2026-07-19", count: 5 }], 14, { openSet: undefined }),
+    });
+    expect(trend.kind).toBe("table"); // only 2 points
+
+    // share_split slices summing BELOW sampleN (a truncated/partial whole) -> bars, not a false donut.
+    const donut = buildInsight({
+      id: "v2",
+      tool: "share_split",
+      params: { dimension: "experience" },
+      result: composed([{ label: "Senior", count: 40 }, { label: "Junior", count: 30 }], 3488),
+    });
+    expect(donut.kind).toBe("chart");
+    if (donut.kind === "chart") expect(donut.chartType).toBe("bars");
+  });
+
+  it("coalesces null/empty group labels in a chart series to 'unspecified' (never a bare null axis)", () => {
+    const insight = buildComposedInsight({
+      id: "n1",
+      params: { measures: ["count"], dimensions: ["city"] },
+      chartType: "bars",
+      result: composed([{ city: "San Francisco", count: 5 }, { city: null, count: 3 }, { city: "", count: 2 }], 10),
+    });
+    if (insight.kind === "chart") {
+      const cities = insight.series.map((r) => r.city);
+      expect(cities).toEqual(["San Francisco", "unspecified", "unspecified"]);
+    }
   });
 });
 

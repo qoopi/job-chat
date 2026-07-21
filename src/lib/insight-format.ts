@@ -24,11 +24,22 @@ export function refusalCopy(reason: RefusalReason): string {
   return "The service has reached today's message limit. Try again tomorrow.";
 }
 
-/** Money for verdicts and axes: whole thousands read as $Nk, smaller values in full. */
-export function formatUsd(value: number): string {
+// Symbols for the currencies the corpus is likely to carry; anything else prefixes its ISO code
+// ("CHF 180k"), so the amount is never mislabeled with a "$" it is not in (018 strand 3).
+const CURRENCY_SYMBOL: Record<string, string> = { USD: "$", EUR: "€", GBP: "£", CAD: "$", AUD: "$" };
+
+/** Money for tables and axes: whole thousands read as <sym>Nk, smaller values in full. Defaults to USD
+ *  so existing callers are unchanged; a salary insight passes the real currency it was filtered to. */
+export function formatMoney(value: number, currency = "USD"): string {
   const n = Math.round(value);
-  if (Math.abs(n) >= 1000) return `$${Math.round(n / 1000)}k`;
-  return `$${n}`;
+  const prefix = CURRENCY_SYMBOL[currency] ?? `${currency} `;
+  if (Math.abs(n) >= 1000) return `${prefix}${Math.round(n / 1000)}k`;
+  return `${prefix}${n}`;
+}
+
+/** The USD-pinned money formatter (the salary histogram is inherently one currency). */
+export function formatUsd(value: number): string {
+  return formatMoney(value, "USD");
 }
 
 /**
@@ -61,15 +72,20 @@ export function labelKeyOf(rows: DataPoint[]): string {
   return key ?? Object.keys(first)[0] ?? "label";
 }
 
-/** Every numeric measure column, in row order, excluding the label (grouped-bars support). */
+// `n` is a SAMPLE-SIZE context column (salary_compare returns {city, median, n}), never a series to
+// plot - a count of ~3 beside a median of ~180000 would be an invisible, misleading second bar. Excluded
+// from the plottable measures so BarsChart never renders it as a grouped series (018 strand 3).
+const CONTEXT_KEYS = new Set(["n"]);
+
+/** Every numeric measure column, in row order, excluding the label and sample-size context (`n`). */
 export function valueKeysOf(rows: DataPoint[], labelKey: string): string[] {
   const first = rows[0] ?? {};
-  return Object.keys(first).filter((k) => k !== labelKey && isNumeric(first[k]));
+  return Object.keys(first).filter((k) => k !== labelKey && !CONTEXT_KEYS.has(k) && isNumeric(first[k]));
 }
 
 // When a row carries several measures (e.g. {median, n}) the headline one wins; a bare {label, count}
-// falls through to its single measure.
-const MEASURE_PRIORITY = ["median", "value", "amount", "total", "count", "n"];
+// falls through to its single measure. (`n` is excluded from the plottable set above.)
+const MEASURE_PRIORITY = ["median", "value", "amount", "total", "count"];
 
 /** The single measure a one-series chart plots: the highest-priority numeric column present. */
 export function valueKeyOf(rows: DataPoint[], labelKey: string): string {

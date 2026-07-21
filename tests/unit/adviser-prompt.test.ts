@@ -119,6 +119,39 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toMatch(/never call a second data tool|no second data tool/);
   });
 
+  // 018 strand 2: when a tool succeeds the card is the WHOLE answer - the model adds no prose (the
+  // fabrication surface, where the model narrated companies with zero DB rows, is closed).
+  it("forbids prose framing when a tool renders a card (the card is the answer)", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toMatch(/add no prose|no prose/);
+    expect(p).toMatch(/card.*(is|are).*(the )?(complete )?answer/);
+  });
+
+  // 018 strand 2: the model may never name an entity or number absent from the tool result it received.
+  it("forbids naming any entity or number absent from the tool result", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toMatch(/not present in the tool result|absent from (that|the) result|row labels/);
+  });
+
+  // 018 strand 4: a follow-up inheritance rule (carry the prior turn's filters, change only the named one)
+  // and a multi-city example so "in LA or NYC" resolves via the cities IN-list.
+  it("encodes the follow-up inheritance rule and multi-city guidance", () => {
+    expect(ADVISER_V2).toContain("FOLLOW-UP INHERITANCE");
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toMatch(/carry the prior|carry .*forward|inherit/);
+    expect(p).toMatch(/la or nyc|los angeles.*new york/);
+    expect(p).toContain("cities");
+  });
+
+  // 018 strand 5: a data-scope honesty rule - qualify whole-market questions to the sample, never present
+  // the sample as the entire market (the concrete numbers arrive at runtime via the DATA SCOPE note).
+  it("encodes the data-scope honesty rule (qualify whole-market questions to the sample)", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toContain("data scope");
+    expect(p).toMatch(/whole job market|entire market|whole market/);
+    expect(p).toMatch(/qualify/);
+  });
+
   // 2026-07-21 vision refinement (answer-anything-then-steer): the agent answers ANY question, then
   // politely steers back to jobs. These pins hold the taxonomy + guardrails the prompt now encodes.
   it("encodes the answer-anything-then-steer vision", () => {

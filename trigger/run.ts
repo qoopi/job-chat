@@ -1,6 +1,7 @@
 import type { ToolSet } from "ai";
 import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
+import type { CoverageProfile } from "@shared/analytics";
 import { checkConversationGuards } from "./guard";
 import {
   buildModelHistory,
@@ -48,10 +49,27 @@ export interface ChatRunDeps<R> {
   emit: (part: EmitPart) => void;
   now: () => Date;
   system: string;
+  /** The corpus shape, memoized at the source (018 strand 5). When present, a one-line DATA SCOPE note
+   *  is appended to the system prompt so the agent can qualify whole-market questions to the real sample. */
+  coverageProfile?: () => Promise<CoverageProfile>;
   streamModel: StreamModel<R>;
 }
 
 type Gate = { kind: "refuse"; reason: RefusalPartReason } | { kind: "run"; history: ModelMessage[] };
+
+/** The one-line DATA SCOPE note appended to the system prompt from the corpus profile (018 strand 5). */
+function dataScopeNote(p: CoverageProfile): string {
+  const sharePct = Math.round(p.topCompanyShare * 100);
+  const salaryPct = Math.round(p.salaryCoverage * 100);
+  const updated = p.freshestAt.slice(0, 10); // YYYY-MM-DD
+  return (
+    `DATA SCOPE: you answer from ${p.total.toLocaleString()} open postings across ${p.distinctCompanies} companies` +
+    ` - ${sharePct}% are ${p.topCompany} - updated ${updated}; salary is present on ~${salaryPct}%.` +
+    ` When a question implies the WHOLE job market ("the US job market", "who pays most in tech"), QUALIFY` +
+    ` your answer to this sample ("across our current sample, which is mostly ${p.topCompany}...") - never` +
+    ` present the sample as the whole market. Questions about what is IN the sample ("at ${p.topCompany}", "in SF") stay unqualified.`
+  );
+}
 
 export function createChatRun<R>(deps: ChatRunDeps<R>) {
   return async (args: ChatRunArgs): Promise<R | undefined> => {
@@ -79,6 +97,18 @@ export function createChatRun<R>(deps: ChatRunDeps<R>) {
       return undefined;
     }
 
-    return deps.streamModel({ system: deps.system, messages: gate.history, tools, signal });
+    // Append the DATA SCOPE note so the agent qualifies whole-market questions honestly. A profile
+    // failure must never block the turn - `system` still holds the base prompt (set above), so on any
+    // error we simply skip the note.
+    let system = deps.system;
+    if (deps.coverageProfile) {
+      try {
+        system = `${deps.system}\n\n${dataScopeNote(await deps.coverageProfile())}`;
+      } catch {
+        // keep the base prompt
+      }
+    }
+
+    return deps.streamModel({ system, messages: gate.history, tools, signal });
   };
 }
