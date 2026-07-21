@@ -23,6 +23,7 @@ import {
   type LcpTarget,
 } from "@/lib/chat-ui";
 import { isAuthDialogOpen } from "@/lib/layers";
+import { queueDraft, takeQueuedDraft } from "@/lib/queued-draft";
 import {
   closeAuthDialog,
   openAuthDialog,
@@ -223,10 +224,12 @@ export function ChatClient({
     async (raw: string) => {
       const text = raw.trim();
       if (!text) return;
-      // refresh #2 s8: while capped, a send does not go to the server - it opens the register dialog with
-      // the draft queued (kept in the composer), and after signing in the user re-sends it.
+      // refresh #2 s8 (AC-D31/D32): while capped, a send does not go to the server - it queues the draft
+      // (in the composer AND in sessionStorage, which survives the Google full-page sign-in redirect) and
+      // opens the register dialog. On return - now signed in - the mount effect auto-sends it (ruling 1).
       if (capped) {
         setDraft(text);
+        queueDraft(conversationId, text);
         openAuthDialog();
         return;
       }
@@ -379,6 +382,13 @@ export function ChatClient({
     queueMicrotask(() => {
       if (e2e && pendingQuestion) void send(pendingQuestion);
       else if (!e2e && autoStream) void attachOnArrival();
+      // refresh #2 s8 (AC-D32): a capped guest's draft queued before the Google sign-in redirect carries
+      // across via sessionStorage; on return - now signed in - auto-send it exactly once (takeQueuedDraft
+      // clears it). Only when signed in, so a guest reload never loops back into the capped guard.
+      else if (signedIn) {
+        const queued = takeQueuedDraft(conversationId);
+        if (queued) void send(queued);
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -61,6 +61,7 @@ const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
 afterEach(() => {
   cleanup();
   closeAuthDialog();
+  sessionStorage.clear();
   sendMessageMock.mockReset();
   startConversationMock.mockReset();
 });
@@ -121,6 +122,40 @@ test("Should_OpenDialogWithDraftQueued_When_SendWhileCapped: chat composer", asy
   ).toBeTruthy();
   expect(box.value).toBe("One more question");
   expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  // AC-D32 / ruling 1: the draft is stashed in sessionStorage so it survives the Google full-page redirect
+  expect(
+    sessionStorage.getItem(`jobchat_queued_draft:${CONVERSATION_ID}`),
+  ).toBe("One more question");
+});
+
+// AC-D32: on the signed-in return (a full-page reload after the Google redirect), ChatClient takes the
+// sessionStorage-carried draft and auto-sends it exactly once, then clears it.
+test("Should_AutoSendQueuedDraft_When_SignInSucceedsAfterCap", async () => {
+  sessionStorage.setItem(
+    `jobchat_queued_draft:${CONVERSATION_ID}`,
+    "Queued question",
+  );
+  sendMessageMock.mockResolvedValue({ ok: true, publicAccessToken: "tok" });
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={[]}
+      e2e={false}
+      signedIn
+      accountName="Ada"
+    />,
+  );
+
+  await waitFor(() =>
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      CONVERSATION_ID,
+      "Queued question",
+    ),
+  );
+  expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  expect(
+    sessionStorage.getItem(`jobchat_queued_draft:${CONVERSATION_ID}`),
+  ).toBeNull(); // cleared (once)
 });
 
 test("Should_ShowRegisterCardAndKeepComposerEnabled_When_Capped: landing composer", async () => {
