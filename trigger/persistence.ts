@@ -8,7 +8,7 @@ import { MAX_INPUT_CHARS } from "./guard";
 // the history rebuild. Pure over an injected Store - unit-testable without Trigger or Bedrock.
 
 type MessagePartLike = { type: string; text?: string; id?: string; data?: unknown };
-type MessageLike = { parts?: MessagePartLike[] };
+type MessageLike = { id?: string; parts?: MessagePartLike[] };
 
 // A persisted card payload is a strict-valid insight, an error marker, or a refusal marker - anything
 // else (notably a loading skeleton, whose `status:"loading"` fails every branch) is dropped so a
@@ -71,14 +71,15 @@ export function extractAssistantPersistence(message: MessageLike): {
 /**
  * Persist the assistant turn (content + card payload) via the store. Called from the agent's
  * `onTurnComplete` on both normal and stopped completion (AC-13; the stopped case is the cancelled-
- * run partial-persistence path).
+ * run partial-persistence path). The row is keyed by `responseMessage.id` (a uuid minted once for the
+ * turn), so a replayed or re-persisted completion upserts into the same row instead of duplicating.
  */
 export async function persistAssistantTurn(
   store: Store,
   args: { conversationId: string; responseMessage: MessageLike },
 ): Promise<void> {
   const { content, parts } = extractAssistantPersistence(args.responseMessage);
-  await store.appendMessage(args.conversationId, "assistant", content, parts);
+  await store.appendMessage(args.conversationId, "assistant", content, parts, args.responseMessage.id);
 }
 
 /** Read a model message's user text (content is a string or an array of text parts). */

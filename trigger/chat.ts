@@ -82,11 +82,18 @@ const chatRun = createChatRun({
   streamModel,
 });
 
+// The response message's id, minted once per assistant turn. The AI SDK defaults to a 16-char
+// generateId; we override to a uuid so the id fits the messages.id uuid column AND lets the assistant
+// row be persisted keyed by it (idempotent upsert), with no column migration.
+export const generateMessageId = (): string => crypto.randomUUID();
+
 export const jobChatAgent = chat.agent({
   id: AGENT_ID,
   maxTurns: AGENT_LIMITS.maxTurns,
   tools: () => buildCatalogTools({ analytics: analytics(), emit }),
   run: (payload) => chatRun(payload),
+  // Mint uuid response ids so responseMessage.id is a uuid the store can key the assistant row on.
+  uiMessageStreamOptions: { generateMessageId },
   // Persist the assistant turn on completion. Fires for stopped turns too (responseMessage has its
   // aborted parts cleaned up), which is how a stopped answer's partial card survives to resume -
   // verified live, see the epic decision log (no client-snapshot fallback needed).
