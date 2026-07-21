@@ -9,22 +9,17 @@ import { MockChatTransport } from "./mock-transport";
 import { readPersistedSession, writePersistedSession } from "./chat-session-store";
 import type { jobChatAgent } from "../../trigger/chat";
 
-// The transport surface ChatClient drives: the standard `ChatTransport` plus `setSession`, the SDK hook
-// through which a server-minted session token + `isStreaming` are threaded into the transport's session
-// cache. That hydration is what makes `reconnectToStream` (via `useChat.resumeStream`) subscribe instead
-// of returning null on a fresh mount (006 P0). Both the real transport and the E2E mock implement it.
+// The transport surface ChatClient drives: the standard `ChatTransport` plus `setSession` - the arrival
+// attach hydrates a freshly-minted token + `isStreaming` so `reconnectToStream` (via
+// `useChat.resumeStream`) resumes the just-triggered run instead of returning null on a fresh mount
+// (006 P0; 024 deletes arrival-attach). The follow-up send no longer threads session state - the
+// transport owns the `.out` cursor and refreshes its token via `accessToken` on 401 (F1/F7). Both the
+// real transport and the E2E mock implement it.
 export interface JobChatTransport extends ChatTransport<UIMessage> {
   setSession(
     chatId: string,
     session: { publicAccessToken: string; isStreaming?: boolean; lastEventId?: string },
   ): void;
-  // Reads the transport's tracked session state - the `.out` cursor (`lastEventId`) in particular, which
-  // a follow-up send must thread back through `setSession` so the subscribe resumes AFTER the prior turn
-  // instead of replaying the session log from the start (006 live-stream replay fix). Both the real
-  // transport and the E2E mock implement it.
-  getSession(
-    chatId: string,
-  ): { publicAccessToken: string; isStreaming?: boolean; lastEventId?: string } | undefined;
 }
 
 // The transport seam. Production: the standard Trigger.dev chat transport (skill-endorsed, unchanged) -

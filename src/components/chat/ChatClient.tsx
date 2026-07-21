@@ -320,27 +320,14 @@ export function ChatClient({
             failSend(text); // invalid_input / not_found -> toast + preserved draft (interaction-spec section 4)
             return;
           }
-          // Hydrate the transport with the action's scoped token, then DELIVER + WATCH the turn via the
-          // transport's `sendMessages` (`useChat.sendMessage`). That one primitive appends the turn to
-          // `.in` (which triggers the run) AND subscribes with wait - the only SDK 4.5.4 path that streams
-          // a freshly-triggered follow-up live. `resumeStream`/`reconnectToStream` forces peekSettled,
-          // built for reload-resume: attaching to a run triggered milliseconds earlier it reads the
-          // settled prior turn and never delivers the fresh chunks (006 diagnosis, routed to 004).
-          // Passing `messageId` makes the SDK reconcile with the optimistic bubble above (replace in place),
-          // so the user turn renders exactly once.
-          //
-          // Carry the prior turn's `.out` cursor forward. `sendMessages` subscribes with
-          // `lastEventId: state.lastEventId` (SDK 4.5.4 chat.js); `setSession` REPLACES the cached session,
-          // so passing it without `lastEventId` would WIPE the cursor and the follow-up subscribe would
-          // replay the session `.out` log from the START - re-delivering the prior turn's chunks, which the
-          // AI SDK cannot reconcile by id (they accumulate into the one new streaming message: 006 live
-          // artifact). Threading the tracked cursor resumes AFTER the prior turn, so only this turn streams.
-          const prior = transport.getSession(conversationId);
-          transport.setSession(conversationId, {
-            publicAccessToken: r.publicAccessToken,
-            isStreaming: true,
-            lastEventId: prior?.lastEventId,
-          });
+          // DELIVER + WATCH the turn via the transport's `sendMessages` (`useChat.sendMessage`). That one
+          // primitive appends the turn to `.in` (which triggers the run) AND subscribes with wait - the
+          // only SDK 4.5.4 path that streams a freshly-triggered follow-up live. `resumeStream` forces
+          // peekSettled (reload-resume): attaching to a run triggered milliseconds earlier it reads the
+          // settled prior turn and never delivers the fresh chunks (006 diagnosis, routed to 004). The
+          // send path threads no session state: the transport owns the `.out` cursor and refreshes its
+          // token via the `accessToken` callback on 401 (F1/F7). Passing `messageId` makes the SDK
+          // reconcile with the optimistic bubble above (replace in place), so the user turn renders once.
           await sendMessage({ text, messageId: userMessageId });
         } catch {
           rollbackEcho(); // AC-22: a failed send returns to the composer (toast + draft), not a stuck bubble
@@ -357,7 +344,6 @@ export function ChatClient({
       router,
       sendMessage,
       setMessages,
-      transport,
       showRefusal,
       failSend,
       capped,
@@ -392,7 +378,14 @@ export function ChatClient({
     // must not run synchronously during the mount effect (cascading-render rule).
     queueMicrotask(() => {
       if (e2e && pendingQuestion) void send(pendingQuestion);
-      else if (!e2e && autoStream) void attachOnArrival();
+      else if (!e2e && autoStream) {
+        void attachOnArrival();
+        // Strip ?new=1 so a later reload cannot re-run the arrival attach - its cursor-less resume replays
+        // settled turns as duplicate bubbles (F4). router.replace soft-navigates: the same ChatClient
+        // instance keeps its state and the in-flight stream, only the searchParam clears, so a reload
+        // mounts with autoStream=false and resumes via the persisted session instead (R1). 024 deletes it.
+        router.replace(`/chat/${conversationId}`);
+      }
       // refresh #2 s8 (AC-D32): a capped guest's draft queued before the Google sign-in redirect carries
       // across via sessionStorage; on the genuine post-auth return (fromAuth) - now signed in - auto-send
       // it exactly once. Fix round (item 2): the "/chat/new" key is SHARED, so a later ORDINARY signed-in
