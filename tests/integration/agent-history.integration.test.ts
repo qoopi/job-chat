@@ -2,7 +2,7 @@ import { afterEach, beforeAll, afterAll, describe, expect, it } from "vitest";
 import postgres, { type Sql } from "postgres";
 import { createStore, type Store } from "@shared/store";
 import type { EmitPart } from "../../trigger/tools";
-import type { ModelMessage } from "../../trigger/parts";
+import { buildInsight, persistAssistantTurn, type ModelMessage } from "../../trigger/parts";
 import { createChatRun } from "../../trigger/run";
 
 // 004 round 4 root-cause guard. In production every turn re-answered ALL prior questions: the model
@@ -131,6 +131,74 @@ describe.skipIf(!hasCreds)("agent history reconstruction against real Postgres",
       "q2",
       "q3",
     ]);
+  });
+
+  // 05-testing audit gap fill (018 strand 2): the turn-3 test above proves role-alternation rebuild with
+  // SYNTHETIC assistant content ("a1"/"a2"); it never exercises a REAL card turn's persisted content. The
+  // Completion Report's deviation (1) states strand 2 persists the honest VERDICT (not empty content)
+  // specifically so history stays role-alternating for Bedrock - this drives that claim end to end: seed
+  // turn 1 as a genuine data-insight card via persistAssistantTurn (the exact site strand 2 changed), then
+  // rebuild for turn 2 and assert the assistant slot is the verdict (non-empty), never dropped.
+  it("rebuilds a card turn's persisted VERDICT as the assistant slot, preserving alternation for turn 2", async () => {
+    const userId = freshGuestId();
+    await store.getOrCreateUser(userId);
+    const conv = await store.createConversation(userId, "Who is hiring the most?");
+    await store.appendMessage(conv.id, "user", "Who is hiring the most?", null);
+
+    const card = buildInsight({
+      id: "m1",
+      tool: "top_companies",
+      params: {},
+      result: {
+        sql: "SELECT company, count() FROM postings FINAL GROUP BY company",
+        rows: [{ company: "Google", count: 4 }],
+        meta: { sampleN: 10, freshestAt: "2026-07-18 06:00:00" },
+      },
+    });
+    // The exact strand-2 persist site: a turn with fabricated-sounding prose alongside a card persists
+    // the CODE-derived verdict, never the prose.
+    const responseMessage = {
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Apple and Meta are also ramping up hiring." },
+        { type: "data-insight", id: "m1", data: card },
+      ],
+    };
+    await persistAssistantTurn(store, { conversationId: conv.id, responseMessage });
+
+    const captured: ModelMessage[][] = [];
+    const run = createChatRun({
+      withStore: (fn) => fn(store),
+      guards: { guestCap: HUGE, dailyBudget: HUGE },
+      emit: () => {},
+      now,
+      system: "SYS",
+      streamModel: ({ messages }) => {
+        captured.push(messages);
+        return "streamed" as const;
+      },
+    });
+
+    await run({
+      chatId: conv.id,
+      messages: [
+        { role: "user", content: "Who is hiring the most?" },
+        { role: "user", content: "How much in SF?" },
+      ],
+      tools: {},
+      signal: new AbortController().signal,
+    });
+
+    expect(captured).toHaveLength(1);
+    // Alternating user/assistant/user - the card turn's slot is non-empty (the verdict), so it was NOT
+    // filtered out by buildModelHistory's empty-content drop, which would otherwise collapse this into
+    // two consecutive user messages and break Bedrock's strict role-alternation requirement.
+    expect(captured[0]).toEqual([
+      { role: "user", content: "Who is hiring the most?" },
+      { role: "assistant", content: card.verdict },
+      { role: "user", content: "How much in SF?" },
+    ]);
+    expect(captured[0][1].content).not.toContain("Apple"); // the fabricated prose never reaches the model
   });
 
   it("refuses at the cap backstop without ever calling the model seam", async () => {

@@ -156,6 +156,46 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
     expect(profile.freshestAt).toBe(FIXTURE_INGESTED_AT);
   });
 
+  // 05-testing audit gap fill (018 strand 3): every existing dominant-currency test is either a string-
+  // shape unit test against a mocked client, or runs against the AC-11 fixture, which is all-USD - the
+  // real GROUP BY/ORDER BY count() DESC selection logic has never executed against genuinely mixed
+  // currencies on real ClickHouse. This seeds its own small table (3 USD rows, 1 EUR row - USD is the
+  // dominant currency) and proves the salary aggregate filters to USD only and meta.currency surfaces it.
+  it("filters a salary aggregate to the dominant currency on a real mixed-currency dataset", async () => {
+    const MIXED_TABLE = "postings_test_currency";
+    const base = {
+      source: "fixture",
+      region: "California",
+      country: "United States",
+      location_kind: "onsite" as const,
+      employment_type: "full-time",
+      experience_level: "Senior",
+      published_at: "2026-07-18 10:00:00",
+      ingested_at: FIXTURE_INGESTED_AT,
+    };
+    await loadFixtureTable(writer, MIXED_TABLE); // gets the DDL, then we replace the seeded rows below
+    await writer.command({ query: `TRUNCATE TABLE ${MIXED_TABLE}`, clickhouse_settings: { wait_end_of_query: 1 } });
+    await writer.insert({
+      table: MIXED_TABLE,
+      values: [
+        { ...base, external_id: "c1", title: "Engineer", company: "Google", city: "San Francisco", salary_min: 150000, salary_max: 190000, salary_currency: "USD" },
+        { ...base, external_id: "c2", title: "Engineer", company: "Meta", city: "San Francisco", salary_min: 140000, salary_max: 160000, salary_currency: "USD" },
+        { ...base, external_id: "c3", title: "Engineer", company: "Amazon", city: "San Francisco", salary_min: 130000, salary_max: 170000, salary_currency: "USD" },
+        { ...base, external_id: "c4", title: "Engineer", company: "Spotify", city: "Berlin", salary_min: 90000, salary_max: 110000, salary_currency: "EUR" },
+      ],
+      format: "JSONEachRow",
+    });
+
+    const mixedAnalytics = createAnalytics({ client: writer, table: MIXED_TABLE });
+    const res = await mixedAnalytics.runQuery("salary_distribution", {});
+    expect(res.meta.currency).toBe("USD"); // 3 USD vs 1 EUR - USD is dominant
+    expect(res.meta.sampleN).toBe(3); // the EUR row is excluded from the salaried set
+    const totalRows = res.rows.reduce((sum, r) => sum + Number(r.count), 0);
+    expect(totalRows).toBe(3);
+
+    await writer.command({ query: `DROP TABLE IF EXISTS ${MIXED_TABLE}`, clickhouse_settings: { wait_end_of_query: 1 } });
+  });
+
   for (const q of LAUNCH_QUESTIONS) {
     it(`${q.id}: runs ${q.tool}, returns the executed SQL, and matches the fixture (AC-6, AC-11)`, async () => {
       executed.length = 0;

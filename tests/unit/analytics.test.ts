@@ -425,6 +425,18 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     expect(sql).toContain("city IN ('x\\' OR \\'1\\'=\\'1')");
   });
 
+  // 05-testing audit gap fill: the two tests above use a single-element cities array (a clean pair, then
+  // an injection payload as the ONLY element) - neither proves escaping is applied PER-ELEMENT across a
+  // multi-city list, so a bug that escaped only cities[0] (or joined the raw array before wrapping) would
+  // slip through. This probes an injection payload in a NON-first position alongside a clean city.
+  it("escapes a quote break-out in a non-first element of a multi-city IN-list", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], cities: ["Los Angeles", "x' OR '1'='1", "New York"] },
+      "postings",
+    );
+    expect(sql).toContain("city IN ('Los Angeles', 'x\\' OR \\'1\\'=\\'1', 'New York')");
+  });
+
   it("a location_kind equality filter is accepted for the three enum values", () => {
     const { sql } = buildComposedSql({ measures: ["count"], location_kind: "remote" }, "postings");
     expect(sql).toContain("location_kind = 'remote'");

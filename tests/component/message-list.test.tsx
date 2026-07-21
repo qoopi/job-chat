@@ -123,6 +123,34 @@ describe("MessageList", () => {
     expect(container.textContent).not.toContain("Apple and Netflix");
   });
 
+  // 05-testing audit gap fill (018 strand 2): the two tests above prove suppression for a LIVE-shaped
+  // insight turn and for the RESUMED error-card path (AC-25, inherited from 016) - but strand 2 extends
+  // suppression to SUCCESS cards, and no test drove that extension through the real resume/hydration
+  // function for a row persisted BEFORE this fix shipped (extractAssistantPersistence used to persist the
+  // model's fabricated prose alongside the insight card). This proves the exact backward-compat case.
+  test("018 strand 2 resume: a legacy-persisted insight turn (fabricated prose + card stored together) suppresses the prose on resume", () => {
+    const stored: StoredMessage[] = [
+      {
+        id: "a1",
+        role: "assistant",
+        content: "Apple and Netflix are also hiring heavily right now.",
+        parts: insight,
+      },
+    ];
+    const messages = storeToUiMessages(stored);
+    // Hydration itself is agnostic to the card kind: it carries both the legacy prose and the card.
+    expect(messages[0].parts).toEqual([
+      { type: "text", text: "Apple and Netflix are also hiring heavily right now." },
+      { type: "data-insight", id: "a1-card-0", data: insight },
+    ]);
+    const { container } = render(
+      <MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
+    );
+    expect(container.querySelector(".insight")).toBeTruthy(); // the card is the single surface
+    expect(container.querySelector(".bubble.ai")).toBeNull(); // the fabricated prose bubble is suppressed
+    expect(container.textContent).not.toContain("Apple and Netflix");
+  });
+
   test("live-walk #4a: an assistant text turn renders **bold** as <strong> with no literal asterisks", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "text", text: "**3,315 new postings** over 90 days" }] },

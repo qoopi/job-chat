@@ -447,6 +447,19 @@ describe("Should_FallBackToFitChartType_When_RawPickUnfit (chartTypeForShape, AC
     ).toBe("bars");
   });
 
+  // 05-testing audit gap fill: donutIsWhole uses a strict `sliceSum === sampleN` equality. The case above
+  // only exercises a slice sum far below the sample (40 of 3488); this pins the exact boundary - slices
+  // summing to EXACTLY the sample (a true whole) vs one short of it (a truncated top-N, however small the
+  // shortfall) so an off-by-one wholeness check would be caught.
+  it("pins the donut wholeness boundary: slices == sampleN is a whole, one short of it is not", () => {
+    expect(
+      chartTypeForShape({ dimensions: ["experience_level"], measures: ["count"] }, "donut", 3, { sliceSum: 10, sampleN: 10 }),
+    ).toBe("donut");
+    expect(
+      chartTypeForShape({ dimensions: ["experience_level"], measures: ["count"] }, "donut", 3, { sliceSum: 9, sampleN: 10 }),
+    ).toBe("bars");
+  });
+
   it("corrects an unfit pick on a single-dimension shape to bars", () => {
     expect(chartTypeForShape({ dimensions: ["company"] }, "trend", 5)).toBe("bars");
     expect(chartTypeForShape({ dimensions: ["title"] }, "histogram", 5)).toBe("bars");
@@ -760,6 +773,29 @@ describe("Strand 3: signal-quality gates", () => {
     expect(insight.verdict).toContain("40 of 3257");
     // The card still renders the top-N bars, honestly labeled.
     if (insight.kind === "chart") expect(insight.series.length).toBe(2);
+  });
+
+  // 05-testing audit gap fill: the two tests above sit far below (1.2%) and far above (93%) the 0.1
+  // floor; neither pins the BOUNDARY itself. minLeaderShare compares with strict `<`, so a share exactly
+  // AT the floor must NOT fragment (it is not LESS than the floor) and a share just below it must.
+  it("pins the fragmentation floor boundary: exactly at 0.1 is a normal leader, just below it fragments", () => {
+    const atFloor = buildComposedInsight({
+      id: "fb1",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      result: composed([{ company: "Google", count: 10 }, { company: "Meta", count: 5 }], 100),
+    });
+    expect(atFloor.verdict).toContain("Google leads with 10 of 100");
+    expect(atFloor.verdict.toLowerCase()).not.toContain("no single");
+
+    const justBelow = buildComposedInsight({
+      id: "fb2",
+      params: { measures: ["count"], dimensions: ["company"] },
+      chartType: "bars",
+      result: composed([{ company: "Google", count: 9 }, { company: "Meta", count: 5 }], 100),
+    });
+    expect(justBelow.verdict.toLowerCase()).toContain("no single company");
+    expect(justBelow.verdict).not.toContain("leads");
   });
 
   it("keeps the normal leader verdict when one group genuinely dominates (share above the floor)", () => {
