@@ -1,7 +1,30 @@
-import type { DataPoint } from "@shared/insight";
+import type { DataInsight, DataPoint } from "@shared/insight";
 
 // Pure presentation helpers for the insight surfaces. Kept free of React/"use client" so the copy
 // contracts (AC-10) and the chart series-reading conventions are unit-testable in isolation.
+
+// refresh #2 s2: a single-measure ("vertical") bar chart of many long, near-unique titles used to smear
+// its category labels into an unreadable stack. The fix caps the visible bars at this count; more than
+// this renders the top N plus a "+ N more" affordance into the LCP table.
+export const BARS_CAP = 8;
+
+/** Truncate a long category label for the chart axis (the full label rides in the data + tooltip). */
+export function truncateLabel(label: string, max = 26): string {
+  return label.length > max ? `${label.slice(0, max)}…` : label;
+}
+
+/**
+ * When a bars insight renders as a capped top-N vertical chart, the number of bars shown (BARS_CAP);
+ * null otherwise (grouped/multi-measure bars, a non-bars chart, or a series at/under BARS_CAP). Lets the
+ * source line disclose "showing top N" in agreement with the chart, never letting the visible slice pose
+ * as the whole market (refresh #2 s3-consistency).
+ */
+export function barsChartCapsAt(insight: DataInsight): number | null {
+  if (insight.kind !== "chart" || insight.chartType !== "bars") return null;
+  const labelKey = labelKeyOf(insight.series);
+  if (valueKeysOf(insight.series, labelKey).length > 1) return null; // grouped bars are not capped
+  return insight.series.length > BARS_CAP ? BARS_CAP : null;
+}
 
 /** The error taxonomy the agent tags (mirrors trigger/parts.ts AgentErrorKind - UI copy layer). */
 export type ErrorKind = "system" | "unanswerable";
@@ -19,14 +42,22 @@ export function errorCopy(kind: ErrorKind): string {
 /** AC-15/AC-20: a polite limit notice (not an error) shown until the auth dialog exists. `too_long`
  *  is the agent-run input-size backstop (a payload past MAX_INPUT_CHARS reaching `.in` directly). */
 export function refusalCopy(reason: RefusalReason): string {
-  if (reason === "guest_cap") return "You have reached the guest message limit. Sign in to keep going.";
-  if (reason === "too_long") return "That message is too long. Please shorten it and try again.";
+  if (reason === "guest_cap")
+    return "You have reached the guest message limit. Sign in to keep going.";
+  if (reason === "too_long")
+    return "That message is too long. Please shorten it and try again.";
   return "The service has reached today's message limit. Try again tomorrow.";
 }
 
 // Symbols for the currencies the corpus is likely to carry; anything else prefixes its ISO code
 // ("CHF 180k"), so the amount is never mislabeled with a "$" it is not in (018 strand 3).
-const CURRENCY_SYMBOL: Record<string, string> = { USD: "$", EUR: "€", GBP: "£", CAD: "$", AUD: "$" };
+const CURRENCY_SYMBOL: Record<string, string> = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  CAD: "$",
+  AUD: "$",
+};
 
 /** Money for tables and axes: whole thousands read as <sym>Nk, smaller values in full. Defaults to USD
  *  so existing callers are unchanged; a salary insight passes the real currency it was filtered to. */
@@ -50,7 +81,9 @@ export function formatUsd(value: number): string {
  * of defense so any pre-2000 timestamp is dropped even where a count is shown.
  */
 export function freshnessLabel(chTs: string): string {
-  const parsed = Date.parse(chTs.includes("T") ? chTs : `${chTs.replace(" ", "T")}Z`);
+  const parsed = Date.parse(
+    chTs.includes("T") ? chTs : `${chTs.replace(" ", "T")}Z`,
+  );
   if (Number.isNaN(parsed)) return "";
   if (parsed < Date.UTC(2000, 0, 1)) return ""; // epoch / placeholder over 0 rows
   const mins = Math.round((Date.now() - parsed) / 60000);
@@ -80,7 +113,9 @@ const CONTEXT_KEYS = new Set(["n"]);
 /** Every numeric measure column, in row order, excluding the label and sample-size context (`n`). */
 export function valueKeysOf(rows: DataPoint[], labelKey: string): string[] {
   const first = rows[0] ?? {};
-  return Object.keys(first).filter((k) => k !== labelKey && !CONTEXT_KEYS.has(k) && isNumeric(first[k]));
+  return Object.keys(first).filter(
+    (k) => k !== labelKey && !CONTEXT_KEYS.has(k) && isNumeric(first[k]),
+  );
 }
 
 // When a row carries several measures (e.g. {median, n}) the headline one wins; a bare {label, count}
@@ -99,7 +134,9 @@ export function valueKeyOf(rows: DataPoint[], labelKey: string): string {
 const NUMBER_RE = /\$?\d[\d,]*(?:\.\d+)?%?k?/;
 
 /** Split a verdict into [before, number, after] around its first number token, or null if none. */
-export function splitFirstNumber(text: string): [string, string, string] | null {
+export function splitFirstNumber(
+  text: string,
+): [string, string, string] | null {
   const m = text.match(NUMBER_RE);
   if (!m || m.index === undefined) return null;
   return [text.slice(0, m.index), m[0], text.slice(m.index + m[0].length)];

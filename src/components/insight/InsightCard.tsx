@@ -2,7 +2,11 @@
 
 import { useMemo, useState } from "react";
 import type { DataInsight } from "@shared/insight";
-import { freshnessLabel, splitFirstNumber } from "@/lib/insight-format";
+import {
+  barsChartCapsAt,
+  freshnessLabel,
+  splitFirstNumber,
+} from "@/lib/insight-format";
 import { LCP_TABLE_PREVIEW_ROWS, tablePlacement } from "@/lib/table-placement";
 import { InsightChart } from "./charts/InsightChart";
 import { DataTable } from "./charts/DataTable";
@@ -56,15 +60,26 @@ export function InsightCard({
   // A real answer always has sampleN > 0; this is defensive - an empty result now renders no card at all.
   const showSource = insight.meta.sampleN > 0;
   const rel = freshnessLabel(insight.meta.updatedAt);
+  // refresh #2 s3-consistency: when the chart caps its bars at the top N, the source line discloses
+  // "showing top N" so the visible slice never poses as the whole market (the real total, sampleN, is
+  // still shown alongside). Only on the chart view - the Table tab shows every row (preview -> LCP).
+  const topN = barsChartCapsAt(insight);
+  const showTopN = isChart && tab === "chart" && topN !== null;
 
   // A stable element reference (keyed on the insight identity, not on tab/sqlOpen) so React bails out
-  // of re-rendering the Recharts subtree when only the Show-query reveal toggles.
+  // of re-rendering the Recharts subtree when only the Show-query reveal toggles. `onOpenTable` is the
+  // capped bars chart's "+ N more" target (open the full series in the LCP); it is ChatClient-stable.
   const chartEl = useMemo(
     () =>
       insight.kind === "chart" ? (
-        <InsightChart chartType={insight.chartType} series={insight.series} currency={insight.meta.currency} />
+        <InsightChart
+          chartType={insight.chartType}
+          series={insight.series}
+          currency={insight.meta.currency}
+          onShowAll={onOpenTable}
+        />
       ) : null,
-    [insight],
+    [insight, onOpenTable],
   );
 
   // The tabs are an ARIA tablist so a screen reader announces the selected view. A table-only insight
@@ -114,7 +129,10 @@ export function InsightCard({
           chartEl
         ) : previewTable ? (
           <div className="table-preview">
-            <DataTable rows={rows.slice(0, LCP_TABLE_PREVIEW_ROWS)} currency={insight.meta.currency} />
+            <DataTable
+              rows={rows.slice(0, LCP_TABLE_PREVIEW_ROWS)}
+              currency={insight.meta.currency}
+            />
             <button
               className="btn btn-outline btn-sm open-full-table"
               type="button"
@@ -148,14 +166,26 @@ export function InsightCard({
         </div>
         {showSource ? (
           <span className="src">
-            {insight.meta.sampleN.toLocaleString()} {insight.meta.openSet ? "open postings" : "postings"}
+            {insight.meta.sampleN.toLocaleString()}{" "}
+            {insight.meta.openSet ? "open postings" : "postings"}
             {/* Salary aggregates are filtered to one currency; disclose the base so a mixed-currency
                corpus never reads as if the median spanned everything (018 strand 3). */}
-            {insight.meta.currency ? ` · salaries in ${insight.meta.currency}` : ""}
+            {insight.meta.currency
+              ? ` · salaries in ${insight.meta.currency}`
+              : ""}
+            {/* refresh #2 s3-consistency: the chart is a top-N slice - say so beside the real total. */}
+            {showTopN ? ` · showing top ${topN}` : ""}
             {/* freshness is Date.now()-relative, so a server/client render straddling a minute boundary
                would mismatch on hydration - suppress the (benign) warning on just this text. */}
-            <span suppressHydrationWarning>{rel ? ` — updated ${rel}` : ""}</span> ·{" "}
-            <button className="src-link" type="button" onClick={() => setSqlOpen((v) => !v)}>
+            <span suppressHydrationWarning>
+              {rel ? ` — updated ${rel}` : ""}
+            </span>{" "}
+            ·{" "}
+            <button
+              className="src-link"
+              type="button"
+              onClick={() => setSqlOpen((v) => !v)}
+            >
               {sqlOpen ? "Hide query" : "Show query"}
             </button>
           </span>

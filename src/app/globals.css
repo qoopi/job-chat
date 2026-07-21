@@ -761,11 +761,14 @@ a:hover {
   box-shadow: var(--shadow-sm);
 }
 
-/* code block (SQL view) */
+/* code block (SQL view) - theme-native: light grey + dark tokens on light, dark grey + light
+   tokens on dark. Every token type must contrast on its own surface (refresh #2 s1: the old
+   shell-bg block rendered identifier text invisibly on a matching-grey background in light theme). */
 .codeblock {
   position: relative;
-  background: var(--shell-bg);
-  color: #e4e4e7;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
   border-radius: var(--r-md);
   padding: var(--sp-4);
   font-family: var(--font-mono);
@@ -778,21 +781,43 @@ a:hover {
   margin: 0;
 }
 .codeblock .kw {
-  color: #5eead4;
+  color: #0f766e;
 }
 .codeblock .str {
-  color: #fbbf24;
+  color: #b45309;
 }
 .codeblock .num {
+  color: #1d4ed8;
+}
+.codeblock .fn {
+  color: #6d28d9;
+}
+.codeblock .cm {
+  color: var(--text-3);
+}
+[data-theme="Dark"] .codeblock {
+  background: #1c1c20;
+  border-color: #2e2e33;
+}
+[data-theme="Dark"] .codeblock .kw {
+  color: #5eead4;
+}
+[data-theme="Dark"] .codeblock .str {
+  color: #fbbf24;
+}
+[data-theme="Dark"] .codeblock .num {
   color: #93c5fd;
+}
+[data-theme="Dark"] .codeblock .fn {
+  color: #c4b5fd;
 }
 .copy-btn {
   position: absolute;
   top: 8px;
   right: 8px;
-  border: 1px solid var(--shell-border);
-  background: var(--shell-active);
-  color: var(--shell-fg);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-2);
   font: inherit;
   font-family: var(--font-sans);
   font-size: var(--fs-2xs);
@@ -802,8 +827,8 @@ a:hover {
   cursor: pointer;
 }
 .copy-btn:hover {
-  color: #fff;
-  background: var(--shell-hover);
+  color: var(--text);
+  background: var(--surface-2);
 }
 
 /* charts */
@@ -817,6 +842,25 @@ a:hover {
 }
 .chart .bar:hover {
   opacity: 0.8;
+}
+/* refresh #2 s2: the capped bars chart's "+ N more" affordance (opens the full series in the LCP). */
+.bars-more {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--accent-ink);
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.bars-more:hover {
+  background: var(--surface-2);
 }
 .axis {
   font-size: 10px;

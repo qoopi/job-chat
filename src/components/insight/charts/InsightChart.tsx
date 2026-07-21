@@ -13,16 +13,19 @@ export function InsightChart({
   chartType,
   series,
   currency,
+  onShowAll,
 }: {
   chartType: ChartType;
   series: DataPoint[];
   currency?: string;
+  /** refresh #2 s2: a capped bars chart's "+ N more" opens the full series as a table in the LCP. */
+  onShowAll?: () => void;
 }) {
   switch (chartType) {
     case "trend":
       return <TrendChart series={series} />;
     case "bars":
-      return <BarsChart series={series} />;
+      return <BarsChart series={series} onShowAll={onShowAll} />;
     case "histogram":
       return <HistogramChart series={series} currency={currency} />;
     case "donut":

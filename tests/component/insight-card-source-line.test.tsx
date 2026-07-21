@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { DataInsight } from "@shared/insight";
 
 // P1 polish (must-fix #2): the source line ("N postings - updated ...") must be suppressed entirely
@@ -12,7 +12,11 @@ vi.mock("@/components/insight/charts/InsightChart", () => ({
 
 import { InsightCard } from "@/components/insight/InsightCard";
 
-function insightWith(sampleN: number, updatedAt: string, openSet?: boolean): DataInsight {
+function insightWith(
+  sampleN: number,
+  updatedAt: string,
+  openSet?: boolean,
+): DataInsight {
   return {
     id: "src-line",
     kind: "chart",
@@ -20,7 +24,12 @@ function insightWith(sampleN: number, updatedAt: string, openSet?: boolean): Dat
     verdict: "The median salary is 180000 here.",
     series: [{ bucket: 160000, count: 3, median: 180000 }],
     followups: [],
-    meta: { sql: "SELECT 1", sampleN, updatedAt, ...(openSet ? { openSet: true } : {}) },
+    meta: {
+      sql: "SELECT 1",
+      sampleN,
+      updatedAt,
+      ...(openSet ? { openSet: true } : {}),
+    },
   };
 }
 
@@ -46,7 +55,9 @@ describe("InsightCard source line", () => {
 // keeps the plain "N postings"; the sampleN=0 suppression is unchanged either way.
 describe("InsightCard open-set source-line copy", () => {
   test("reads 'N open postings' when meta.openSet is set", () => {
-    render(<InsightCard insight={insightWith(412, "2026-07-18 19:12:00", true)} />);
+    render(
+      <InsightCard insight={insightWith(412, "2026-07-18 19:12:00", true)} />,
+    );
     expect(screen.getByText(/412 open postings/)).toBeTruthy();
   });
 
@@ -57,8 +68,53 @@ describe("InsightCard open-set source-line copy", () => {
   });
 
   test("suppresses the source line entirely when sampleN is 0 even with openSet set", () => {
-    render(<InsightCard insight={insightWith(0, "1970-01-01 00:00:00", true)} />);
+    render(
+      <InsightCard insight={insightWith(0, "1970-01-01 00:00:00", true)} />,
+    );
     expect(screen.queryByText(/postings/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Show query" })).toBeNull();
+  });
+});
+
+// refresh #2 s3-consistency: a capped bars chart's source line discloses "showing top 8" beside the real
+// total, and only on the chart view (the Table tab shows every row via preview -> LCP). The Recharts
+// subtree is stubbed so the source-line text is what is under test.
+describe("InsightCard capped-chart source line", () => {
+  function barsInsight(n: number): DataInsight {
+    return {
+      id: "bars",
+      kind: "chart",
+      chartType: "bars",
+      verdict: "Amazon leads the top 8 titles with 11 openings.",
+      series: Array.from({ length: n }, (_, i) => ({
+        title: `Role ${i + 1}`,
+        count: 100 - i,
+      })),
+      followups: [],
+      meta: {
+        sql: "SELECT 1",
+        sampleN: 1863,
+        updatedAt: "2026-07-18 19:12:00",
+        openSet: true,
+      },
+    };
+  }
+
+  test("shows the real total AND 'showing top 8' on the chart view when the bars cap", () => {
+    render(<InsightCard insight={barsInsight(20)} />);
+    expect(screen.getByText(/1,863 open postings/)).toBeTruthy(); // the real denominator, not the slice
+    expect(screen.getByText(/showing top 8/)).toBeTruthy();
+  });
+
+  test("no 'showing top' suffix when the series is at/under the cap", () => {
+    render(<InsightCard insight={barsInsight(6)} />);
+    expect(screen.queryByText(/showing top/)).toBeNull();
+  });
+
+  test("drops 'showing top' on the Table tab (that view shows every row, not a top-N slice)", () => {
+    render(<InsightCard insight={barsInsight(20)} />);
+    expect(screen.getByText(/showing top 8/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Table" }));
+    expect(screen.queryByText(/showing top/)).toBeNull();
   });
 });
