@@ -398,6 +398,7 @@ export async function runCase(
     try {
       const result = await buildRun(emit)({
         chatId: conv.id,
+        trigger: "submit-message",
         messages: cumulative.map((m) => ({ ...m })),
         tools,
         signal: new AbortController().signal,
