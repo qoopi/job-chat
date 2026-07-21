@@ -16,6 +16,10 @@ export const ClickhouseEnvSchema = z.object({
   CLICKHOUSE_PASSWORD: z.string().min(1),
 });
 
+// ClickHouse Cloud idles the service and its wake exceeds the client's 30s request_timeout default,
+// so the first query after idle must survive the wake - both clients allow 60s per request.
+export const CLICKHOUSE_REQUEST_TIMEOUT_MS = 60_000;
+
 // The ingestion writer path uses the default ClickHouse user.
 export function createWriterClient(
   source: Record<string, string | undefined> = process.env,
@@ -25,6 +29,7 @@ export function createWriterClient(
     url: env.CLICKHOUSE_URL,
     username: env.CLICKHOUSE_USER,
     password: env.CLICKHOUSE_PASSWORD,
+    request_timeout: CLICKHOUSE_REQUEST_TIMEOUT_MS,
   });
 }
 
@@ -44,6 +49,7 @@ export function createReadOnlyClient(
     url: env.CLICKHOUSE_URL,
     username: env.CLICKHOUSE_RO_USER,
     password: env.CLICKHOUSE_RO_PASSWORD,
+    request_timeout: CLICKHOUSE_REQUEST_TIMEOUT_MS,
   });
 }
 
