@@ -84,6 +84,14 @@ describe("selectEvalCases (JOBCHAT_EVAL_IDS subset filter)", () => {
     expect(skipped).toBe(EVAL_SET.length - 2);
   });
 
+  // 05-testing audit (2026-07-21): a repeated id must select its case ONCE, not run it twice - and must
+  // count as ONE skip toward "the rest", not deflate the skipped count by the duplicate.
+  it("dedupes a repeated id: selects it once, skipped counts every OTHER case exactly once", () => {
+    const { cases, skipped } = selectEvalCases(EVAL_SET, "Q1,Q1,C1");
+    expect(cases.map((c) => c.id)).toEqual(["Q1", "C1"]);
+    expect(skipped).toBe(EVAL_SET.length - 2);
+  });
+
   it("tolerates whitespace and trailing commas around ids", () => {
     const { cases } = selectEvalCases(EVAL_SET, " Q1 , , C1 ,");
     expect(cases.map((c) => c.id)).toEqual(["Q1", "C1"]);
