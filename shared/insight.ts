@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProfileSchema, type Profile } from "./profile";
 
 // The `data-insight` part: the single payload the agent streams (writer), the web renders
 // (renderer), and the store persists (the resume source). One part type with two kinds - a chart
@@ -91,3 +92,55 @@ export type GuardRefusal = "guest_cap" | "daily_budget";
 /** A `data-refusal` card reason: the cap/budget guard plus the over-length (`too_long`) input backstop
  *  refused at the agent-run ingress before persist/model. The UI renders every one as a polite notice. */
 export type RefusalReason = GuardRefusal | "too_long";
+
+// The profile + fresh-data part kinds - the ONE home for the four persisted parts this feature adds,
+// alongside `data-insight`. Each rides the SDK's `data-<kind>` wire prefix (the convertToModelMessages
+// contract: a part type must be a known kind or `data-`/`tool-`-prefixed, or the SDK throws on EVERY
+// turn), and each persists as its payload here. Only `profile-card` is wired end-to-end in this slice
+// (its persistence acceptance below); the other three are emitted with their tools in a later slice -
+// the TYPES live here now so the vocabulary has a single definition.
+
+/** One scored posting row the selection scorer returns and the postings card renders. Defined here (the
+ *  part vocabulary) so the `postings` part type is self-contained; the scorer that fills it lands with
+ *  `searchPostings`. `null` for city/salary means "not listed" (the card shows a muted note, never blank). */
+export interface ScoredPostingRow {
+  title: string;
+  company: string;
+  city: string | null;
+  remote: boolean;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  experience: string;
+  publishedAt: string;
+  score: number;
+}
+
+/** The profile card payload: the structured profile the extraction task produced, rendered as the
+ *  in-chat identity card + the LCP expanded view. Appended out-of-band by the save flow (not a turn),
+ *  so it is INVISIBLE to the turn machinery - the run gate and `deleteTrailingAssistant` skip it. */
+export type ProfileCardPart = { kind: "profile-card"; profile: Profile };
+/** The postings card payload: the scored rows plus the pre-limit total for the "8 of 23" framing. */
+export type PostingsPart = { kind: "postings"; rows: ScoredPostingRow[]; total: number };
+/** The guest fit-intent invite: the authorize-with-Google card (the server decides guest vs signed-in). */
+export type AuthInvitePart = { kind: "auth-invite" };
+/** The signed-in-without-profile fit-intent invite: the create-profile card (opens the LCP form). */
+export type ProfileInvitePart = { kind: "profile-invite" };
+
+/** The profile-card payload validator - the strict shape that makes a `data-profile-card` part
+ *  persistable (the run persistence whitelist checks it; a malformed payload is dropped, never stored). */
+export const ProfileCardSchema = z
+  .object({ kind: z.literal("profile-card"), profile: ProfileSchema })
+  .strict();
+
+/** True for a persisted assistant row whose payload is a profile card. The out-of-band append rule
+ *  keys off this: the run gate computes its already-answered tail over NON-profile-card rows, and
+ *  `deleteTrailingAssistant` never deletes one - so a save landing mid-turn cannot skip a redispatched
+ *  turn, and a Retry after a save cannot destroy the card. `parts` is the stored jsonb (opaque here). */
+export function isProfileCardPayload(parts: unknown): boolean {
+  return (
+    typeof parts === "object" &&
+    parts !== null &&
+    !Array.isArray(parts) &&
+    (parts as { kind?: unknown }).kind === "profile-card"
+  );
+}

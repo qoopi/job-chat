@@ -59,6 +59,11 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     listConversations: boom,
     deleteConversation: boom,
     deleteTrailingAssistant: boom,
+    appendProfileCard: boom,
+    getProfile: boom,
+    saveProfileInputs: boom,
+    saveExtractedProfile: boom,
+    deleteProfile: boom,
     messageCounts: boom,
     ...overrides,
   };

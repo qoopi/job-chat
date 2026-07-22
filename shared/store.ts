@@ -1,4 +1,5 @@
 import type { Sql } from "postgres";
+import type { Profile } from "./profile";
 
 // The OLTP chat store: raw `postgres` + .sql migrations (no ORM, no repository layer). A deep module
 // - callers get user/conversation/message persistence behind five methods;
@@ -58,6 +59,28 @@ export interface Message {
   content: string;
   parts: Json | null; // null for user messages; the insight payload for assistant messages
   created_at: Date;
+}
+
+/**
+ * A profiles row: the raw inputs the save action stored plus (once the extraction task runs) the
+ * structured profile. `extracted_at IS NOT NULL` is the DONE marker the poll read waits on. `resume_pdf`
+ * is transient - present only between the save and the task, then NULLed. Postgres-only (AC-13).
+ */
+export interface ProfileRow {
+  user_id: string;
+  raw_resume_text: string | null;
+  resume_pdf: Uint8Array | null;
+  github_username: string | null;
+  profile: Profile | null; // null until the extraction task writes it
+  extracted_at: Date | null; // null = extraction pending
+}
+
+/** The raw inputs the save action stores (the pre-extraction write). A null field clears that input. */
+export interface ProfileInputs {
+  userId: string;
+  rawResumeText: string | null;
+  resumePdf: Uint8Array | null;
+  githubUsername: string | null;
 }
 
 export interface Store {
@@ -133,6 +156,38 @@ export interface Store {
    * already a user row, is a no-op; a malformed id is a no-op (the "null = not found" contract).
    */
   deleteTrailingAssistant(conversationId: string): Promise<void>;
+  /**
+   * Append the out-of-band profile-card assistant message with REPLACE semantics: the caller mints a
+   * DETERMINISTIC id (one per conversation), so a re-save UPDATES the one card in place and a double-save
+   * can never duplicate it (`ON CONFLICT (id) DO UPDATE` - distinct from `appendMessage`'s first-write-wins
+   * `DO NOTHING`, which is load-bearing for the crash-redispatch dedup and must NOT change). `created_at` is
+   * left untouched on update, so the card keeps its original thread position. Content is "" - the card IS
+   * the surface, and buildModelHistory drops an empty-model-facing row so the model never sees it.
+   */
+  appendProfileCard(
+    conversationId: string,
+    id: string,
+    parts: Json,
+  ): Promise<void>;
+  /** The caller's profile row, or `null` when they have none (the AC-2 invite path). Returns the raw
+   *  inputs (for the extraction task) plus the structured profile + extracted_at (for the poll read). */
+  getProfile(userId: string): Promise<ProfileRow | null>;
+  /**
+   * Store the raw profile inputs (the save action's pre-extraction write): upsert the resume text / PDF
+   * bytes / github username. Leaves `profile` and `extracted_at` UNTOUCHED, so a re-save keeps the
+   * previous extracted profile in place until the task overwrites it - a failed re-extraction never
+   * destroys the working profile (AC: "error keeps the previous profile untouched").
+   */
+  saveProfileInputs(inputs: ProfileInputs): Promise<void>;
+  /**
+   * Write the extracted structured profile (the extraction task's post-extraction write): set `profile`
+   * + `extracted_at = now()` and NULL `resume_pdf` (transient PII consumed). A no-op if the row was
+   * deleted mid-extraction. Full replace of the profile - a re-extraction overwrites the prior one.
+   */
+  saveExtractedProfile(userId: string, profile: Profile): Promise<void>;
+  /** Remove the caller's profile (raw inputs + structured profile). Idempotent - deleting a
+   *  non-existent profile is a no-op; subsequent fit-intents then behave as the no-profile path (AC-10). */
+  deleteProfile(userId: string): Promise<void>;
 }
 
 /**
@@ -291,10 +346,15 @@ export function createStore(sql: Sql): Store {
       // later user (kept); only the tail after the last user is removed. The EXISTS guard keeps a
       // user-less conversation a no-op (never nukes stray assistant rows) - defense; a real conversation
       // always opens with a user turn.
+      // A profile-card row is out-of-band (appended by the save flow, not a turn) and INVISIBLE to the
+      // turn machinery: exclude it so a Retry after a save can never destroy the card. `IS DISTINCT FROM`
+      // keeps a null-parts assistant row eligible (NULL ->> 'kind' is NULL, which IS DISTINCT FROM the
+      // literal, so it still deletes) - only a genuine profile-card row is spared.
       await sql`
         DELETE FROM messages a
         WHERE a.conversation_id = ${conversationId}
           AND a.role = 'assistant'
+          AND (a.parts->>'kind') IS DISTINCT FROM 'profile-card'
           AND EXISTS (
             SELECT 1 FROM messages u
             WHERE u.conversation_id = ${conversationId} AND u.role = 'user'
@@ -304,6 +364,50 @@ export function createStore(sql: Sql): Store {
             WHERE u.conversation_id = ${conversationId} AND u.role = 'user'
               AND (u.created_at, u.id) >= (a.created_at, a.id)
           )`;
+    },
+
+    async appendProfileCard(conversationId, id, parts) {
+      // REPLACE semantics via DO UPDATE (contrast appendMessage's DO NOTHING): the deterministic id means
+      // a re-save updates the single card and a double-save cannot duplicate it. created_at is untouched,
+      // so the card holds its thread position across re-saves.
+      await sql`
+        INSERT INTO messages (id, conversation_id, role, content, parts)
+        VALUES (${id}, ${conversationId}, 'assistant', '', ${sql.json(parts as never)})
+        ON CONFLICT (id) DO UPDATE
+          SET content = EXCLUDED.content, parts = EXCLUDED.parts`;
+    },
+
+    async getProfile(userId) {
+      const rows = await sql<ProfileRow[]>`
+        SELECT user_id, raw_resume_text, resume_pdf, github_username, profile, extracted_at
+        FROM profiles WHERE user_id = ${userId}`;
+      return rows.length === 0 ? null : rows[0];
+    },
+
+    async saveProfileInputs({ userId, rawResumeText, resumePdf, githubUsername }) {
+      // Upsert the raw inputs only; profile / extracted_at are left as-is on conflict (a re-save keeps the
+      // prior extracted profile until the task overwrites it - a failed re-extraction loses nothing).
+      await sql`
+        INSERT INTO profiles (user_id, raw_resume_text, resume_pdf, github_username)
+        VALUES (${userId}, ${rawResumeText}, ${resumePdf}, ${githubUsername})
+        ON CONFLICT (user_id) DO UPDATE SET
+          raw_resume_text = EXCLUDED.raw_resume_text,
+          resume_pdf = EXCLUDED.resume_pdf,
+          github_username = EXCLUDED.github_username`;
+    },
+
+    async saveExtractedProfile(userId, profile) {
+      // Post-extraction write: set the structured profile + stamp extracted_at, and NULL the transient
+      // resume_pdf (its named consumer - the extraction task - is done with it). UPDATE-only: if the row
+      // was deleted mid-extraction, this matches zero rows and no profile is resurrected.
+      await sql`
+        UPDATE profiles
+        SET profile = ${sql.json(profile as never)}, extracted_at = now(), resume_pdf = NULL
+        WHERE user_id = ${userId}`;
+    },
+
+    async deleteProfile(userId) {
+      await sql`DELETE FROM profiles WHERE user_id = ${userId}`;
     },
 
     async messageCounts({ userId, sinceUtcMidnight }) {
