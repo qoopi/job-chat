@@ -10,6 +10,7 @@ import {
 } from "./runner";
 import { scoreCase, type ScoredCase } from "./scorer";
 import { HEAVY, printCase, printReport } from "./report";
+import { writeEvalTranscript, type TranscriptRecord } from "./transcript";
 
 // The eval harness entry point (dev tooling; NOT a vitest test - tests/evals/ sits outside the vitest
 // globs). It wires the shipped prompt + the live Bedrock model seam into the runner, drives each selected
@@ -47,13 +48,20 @@ async function main(): Promise<void> {
   }
 
   const scored: ScoredCase[] = [];
+  const records: TranscriptRecord[] = [];
   for (let i = 0; i < cases.length; i++) {
     const observed = await runCase(streamModel, system, cases[i]);
     const s = scoreCase(cases[i], observed);
     scored.push(s);
+    records.push({ evalCase: cases[i], observed, scored: s });
     printCase(i + 1, cases[i], s);
   }
   printReport(scored);
+
+  // Persist the per-case transcript (observed tool calls/params + verdict + population) so this run's
+  // gate reading is auditable after the fact. Log the absolute path.
+  const transcriptPath = writeEvalTranscript(records, MODEL_ID);
+  console.log(`transcript: ${transcriptPath}`);
 }
 
 if ((import.meta as { main?: boolean }).main === true) {

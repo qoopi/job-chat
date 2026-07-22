@@ -3,17 +3,18 @@ import type { Profile } from "@shared/profile";
 import { LAUNCH_QUESTIONS } from "../fixtures/launch-questions";
 import { CONVERSATIONAL_PROMPTS, P2_INTENT_PROMPTS } from "../fixtures/plain-prompts";
 
-// The eval set (35 cases): the regression net for agent flexibility. Each case pins what
+// The eval set (40 cases): the regression net for agent flexibility. Each case pins what
 // the SHIPPED prompt + catalog should do with a question - the tool it should call, the answer mode, the
 // params it should pass, and (for query_postings cases) the RAW chartType it should pick. The runner
 // drives each question through the real prompt + Bedrock and scores the agent's CHOICES
 // against these expectations deterministically; it never judges the returned data. Composition:
-//   - 7 launch questions        -> the six fixed templates (imported from the launch-questions fixture, DRY)
-//   - 12 composed questions      -> query_postings, the chart-bearing sample (>= 12 pinned)
-//   - 4 follow-ups               -> context inheritance + multi-city (tool/mode/params, no chart gate)
-//   - 4 P2-intent + 4 small-talk -> plain mode, no tool (imported from the conformance fixture)
-//   - 3 off-domain               -> plain mode, no tool (answer-or-honest-no-live-data + steer)
-//   - 1 market-wide scope        -> plain mode, scope-qualified to the sample
+//   - 7 launch questions          -> the six fixed templates (imported from the launch-questions fixture, DRY)
+//   - 12 composed questions        -> query_postings, the chart-bearing sample (>= 12 pinned)
+//   - 4 follow-ups                 -> context inheritance + multi-city (tool/mode/params, no chart gate)
+//   - 4 P2-intent (3 fit -> request_profile, 1 applying -> plain) + 4 small-talk -> plain, no tool
+//   - 3 off-domain                 -> plain mode, no tool (answer-or-honest-no-live-data + steer)
+//   - 1 market-wide scope          -> plain mode, scope-qualified to the sample
+//   - 5 profile-driven fit cases   -> request_profile / search_postings (three-way routing + guardrail)
 // The banned-opener list + tone harness live in ONE home (tests/fixtures/plain-prompts.ts); the
 // runner imports them there for format scoring - this file only marks which cases get the tone check.
 
@@ -359,3 +360,17 @@ export const EVAL_SET: EvalCase[] = [
 
 /** The chart-bearing sample: every case carrying a RAW chartType expectation (pinned at 12). */
 export const CHART_BEARING: EvalCase[] = EVAL_SET.filter((c) => c.expect.chartType !== undefined);
+
+// The three AC-14 gate populations - the exit gate is read PER-POPULATION, never on the masking
+// aggregate: the pre-030 BASELINE (the unchanged cases), the 030 PROFILE cases (new), and the REVISED P2
+// fit-intents. The "unchanged/baseline" bar (>= 34/35) covers every NON-profile case (baseline + p2);
+// the p2 and profile subsets additionally must ALL pass. Exported so the runner tags each transcript line
+// and the report prints the per-population gate.
+export type EvalPopulation = "baseline" | "profile" | "p2-revised";
+const PROFILE_IDS: ReadonlySet<string> = new Set(PROFILE_CASES.map((c) => c.id));
+const P2_IDS: ReadonlySet<string> = new Set(P2_CASES.map((c) => c.id));
+export function casePopulation(id: string): EvalPopulation {
+  if (PROFILE_IDS.has(id)) return "profile";
+  if (P2_IDS.has(id)) return "p2-revised";
+  return "baseline";
+}
