@@ -8,6 +8,7 @@ import {
   hasSalary,
   isSeniorPlus,
   locationLabel,
+  openPanelLabel,
   postingsVerdict,
   salaryLabel,
   shownCount,
@@ -151,7 +152,7 @@ export function PostingsCard({
         <div className="followups">
           {rows.length > POSTINGS_INCHAT_CAP ? (
             <button className="chip chip-accent" type="button" onClick={onOpenPanel}>
-              Open all {total} in panel
+              {openPanelLabel(rows.length, total)} in panel
             </button>
           ) : null}
           <button className="chip" type="button" disabled={pending} onClick={() => onFollowup?.("Only remote")}>
