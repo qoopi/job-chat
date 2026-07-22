@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import postgres, { type Sql } from "postgres";
 import { createStore, type Store } from "@shared/store";
+import { runProfileExtraction } from "../../trigger/profile-extraction";
 import type { Profile } from "@shared/profile";
 
 // Integration: the profiles store methods against real managed Postgres. Skipped when DATABASE_URL is
@@ -80,6 +81,52 @@ describe.skipIf(!hasCreds)("profiles store against real Postgres", () => {
     expect(row!.raw_resume_text).toBe("v2"); // inputs replaced
     expect(row!.profile).toEqual(extracted); // previous profile untouched (no data loss on re-save)
     expect(row!.extracted_at).toBeInstanceOf(Date);
+
+    await sql`DELETE FROM profiles WHERE user_id = ${u}`;
+    await sql`DELETE FROM users WHERE user_id = ${u}`;
+  });
+
+  // The stated reason for the saveProfileInputs/saveExtractedProfile split (Deviation 3): a FAILED
+  // re-extraction must never destroy the prior working profile. runProfileExtraction never calls
+  // saveExtractedProfile when the model generation throws (extractProfileFields propagates after its one
+  // retry), so the whole task run rejects - proved here end-to-end against real Postgres, not just at the
+  // store layer: seed an already-extracted profile, re-save new inputs, then run the REAL pipeline
+  // function with a `generate` that always rejects.
+  it("a failed re-extraction (both model attempts reject) preserves the prior extracted profile untouched", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    await store.saveProfileInputs({ userId: u, rawResumeText: "v1", resumePdf: null, githubUsername: null });
+    await store.saveExtractedProfile(u, extracted);
+    const before = await store.getProfile(u);
+
+    // A re-save (new inputs) queues a re-extraction; that re-extraction then fails entirely.
+    await store.saveProfileInputs({ userId: u, rawResumeText: "v2 (re-extraction pending)", resumePdf: null, githubUsername: null });
+    const failingGenerate = vi.fn(async () => {
+      throw new Error("model unavailable");
+    });
+    const cardSpy = vi.spyOn(store, "appendProfileCard");
+    await expect(
+      runProfileExtraction(
+        {
+          store,
+          fetchGithub: async () => {
+            throw new Error("no github in this fixture");
+          },
+          generate: failingGenerate,
+          githubToken: undefined,
+        },
+        { userId: u, conversationId: crypto.randomUUID() },
+      ),
+    ).rejects.toThrow("model unavailable");
+    expect(failingGenerate).toHaveBeenCalledTimes(2); // both the initial attempt AND its one retry failed
+
+    const after = await store.getProfile(u);
+    expect(after!.profile).toEqual(before!.profile); // the WORKING profile survives the failed re-extraction
+    expect(after!.profile).toEqual(extracted);
+    expect(after!.extracted_at).toEqual(before!.extracted_at); // extracted_at is NOT re-stamped
+    expect(after!.raw_resume_text).toBe("v2 (re-extraction pending)"); // the new inputs are staged for a retry
+    expect(cardSpy).not.toHaveBeenCalled(); // no card append either - saveExtractedProfile was never reached
+    cardSpy.mockRestore();
 
     await sql`DELETE FROM profiles WHERE user_id = ${u}`;
     await sql`DELETE FROM users WHERE user_id = ${u}`;

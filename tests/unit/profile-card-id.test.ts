@@ -14,6 +14,16 @@ describe("uuidv5 (deterministic profile-card id)", () => {
     );
   });
 
+  // A FIXED vector, not a same-call-twice check: the expected value was computed independently, in a
+  // SEPARATE process/language (Python's `uuid.uuid5(uuid.UUID(conversationId), "profile-card")`), not by
+  // calling profileCardMessageId itself. This proves the id is stable across independent invocations/
+  // processes for the same conversation - the property the replace-not-duplicate contract depends on
+  // (two different Trigger task runs, or a task run + a later reload, must derive the identical card id).
+  it("profileCardMessageId matches an independently-computed vector for a fixed conversation id", () => {
+    const conv = "11111111-2222-4333-8444-555555555555";
+    expect(profileCardMessageId(conv)).toBe("a9c2bdff-1c47-5062-abbb-bb121637052d");
+  });
+
   it("profileCardMessageId is deterministic per conversation and a valid v5 uuid", () => {
     const conv = "11111111-2222-4333-8444-555555555555";
     const a = profileCardMessageId(conv);
