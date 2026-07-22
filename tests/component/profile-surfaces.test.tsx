@@ -25,12 +25,19 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: 
 vi.mock("@/lib/auth-client", () => ({
   authClient: { signIn: { social: vi.fn() }, signOut: vi.fn(), useSession: () => ({ data: null, isPending: false }) },
 }));
+// The poll's own contract (attempt ceiling, the re-save edge) is exhaustively unit-tested in
+// profile-poll.test.ts; here it is mocked so LcpProfile's ERROR-STATE RENDERING (which copy, gated on
+// whether a prior profile existed) is tested in isolation from the poll's real timers.
+vi.mock("@/lib/profile-poll", () => ({ pollProfileSave: vi.fn() }));
 
 import { ChatClient } from "@/components/chat/ChatClient";
 import { ProfileCard, ProfileExpanded } from "@/components/insight/ProfileCard";
 import { PostingsCard } from "@/components/insight/PostingsCard";
 import { InlinePromptCard } from "@/components/insight/InlinePromptCard";
 import { LcpProfile } from "@/components/chat/LcpProfile";
+import { deleteProfile, getMyProfile, saveProfile, type MyProfile } from "@/app/actions";
+import { pollProfileSave } from "@/lib/profile-poll";
+import { profileCardMessageId } from "@/lib/profile-card-id";
 
 const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -75,9 +82,33 @@ function renderChat(messages: UIMessage[], props: Record<string, unknown> = {}) 
   );
 }
 
+// The saved-profile getMyProfile fixture (a prior profile exists) and the fresh-first-save-failure one
+// (no profile row's extraction ever completed) - used by the error-state and card-on-delete cases below.
+const savedMyProfile: MyProfile = {
+  profile,
+  githubUsername: "octocat",
+  extractedAt: "2026-07-22T09:00:00Z",
+  extractionFailed: false,
+};
+const freshFailureMyProfile: MyProfile = {
+  profile: null,
+  githubUsername: null,
+  extractedAt: null,
+  extractionFailed: true,
+};
+
 afterEach(() => {
   cleanup();
   setAuthDialogOpen(false);
+  sessionStorage.clear(); // the pending-invite tests below stash a real sessionStorage key
+  // These action mocks are SHARED module-level vi.fn()s; `mockResolvedValueOnce` queues values that
+  // outlive a test if the component under test never consumed them (e.g. a test that never opens the
+  // LCP form leaves its queued `getMyProfile` value to bleed into the NEXT test's first call). Reset the
+  // call history + queues and restore each factory's original default so every test starts clean.
+  vi.mocked(getMyProfile).mockReset().mockResolvedValue(null);
+  vi.mocked(saveProfile).mockReset();
+  vi.mocked(deleteProfile).mockReset().mockResolvedValue({ ok: true });
+  vi.mocked(pollProfileSave).mockReset();
 });
 
 // ---------------------------------------------------------------------------------------------------
@@ -262,12 +293,149 @@ describe("LcpProfile form", () => {
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toMatch(/Add a resume or a GitHub username/);
   });
+
+  // Inherited requirement (028 review, binding): the Update form MUST prefill the stored github_username
+  // AND indicate a resume is on file - saveProfileInputs is full-replace, so an empty field on re-save
+  // would otherwise clear it silently with no warning shown.
+  test("Should_PrefillGithubAndIndicateResumeOnFile_When_EditingASavedProfile", async () => {
+    vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
+    render(<LcpProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit & re-save" }));
+    expect((screen.getByLabelText(/GitHub username/) as HTMLInputElement).value).toBe("octocat");
+    expect(screen.getByText("A resume is on file. Re-upload to replace it.")).toBeTruthy();
+  });
 });
 
 // exercised indirectly above; kept explicit so a regression in the wire is obvious
 test("auth-invite card wires the auth dialog (guest)", async () => {
   renderChat([assistantPart("data-auth-invite", { kind: "auth-invite" })], { signedIn: false });
   fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
+  // The redirect ahead (Google sign-in) is a FULL-PAGE navigation that wipes React state; the pending
+  // profile-invite survives it via sessionStorage (same mechanism as the queued-draft carrying the
+  // capped guest's draft across the identical redirect).
+  expect(sessionStorage.getItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`)).toBe("1");
   await waitFor(() => expect(screen.getByRole("dialog", { name: "Create your free account" })).toBeTruthy());
   expect(within(document.body).getByRole("dialog")).toBeTruthy();
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The pending profile-invite across the REAL auth boundary (the Google redirect)
+// ---------------------------------------------------------------------------------------------------
+describe("pending profile-invite replay across the auth redirect", () => {
+  // The post-auth return: `/auth/complete` lands back on this SAME conversation with `fromAuth=1`. The
+  // queued flag (set above) is read-once and, on this genuine post-auth arrival, replayed as the
+  // profile-invite card in the live thread.
+  test("Should_ReplayProfileInviteCardOnce_When_PostAuthArrivalWithPendingInvite", async () => {
+    sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
+    renderChat([], { fromAuth: true });
+    expect(await screen.findByRole("button", { name: "Add your profile" })).toBeTruthy();
+    // read-once: the flag is cleared once consumed, so it can never fire a second time from storage alone
+    expect(sessionStorage.getItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`)).toBeNull();
+  });
+
+  // Mutation-check: the exactly-once guarantee must live at the sessionStorage layer itself, not just a
+  // component mount ref - a SECOND ChatClient mount for the SAME conversation (a StrictMode double-invoke,
+  // or a real remount) after the first already consumed the flag must NOT inject a second card.
+  test("Should_NotReplayOnSecondUnrelatedMount_When_PendingInviteAlreadyConsumed", async () => {
+    sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
+    const first = renderChat([], { fromAuth: true });
+    await screen.findByRole("button", { name: "Add your profile" });
+    first.unmount();
+
+    renderChat([], { fromAuth: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.queryByRole("button", { name: "Add your profile" })).toBeNull();
+  });
+
+  // The flag is taken-and-cleared on ANY signed-in mount (a signed-in user never legitimately owns one),
+  // but only INJECTED on a genuine post-auth arrival. A LATER ordinary signed-in mount that happens to
+  // find a stale flag (the guest abandoned the sign-in, then returned via an unrelated navigation) must
+  // not surface the card either - it is garbage-collected instead.
+  test("Should_NotInjectInvite_When_OrdinarySignedInMountFindsAStalePendingFlag", async () => {
+    sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
+    renderChat([]); // signed in (renderChat default), fromAuth absent
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.queryByRole("button", { name: "Add your profile" })).toBeNull();
+    expect(sessionStorage.getItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`)).toBeNull(); // still cleared
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Card-on-delete: the active-conversation card-and-row rule, plus the orphan case in other conversations
+// ---------------------------------------------------------------------------------------------------
+describe("card-on-delete", () => {
+  test("Should_RemoveLiveThreadCardAndDeletePersistedRow_When_ProfileDeletedInActiveConversation", async () => {
+    const cardId = await profileCardMessageId(CONVERSATION_ID);
+    vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
+    renderChat([
+      {
+        id: cardId,
+        role: "assistant",
+        parts: [{ type: "data-profile-card", id: `${cardId}-card`, data: { kind: "profile-card", profile } }],
+      } as UIMessage,
+    ]);
+    expect(document.querySelector(".insight")).toBeTruthy(); // the live ProfileCard in the thread
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" })); // opens the LCP form
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(deleteProfile).toHaveBeenCalledWith(CONVERSATION_ID)); // the persisted row
+    await waitFor(() => expect(document.querySelector(".insight")).toBeNull()); // the live thread card
+  });
+
+  // The binding rule scopes the DELETE to the ACTIVE conversation only (the deterministic id is PER
+  // conversation) - a card persisted in a DIFFERENT conversation is never touched, so it renders as plain
+  // history even when the account's CURRENT profile state (getMyProfile) is empty (e.g. deleted elsewhere).
+  test("Should_RenderPersistedCardAsHistory_When_AccountCurrentlyHasNoProfile (orphan card, other conversation)", async () => {
+    const OTHER_CONV = "22222222-2222-4222-8222-222222222222";
+    const cardId = await profileCardMessageId(OTHER_CONV);
+    // getMyProfile (the account's LIVE current state) is never even called here - the LCP profile panel
+    // is not opened - which is the point: the persisted part renders independent of it.
+    render(
+      <ChatClient
+        conversationId={OTHER_CONV}
+        initialMessages={[
+          {
+            id: cardId,
+            role: "assistant",
+            parts: [{ type: "data-profile-card", id: `${cardId}-card`, data: { kind: "profile-card", profile } }],
+          } as UIMessage,
+        ]}
+        e2e={false}
+        signedIn
+        accountName="Ada"
+      />,
+    );
+    expect(screen.getByText("Senior Backend Engineer")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The poll's error outcome -> LcpProfile's error-state copy (gated on whether a prior profile existed)
+// ---------------------------------------------------------------------------------------------------
+describe("LcpProfile error state (poll contract)", () => {
+  test("Should_ShowNothingWasSaved_When_FreshExtractionFailsWithNoPriorProfile", async () => {
+    vi.mocked(getMyProfile).mockResolvedValueOnce(freshFailureMyProfile);
+    render(<LcpProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    expect(await screen.findByText("Couldn’t build the profile")).toBeTruthy();
+    expect(screen.getByText("Nothing was saved.")).toBeTruthy();
+    expect(screen.queryByText("Your previous profile is untouched.")).toBeNull();
+  });
+
+  // The re-save edge (028/029 inherited requirement): a WORKING profile re-saves and extraction fails
+  // terminally - the poll's own outcome carries `hadPriorProfile: true`, and the error copy must say so.
+  test("Should_ShowPreviousProfileUntouched_When_ResaveFailsWithPriorProfile (re-save edge)", async () => {
+    vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile).mockResolvedValueOnce(savedMyProfile);
+    vi.mocked(saveProfile).mockResolvedValueOnce({ ok: true, taskState: "queued", runId: "run_x" });
+    vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "error", hadPriorProfile: true });
+    render(<LcpProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit & re-save" })); // github already prefilled -> passes the build() guard
+    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Couldn’t build the profile")).toBeTruthy();
+    expect(screen.getByText("Your previous profile is untouched.")).toBeTruthy();
+  });
 });
