@@ -59,23 +59,22 @@ describe("MockChatTransport - honors the caller's AbortSignal (AC-9)", () => {
 });
 
 // R1/R4: after the manual cursor threading is gone, the mock's reconnect models the SDK's persisted-
-// session behavior - a settled turn no-ops on reload (no replay), a still-streaming turn resumes.
+// session behavior, hydrated at construction (mirroring the real transport's `sessions` option read from
+// sessionStorage) - a settled turn no-ops on reload (no replay), a still-streaming turn resumes.
 describe("MockChatTransport - reconnectToStream honors the persisted session (R1)", () => {
   afterEach(() => {
     delete window.__CHAT_REPLAY__;
   });
 
   it("no-ops (returns null) when the persisted session is settled - even with a replay armed", async () => {
-    const transport = new MockChatTransport();
-    transport.setSession("chat-1", { publicAccessToken: "tok", isStreaming: false });
+    const transport = new MockChatTransport({ "chat-1": { publicAccessToken: "tok", isStreaming: false } });
     window.__CHAT_REPLAY__ = [{ chunk: { type: "start" } }, { chunk: { type: "finish" } }];
 
     expect(await transport.reconnectToStream({ chatId: "chat-1" })).toBeNull();
   });
 
   it("resumes (replays __CHAT_REPLAY__) for a still-streaming session", async () => {
-    const transport = new MockChatTransport();
-    transport.setSession("chat-1", { publicAccessToken: "tok", isStreaming: true });
+    const transport = new MockChatTransport({ "chat-1": { publicAccessToken: "tok", isStreaming: true } });
     window.__CHAT_REPLAY__ = [
       { chunk: { type: "start" } },
       { chunk: { type: "text-delta", id: "t", delta: "resumed" } },
@@ -94,7 +93,7 @@ describe("MockChatTransport - reconnectToStream honors the persisted session (R1
     expect(chunks).toContainEqual({ type: "text-delta", id: "t", delta: "resumed" });
   });
 
-  it("no-ops when nothing is armed (the default e2e reconnect path)", async () => {
+  it("no-ops for an unknown session (no hydrated entry) - the default e2e reconnect path", async () => {
     const transport = new MockChatTransport();
     expect(await transport.reconnectToStream({ chatId: "chat-x" })).toBeNull();
   });

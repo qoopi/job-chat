@@ -22,7 +22,16 @@ export function readPersistedSession(
   if (typeof window === "undefined") return undefined;
   try {
     const raw = window.sessionStorage.getItem(keyFor(chatId));
-    return raw ? (JSON.parse(raw) as ChatSessionPersistedState) : undefined;
+    if (!raw) return undefined;
+    // Same-origin, self-written state (our own onSessionChange), so no schema - but confirm the one
+    // load-bearing field before trusting the shape: a malformed entry reads as no persisted session
+    // rather than a bad cast that could hand a garbage token to the transport.
+    const parsed: unknown = JSON.parse(raw);
+    return parsed &&
+      typeof parsed === "object" &&
+      typeof (parsed as ChatSessionPersistedState).publicAccessToken === "string"
+      ? (parsed as ChatSessionPersistedState)
+      : undefined;
   } catch {
     return undefined; // private-mode / corrupt entry - treat as no persisted session
   }

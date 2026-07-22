@@ -207,13 +207,13 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
         initialMessages: unknown[];
         conversations: unknown[];
         signedIn: boolean;
-        autoStream: boolean;
+        pendingQuestion?: string;
       };
     };
 
     expect(element.props.newChat).toBe(true); // armed as a fresh chat shell
     expect(element.props.initialMessages).toEqual([]); // nothing resumed
-    expect(element.props.autoStream).toBe(false); // no arrival auto-stream on a fresh shell
+    expect(element.props.pendingQuestion).toBeUndefined(); // no arrival question on a fresh shell (no ?q=)
     expect(loadConversationMock).not.toHaveBeenCalled(); // "new" is not a stored id - never queried
     expect(element.props.conversations).toHaveLength(1); // history still seeded for the signed-in account
     expect(element.props.signedIn).toBe(true);

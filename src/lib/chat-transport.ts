@@ -4,22 +4,17 @@ import { useMemo, useState } from "react";
 import type { ChatTransport, UIMessage } from "ai";
 import { useTriggerChatTransport } from "@trigger.dev/sdk/chat/react";
 import { AGENT_ID } from "../../trigger/agent-id";
-import { mintChatToken } from "@/app/actions";
+import { mintChatToken, startChatSession } from "@/app/actions";
 import { MockChatTransport } from "./mock-transport";
 import { readPersistedSession, writePersistedSession } from "./chat-session-store";
 import type { jobChatAgent } from "../../trigger/chat";
 
-// The transport surface ChatClient drives: the standard `ChatTransport` plus `setSession` - the arrival
-// attach hydrates a freshly-minted token + `isStreaming` so `reconnectToStream` (via
-// `useChat.resumeStream`) resumes the just-triggered run instead of returning null on a fresh mount
-// (006 P0; 024 deletes arrival-attach). The follow-up send no longer threads session state - the
-// transport owns the `.out` cursor and refreshes its token via `accessToken` on 401 (F1/F7). Both the
-// real transport and the E2E mock implement it.
+// The transport surface ChatClient drives: the standard `ChatTransport` plus `stopGeneration`. Session
+// state is owned entirely by the transport now - hydrated at construction from the persisted session
+// (`sessions`), refreshed via the `accessToken` callback on 401, and lazily started on the first send
+// (`startSession`). There is no imperative `setSession` seam. Both the real transport and the E2E mock
+// implement this.
 export interface JobChatTransport extends ChatTransport<UIMessage> {
-  setSession(
-    chatId: string,
-    session: { publicAccessToken: string; isStreaming?: boolean; lastEventId?: string },
-  ): void;
   // Stop must reach the backend after a RESUMED mount: `useChat.stop()` aborts only the local reader
   // (the AI SDK does not thread an abort through `reconnectToStream`), so the composer's onStop pairs it
   // with `stopGeneration`, which posts `{kind:"stop"}` on `.in` and halts the agent's streamText.
@@ -39,7 +34,6 @@ export function useJobChatTransport({
   e2e: boolean;
   conversationId: string;
 }): JobChatTransport {
-  const mock = useMemo(() => new MockChatTransport(), []);
   // Hydrate this conversation's persisted session at transport construction (the SDK reads `sessions`
   // once, on first render). A settled entry makes `reconnectToStream` no-op; a live one lets it resume
   // from the persisted `.out` cursor. Read once (SSR-guarded) - the transport ignores later changes.
@@ -47,6 +41,7 @@ export function useJobChatTransport({
     const s = readPersistedSession(conversationId);
     return s ? { [conversationId]: s } : undefined;
   });
+  const mock = useMemo(() => new MockChatTransport(hydrated), [hydrated]);
   const real = useTriggerChatTransport<typeof jobChatAgent>({
     task: AGENT_ID,
     accessToken: async ({ chatId }) => {
@@ -54,6 +49,10 @@ export function useJobChatTransport({
       if (!r.ok) throw new Error("chat session unavailable");
       return r.token;
     },
+    // Lazily start (or resume) the session on the first `sendMessage` for a chatId with no cached
+    // session - THE documented turn-1 delivery path (createStartSessionAction creates the Session +
+    // triggers the run + returns the browser token). Every follow-up reuses the cached session.
+    startSession: ({ chatId }) => startChatSession({ chatId }),
     sessions: hydrated,
     // Persist every session change (token refresh, cursor advance, stream start/stop) so the next mount
     // resumes exactly where this one left off; a null clears the stored key when the session closes.

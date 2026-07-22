@@ -19,13 +19,10 @@ import type { UIMessage } from "ai";
 // path, not a bespoke banner. The real transport and server action are mocked (external boundaries);
 // ChatClient's own branching is what is under test.
 //
-// It also proves the send contract after R1/R2: the follow-up send threads NO session state - the
-// transport owns the `.out` cursor and refreshes its token via `accessToken`, so `send` never calls
-// `setSession`. A follow-up delivers + watches via `sendMessages` (the only SDK path that streams a
-// freshly-triggered turn live); the peekSettled `reconnectToStream` is NOT used for follow-ups. Arrival
-// still attaches via `setSession` + `reconnectToStream` (resumeStream on an in-flight run; 024 removes
-// it). All three are spied.
-const setSessionMock = vi.fn();
+// It also proves the send contract after R4: every turn - including turn 1 on arrival - rides the public
+// send path via the transport's `sendMessages` (append + subscribe-with-wait). The peekSettled
+// `reconnectToStream` is NOT used to deliver a fresh turn. The transport owns its own session (there is
+// no `setSession` seam). Both `sendMessages` and `reconnectToStream` are spied.
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(
   async () => new ReadableStream({ start: (c) => c.close() }),
@@ -34,7 +31,6 @@ vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
     sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
-    setSession: setSessionMock,
   }),
 }));
 
@@ -61,7 +57,6 @@ afterEach(() => {
   closeAuthDialog(); // a guest cap refusal auto-opens the shared auth dialog (module singleton) - reset it
   sendMessageMock.mockReset();
   mintChatTokenMock.mockReset();
-  setSessionMock.mockClear();
   reconnectMock.mockClear();
   sendMessagesMock.mockClear();
   routerReplaceMock.mockClear();
@@ -88,18 +83,12 @@ test("action-refusal: the sendMessage action's cap refusal renders the SAME regi
     CONVERSATION_ID,
     "One more question",
   );
-  // A refusal short-circuits BEFORE any attach - the transport must never be touched.
-  expect(setSessionMock).not.toHaveBeenCalled();
+  // A refusal short-circuits BEFORE any delivery - the transport's send path must never be touched.
+  expect(sendMessagesMock).not.toHaveBeenCalled();
 });
 
 test("action-refusal: an ok send does NOT render a notice (control case)", async () => {
-  sendMessageMock.mockResolvedValue({
-    ok: true,
-    conversationId: CONVERSATION_ID,
-    messageId: "m1",
-    publicAccessToken: "tok",
-    runId: "run1",
-  });
+  sendMessageMock.mockResolvedValue({ ok: true });
   render(
     <ChatClient
       conversationId={CONVERSATION_ID}
@@ -135,14 +124,13 @@ test("Should_EchoUserBubbleSynchronously_When_Sent: the user bubble renders befo
   fireEvent.change(box, { target: { value: "Median salary in Berlin?" } });
   fireEvent.keyDown(box, { key: "Enter" });
 
-  // Synchronously present, before the gate resolves and before the transport is hydrated.
+  // Synchronously present, before the gate resolves and before the transport streams.
   expect(screen.getByText("Median salary in Berlin?")).toBeTruthy();
   expect(screen.getByRole("status", { name: "Answering" })).toBeTruthy(); // indicator follows immediately
-  expect(setSessionMock).not.toHaveBeenCalled();
 
   // The gate passes: the SDK's sendMessage({ messageId }) replaces the SAME optimistic id in place (and
   // reconcileMessagesById is the backstop), so the server echo yields EXACTLY ONE bubble, no duplicate.
-  release({ ok: true, publicAccessToken: "tok" });
+  release({ ok: true });
   await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
   expect(screen.getAllByText("Median salary in Berlin?")).toHaveLength(1);
 });
@@ -344,9 +332,9 @@ test("Should_IgnoreReenteredSend_When_SendAlreadyInFlight: two same-tick compose
   await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
 });
 
-// --- R2: a follow-up delivers + watches via sendMessages and threads NO session state ---
+// --- R2/R4: a follow-up delivers + watches via sendMessages, not the peekSettled reconnect ---
 
-test("follow-up send: threads no session state (no setSession on the send path) and streams via sendMessages, not the peekSettled reconnect", async () => {
+test("follow-up send: streams via sendMessages (append + subscribe-with-wait), not the peekSettled reconnect", async () => {
   sendMessageMock.mockResolvedValue({ ok: true });
   render(
     <ChatClient
@@ -364,9 +352,6 @@ test("follow-up send: threads no session state (no setSession on the send path) 
   // Delivered + watched via sendMessages (append + subscribe-with-wait), NOT the peekSettled reconnect.
   await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
   expect(reconnectMock).not.toHaveBeenCalled();
-  // R2/F1/F7: the send path never touches the transport's session cache - the transport owns the `.out`
-  // cursor and refreshes its token via `accessToken`. (Reverting the send-path deletion turns this RED.)
-  expect(setSessionMock).not.toHaveBeenCalled();
 });
 
 test("instant feedback: the answering indicator + Stop show AT ONCE on send, through the run-wake gap before the run streams (006 ruling 1)", async () => {
@@ -404,11 +389,12 @@ test("instant feedback: the answering indicator + Stop show AT ONCE on send, thr
   expect(screen.queryByRole("status", { name: "Answering" })).toBeNull();
 });
 
-test("arrival: a new chat mints its session token and hydrates the transport so the first run streams on mount (AC-3)", async () => {
-  mintChatTokenMock.mockResolvedValue({ ok: true, token: "tok-arrival" });
+test("arrival (AC-11): turn 1 is delivered through the public send path - sendMessages, not the peekSettled reconnect - and ?q= is stripped so a reload cannot re-deliver", async () => {
+  // Message #1 is SSR-loaded (startConversation persisted it before navigating); the pending question is
+  // carried in ?q= (pendingQuestion). deliverArrival delivers it via useChat.sendMessage with msg#1's id.
   const initial: UIMessage[] = [
     {
-      id: "u1",
+      id: "msg-1-uuid",
       role: "user",
       parts: [{ type: "text", text: "Which companies are hiring the most?" }],
     },
@@ -417,26 +403,27 @@ test("arrival: a new chat mints its session token and hydrates the transport so 
     <ChatClient
       conversationId={CONVERSATION_ID}
       initialMessages={initial}
-      autoStream
+      pendingQuestion="Which companies are hiring the most?"
       e2e={false}
     />,
   );
 
-  await waitFor(() => expect(setSessionMock).toHaveBeenCalled());
-  expect(mintChatTokenMock).toHaveBeenCalledWith(CONVERSATION_ID);
-  expect(setSessionMock).toHaveBeenCalledWith(
-    CONVERSATION_ID,
-    expect.objectContaining({
-      publicAccessToken: "tok-arrival",
-      isStreaming: true,
+  // Turn 1 rides the send path (append + subscribe), NOT the peekSettled reconnect (which never delivers
+  // a freshly-triggered turn live). No token minting / setSession attach.
+  await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
+  expect(reconnectMock).not.toHaveBeenCalled();
+  expect(mintChatTokenMock).not.toHaveBeenCalled();
+
+  // id continuity: delivering with msg#1's id reconciles the streamed turn onto the SSR bubble - the
+  // question renders EXACTLY ONCE, not a duplicate under a fresh optimistic id.
+  expect(
+    screen.getAllByText("Which companies are hiring the most?", {
+      selector: ".bubble.user",
     }),
-  );
-  await waitFor(() => expect(reconnectMock).toHaveBeenCalled());
-  expect(setSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
-    reconnectMock.mock.invocationCallOrder[0],
-  );
-  // R2/F4: ?new=1 is stripped after the attach so a later reload cannot re-run it (a cursor-less resume
-  // that replays settled turns as duplicates) - the reload resumes via the persisted session instead.
+  ).toHaveLength(1);
+
+  // ?q= is stripped after delivery so a later reload cannot re-deliver turn 1 (it resumes via the
+  // persisted session instead).
   await waitFor(() =>
     expect(routerReplaceMock).toHaveBeenCalledWith(`/chat/${CONVERSATION_ID}`),
   );

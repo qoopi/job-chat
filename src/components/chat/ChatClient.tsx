@@ -34,7 +34,6 @@ import {
 import {
   clearGuestSession,
   deleteConversation as deleteConversationAction,
-  mintChatToken,
   sendMessage as sendMessageAction,
   startConversation as startConversationAction,
 } from "@/app/actions";
@@ -43,11 +42,12 @@ import {
 // Trigger transport, and wires every interaction the interaction-spec calls for - composer send / stop
 // (AC-8/9), follow-up chips one-shot (AC-7), error retry (AC-10), and the polite limit notice (AC-15).
 //
-// Send paths differ by boundary, not by rendering:
-//  - PROD: the `sendMessage` server action persists the user turn to Postgres BEFORE the run counts it
-//    (the guard/AC-13 handoff) and returns the early typed refusal (UX); the run then streams over the
-//    transport, which we attach to with `resumeStream`. A cap/budget refusal is rendered as a
-//    data-refusal part so it reads identically to the agent-side backstop's refusal.
+// Every turn - including turn 1 on arrival - rides the same public send path: `useChat.sendMessage`
+// drives the transport's `sendMessages` (append to `.in` + subscribe-with-wait), which lazily starts the
+// session on the first send. Boundary difference, not a rendering one:
+//  - PROD: the `sendMessage` server action is the early UX gate (ownership + cap/budget) and returns the
+//    typed refusal; a cap/budget refusal renders as a data-refusal part so it reads identically to the
+//    agent-side backstop. The run then streams over the transport.
 //  - E2E: the mock transport streams a scripted answer, so `useChat.sendMessage` drives the whole turn
 //    with no Trigger/Bedrock. The rendering, reconciliation, and controls under test are the same.
 
@@ -56,7 +56,6 @@ export function ChatClient({
   title,
   initialMessages,
   pendingQuestion,
-  autoStream = false,
   newChat = false,
   e2e = false,
   signedIn: signedInInitial = false,
@@ -71,8 +70,9 @@ export function ChatClient({
   conversationId: string;
   title?: string;
   initialMessages: UIMessage[];
+  /** AC-11 arrival: the landing/new-chat question, carried in `?q=`. Delivered on mount through the same
+   *  public send path as every follow-up (turn 1 rides `useChat.sendMessage`). */
   pendingQuestion?: string;
-  autoStream?: boolean;
   /** 017: a fresh chat shell (`/chat/new`) - no thread to resume; the first send starts a new conversation
    *  (arms `freshChatRef`). The landing-initiated sign-in's destination. */
   newChat?: boolean;
@@ -109,7 +109,6 @@ export function ChatClient({
     error,
     regenerate,
     setMessages,
-    resumeStream,
   } = useChat({
     id: conversationId,
     transport,
@@ -252,21 +251,19 @@ export function ChatClient({
       setAwaiting(true); // instant answering indicator + streaming composer through the run-wake gap
 
       // AC-19: the first message after New chat starts a NEW conversation (the landing handoff), then
-      // soft-navigates to it (no full reload) - the new page attaches the stream on arrival. Mirrors
-      // LandingComposer's submit exactly. Awaiting stays set through the navigation (the component
-      // unmounts on push); a refusal clears it and shows the notice.
+      // soft-navigates to it carrying the question in `?q=` - the new page delivers turn 1 via the public
+      // send path on arrival. Mirrors LandingComposer's submit exactly. Awaiting stays set through the
+      // navigation (the component unmounts on push); a refusal clears it and shows the notice.
       if (freshChatRef.current) {
         try {
           if (e2e) {
-            router.push(
-              `/chat/${crypto.randomUUID()}?new=1&q=${encodeURIComponent(text)}`,
-            );
+            router.push(`/chat/${crypto.randomUUID()}?q=${encodeURIComponent(text)}`);
             return;
           }
           const r = await startConversationAction(text);
           if (r.ok) {
             freshChatRef.current = false;
-            router.push(`/chat/${r.conversationId}?new=1`);
+            router.push(`/chat/${r.conversationId}?q=${encodeURIComponent(text)}`);
             return;
           }
           if (r.reason === "guest_cap" || r.reason === "daily_budget") {
@@ -352,40 +349,44 @@ export function ChatClient({
     ],
   );
 
-  // AC-3 arrival attach: the landing action already created the conversation and triggered its run, but
-  // the run's token was discarded on the redirect. Mint a fresh session-scoped token (ownership-checked)
-  // and hydrate the transport so resumeStream subscribes to the in-flight run instead of no-op'ing on an
-  // empty session cache (006 P0). Prod only - E2E arrival streams via the mock's mount-time send.
-  const attachOnArrival = useCallback(async () => {
-    setAwaiting(true); // indicator shows AT ONCE on arrival, through the mint + attach gap (server bubble already present)
-    try {
-      const r = await mintChatToken(conversationId);
-      if (!r.ok) return;
-      transport.setSession(conversationId, {
-        publicAccessToken: r.token,
-        isStreaming: true,
-      });
-      await resumeStream();
-    } finally {
-      setAwaiting(false);
-    }
-  }, [conversationId, transport, resumeStream]);
+  // AC-11 arrival: deliver turn 1 through the public send path (the same primitive every follow-up uses).
+  // Message #1 was persisted by startConversation and SSR-loaded into initialMessages; delivering with its
+  // id makes the streamed turn reconcile onto the SSR bubble (one bubble) and keeps the run-side
+  // count-persist a no-op. E2E has no store, so no seed -> the AI SDK mints the id and the optimistic
+  // user bubble. The transport lazily starts the session on this first send (createStartSessionAction).
+  const deliverArrival = useCallback(
+    async (question: string) => {
+      const seed = initialMessages[initialMessages.length - 1];
+      // A settled thread (trailing assistant) is already answered - never re-deliver (defensive; ?q= is
+      // stripped after the first delivery, so a reload normally arrives without it).
+      if (seed && seed.role !== "user") return;
+      const messageId = seed?.role === "user" ? seed.id : undefined;
+      sendingRef.current = true;
+      setAwaiting(true); // instant answering indicator through the run-wake gap (bubble already present)
+      try {
+        await sendMessage({ text: question, messageId });
+      } catch {
+        // stream aborted (Stop) or a mock/stream error - the live error card renders from useChat error
+      } finally {
+        sendingRef.current = false;
+        setAwaiting(false);
+      }
+    },
+    [initialMessages, sendMessage],
+  );
 
-  // AC-3 arrival: the landing question is already answered on this screen. E2E streams it via the mock
-  // send; prod attaches to the run the landing action already triggered. Runs exactly once.
+  // Arrival kick, run exactly once on mount. Turn 1 (prod AND e2e) is delivered via the send path when the
+  // question arrived in `?q=`; a mid-stream reload instead resumes via the persisted session (resume), so
+  // it is skipped there. Deferred off the effect body (the send sets state - cascading-render rule).
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    // Deferred off the effect body: the arrival kick sets state (optimistic turn / stream attach) and
-    // must not run synchronously during the mount effect (cascading-render rule).
     queueMicrotask(() => {
-      if (e2e && pendingQuestion) void send(pendingQuestion);
-      else if (!e2e && autoStream) {
-        void attachOnArrival();
-        // Strip ?new=1 so a later reload cannot re-run the arrival attach - its cursor-less resume replays
-        // settled turns as duplicate bubbles (F4). router.replace soft-navigates: the same ChatClient
-        // instance keeps its state and the in-flight stream, only the searchParam clears, so a reload
-        // mounts with autoStream=false and resumes via the persisted session instead (R1). 024 deletes it.
+      if (pendingQuestion && !resume) {
+        void deliverArrival(pendingQuestion);
+        // Strip ?q= so a later reload cannot re-deliver turn 1 - it resumes via the persisted session
+        // instead (R1). router.replace soft-navigates: the same ChatClient keeps its state and the
+        // in-flight stream, only the searchParam clears.
         router.replace(`/chat/${conversationId}`);
       }
       // refresh #2 s8 (AC-D32): a capped guest's draft queued before the Google sign-in redirect carries

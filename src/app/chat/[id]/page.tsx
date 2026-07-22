@@ -27,7 +27,6 @@ export default async function ChatPage({
 }: {
   params: Promise<{ id: string }>;
   searchParams: Promise<{
-    new?: string;
     q?: string;
     profile?: string;
     fromAuth?: string;
@@ -39,7 +38,7 @@ export default async function ChatPage({
   // account's history, and arms ChatClient to start a new conversation on the first send.
   const isNewChat = id === "new";
   if (!isNewChat && !ConversationIdSchema.safeParse(id).success) notFound();
-  const { new: isNew, q, profile, fromAuth } = await searchParams;
+  const { q, profile, fromAuth } = await searchParams;
   const e2e = isE2E();
 
   let title: string | undefined;
@@ -72,6 +71,9 @@ export default async function ChatPage({
         initialMessages = storeToUiMessages(loaded.messages);
       }
     }
+    // AC-11 arrival: turn 1's question rides `?q=`. ChatClient delivers it on mount via the public send
+    // path, reusing message #1's id (from the loaded thread) so the streamed turn renders once.
+    if (q) pendingQuestion = q;
     signedIn = viewer.signedIn;
     accountName = viewer.accountName ?? undefined;
     accountEmail = viewer.accountEmail ?? undefined;
@@ -86,7 +88,6 @@ export default async function ChatPage({
       title={title}
       initialMessages={initialMessages}
       pendingQuestion={pendingQuestion}
-      autoStream={!isNewChat && isNew === "1"}
       newChat={isNewChat}
       e2e={e2e}
       signedIn={signedIn}

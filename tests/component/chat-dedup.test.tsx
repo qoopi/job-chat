@@ -35,7 +35,7 @@ vi.mock("@/app/actions", () => ({
   mintChatToken: (conversationId: string) => mintChatTokenMock(conversationId),
 }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 
 import { ChatClient } from "@/components/chat/ChatClient";
 
@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 test("a follow-up that replays the hydrated tail renders the existing card exactly once (no duplicate key)", async () => {
-  sendMessageMock.mockResolvedValue({ ok: true, publicAccessToken: "tok" });
+  sendMessageMock.mockResolvedValue({ ok: true });
 
   // The follow-up's `sendMessages` subscribe replays the session `.out` tail from the start: the SAME
   // assistant turn (id = ASSISTANT_ID) that is already hydrated, plus a marker text so the test can await

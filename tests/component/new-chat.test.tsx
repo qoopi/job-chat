@@ -9,16 +9,12 @@ import type { DataInsight } from "@shared/insight";
 // landing); the first message afterwards starts a brand-new conversation (the landing handoff). AC-21:
 // deleting the OPEN conversation clears to that same fresh-chat state. Driven through the REAL ChatClient;
 // the transport + server actions are external boundaries and mocked exactly as the sibling ChatClient tests.
-const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(async () => new ReadableStream({ start: (c) => c.close() }));
-const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
     sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
-    setSession: setSessionMock,
-    getSession: getSessionMock,
   }),
 }));
 
@@ -34,7 +30,7 @@ vi.mock("@/app/actions", () => ({
 }));
 
 const pushMock = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock, replace: vi.fn() }) }));
 
 import { ChatClient } from "@/components/chat/ChatClient";
 
@@ -97,7 +93,7 @@ describe("New chat in place (AC-19)", () => {
 
   test("the first message after New chat starts a NEW conversation and soft-navigates to it (landing handoff)", async () => {
     const NEW_ID = "22222222-2222-4222-8222-222222222222";
-    startConversationMock.mockResolvedValue({ ok: true, conversationId: NEW_ID });
+    startConversationMock.mockResolvedValue({ ok: true, conversationId: NEW_ID, messageId: "m-new" });
     render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={[]} signedIn conversations={convs} e2e={false} />);
 
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
@@ -105,10 +101,13 @@ describe("New chat in place (AC-19)", () => {
     fireEvent.change(box, { target: { value: "Median salary in NYC" } });
     fireEvent.keyDown(box, { key: "Enter" });
 
-    // The fresh first message creates a conversation (NOT a follow-up on the reset thread) and pushes to it.
+    // The fresh first message creates a conversation (NOT a follow-up on the reset thread) and pushes to it,
+    // carrying the question in ?q= so the arrival delivers turn 1 via the public send path.
     await waitFor(() => expect(startConversationMock).toHaveBeenCalledWith("Median salary in NYC"));
     expect(sendMessageMock).not.toHaveBeenCalled(); // not a follow-up
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith(`/chat/${NEW_ID}?new=1`));
+    await waitFor(() =>
+      expect(pushMock).toHaveBeenCalledWith(`/chat/${NEW_ID}?q=Median%20salary%20in%20NYC`),
+    );
   });
 });
 

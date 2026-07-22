@@ -61,8 +61,7 @@ vi.mock("@/lib/chat-transport", () => ({
       reconnectSpy();
       return streamOf(settledChunks); // peekSettled: only the settled prior turn, never the fresh one
     },
-    setSession: () => {},
-    getSession: () => undefined,
+    stopGeneration: async () => true,
   }),
 }));
 
@@ -73,7 +72,7 @@ vi.mock("@/app/actions", () => ({
   mintChatToken: (conversationId: string) => mintChatTokenMock(conversationId),
 }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 
 import { ChatClient } from "@/components/chat/ChatClient";
 
@@ -93,7 +92,7 @@ afterEach(() => {
 });
 
 test("a follow-up in an ongoing chat STREAMS the fresh answer live (deliver+watch via sendMessages, not peekSettled reconnect)", async () => {
-  sendMessageMock.mockResolvedValue({ ok: true, publicAccessToken: "tok-followup" });
+  sendMessageMock.mockResolvedValue({ ok: true });
 
   render(<ChatClient conversationId={CONVERSATION_ID} initialMessages={hydrated} e2e={false} />);
 

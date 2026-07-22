@@ -14,18 +14,14 @@ import { closeAuthDialog } from "@/lib/auth-dialog";
 // 017 strand 3: Sign out must land the user on the landing as a GUEST with no stale thread. onSignOut
 // drops the Better Auth session, clears the guest cookie (rotate), clears the open thread + sidebar
 // history, and redirects to "/". External boundaries mocked; ChatClient's own sign-out wiring is tested.
-const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(
   async () => new ReadableStream({ start: (c) => c.close() }),
 );
-const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
     sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
-    setSession: setSessionMock,
-    getSession: getSessionMock,
   }),
 }));
 

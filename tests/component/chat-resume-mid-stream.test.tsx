@@ -42,7 +42,6 @@ vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
     sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
-    setSession: vi.fn(),
     stopGeneration: vi.fn(async () => true),
   }),
 }));
