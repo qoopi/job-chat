@@ -82,6 +82,10 @@ export function LcpProfile({
   const [status, setStatus] = useState<Status>(e2e ? "form" : "loading");
   const [profile, setProfile] = useState<Profile | null>(null);
   const [savedGithub, setSavedGithub] = useState<string | null>(null); // the SAVED github username
+  // The error state's own copy gate - the POLL OUTCOME's `hadPriorProfile`, not derived from local
+  // `profile` state (they can diverge in a multi-tab race; the outcome is the source of truth for what
+  // ITS poll observed).
+  const [errorHadPriorProfile, setErrorHadPriorProfile] = useState(false);
 
   // Form fields.
   const [resumeText, setResumeText] = useState("");
@@ -187,6 +191,7 @@ export function LcpProfile({
     );
     if (!mounted.current || token !== pollToken.current) return; // superseded by a newer save / unmounted
     if (outcome.outcome === "error") {
+      setErrorHadPriorProfile(outcome.hadPriorProfile);
       setStatus("error");
       return;
     }
@@ -244,7 +249,6 @@ export function LcpProfile({
           />
         ) : status === "github-skipped" && profile ? (
           <GithubSkippedState
-            github={savedGithub}
             githubInput={githubInput}
             onGithubInput={setGithubInput}
             onRetry={() => void build()}
@@ -252,7 +256,7 @@ export function LcpProfile({
           />
         ) : status === "error" ? (
           <ErrorState
-            hadProfile={profile != null}
+            hadProfile={errorHadPriorProfile}
             inputRef={inputRef}
             pdfName={pdfName}
             onPickFile={onPickFile}
@@ -449,13 +453,11 @@ function SavedState({
 }
 
 function GithubSkippedState({
-  github,
   githubInput,
   onGithubInput,
   onRetry,
   onDelete,
 }: {
-  github: string | null;
   githubInput: string;
   onGithubInput: (v: string) => void;
   onRetry: () => void;
@@ -480,7 +482,7 @@ function GithubSkippedState({
           color: "var(--text-2)",
         }}
       >
-        Couldn’t read github.com/{github ?? githubInput} — check the username.
+        We couldn’t verify skills from GitHub for this profile — check the username or try again.
       </div>
       <div className="field">
         <label htmlFor="profile-github-retry">GitHub username</label>

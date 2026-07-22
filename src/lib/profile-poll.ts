@@ -56,10 +56,15 @@ export async function pollProfileSave(deps: PollDeps, params: PollParams): Promi
       if (advanced && my.profile) return classifySuccess(my.profile, my.githubUsername);
       if (my.extractionFailed) return fail();
     }
-    // Not done via the profile read yet - consult the run. A terminal FAILED run ends the poll here (the
-    // re-save edge); COMPLETED without an advanced `extracted_at` yet is DB-write lag, so loop once more.
-    const run = await deps.getRunStatus(params.runId);
-    if (run.status === "failed") return fail();
+    // Not done via the profile read yet. The run status is ONLY load-bearing for the re-save edge - a
+    // fresh save (no prior profile) always terminates via `extractionFailed` or the ceiling above, so
+    // skip the round trip there (perf: halves the poll's request volume on the common fresh-save path).
+    // A terminal FAILED run ends the poll here (the re-save edge, marker can't flip); COMPLETED without
+    // an advanced `extracted_at` yet is DB-write lag, so loop once more.
+    if (params.hadPriorProfile) {
+      const run = await deps.getRunStatus(params.runId);
+      if (run.status === "failed") return fail();
+    }
   }
   return fail(); // ceiling reached - terminate rather than poll forever
 }

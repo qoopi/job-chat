@@ -143,7 +143,10 @@ describe("ProfileCard (in-chat compact)", () => {
     const onEdit = vi.fn();
     render(<ProfileCard profile={skipped} onEdit={onEdit} />);
     expect(document.querySelectorAll(".tag").length).toBe(0); // nothing proven -> no accent tags
-    expect(screen.getByText(/GitHub skipped/)).toBeTruthy();
+    // Source-honest copy (ruled deviation from the mock): true under BOTH causes of this state - a
+    // GitHub read failure AND a read that proved nothing - never asserts a read failure that may not
+    // have happened.
+    expect(screen.getByText(/couldn.t verify skills from GitHub/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Add GitHub" }));
     expect(onEdit).toHaveBeenCalled();
   });
@@ -434,6 +437,24 @@ describe("LcpProfile error state (poll contract)", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit & re-save" })); // github already prefilled -> passes the build() guard
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Couldn’t build the profile")).toBeTruthy();
+    expect(screen.getByText("Your previous profile is untouched.")).toBeTruthy();
+  });
+
+  // Nit (review): the error copy must key off the POLL OUTCOME's own hadPriorProfile, not local `profile`
+  // state - they can diverge in a multi-tab race (another tab creates a profile between this tab's empty
+  // initial load and this tab's save). Local `profile` here stays null throughout; only the outcome says
+  // a prior profile existed.
+  test("Should_TrustPollOutcomeOverLocalState_When_TheyDiverge (multi-tab race)", async () => {
+    vi.mocked(getMyProfile).mockResolvedValueOnce(null); // this tab's initial load: no profile known locally
+    vi.mocked(saveProfile).mockResolvedValueOnce({ ok: true, taskState: "queued", runId: "run_y" });
+    vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "error", hadPriorProfile: true });
+    render(<LcpProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+
+    await screen.findByText("No profile yet"); // confirms local state resolved empty (profile stays null)
+    fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
+    fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
 
     expect(await screen.findByText("Couldn’t build the profile")).toBeTruthy();
     expect(screen.getByText("Your previous profile is untouched.")).toBeTruthy();

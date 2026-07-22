@@ -88,4 +88,16 @@ describe("pollProfileSave", () => {
     expect(out.outcome).toBe("error");
     expect(d.getMyProfile).toHaveBeenCalledTimes(3);
   });
+
+  // Perf (review should-fix): getRunStatus is only load-bearing for the re-save edge (marker can't flip
+  // when a profile already exists). A fresh save (no prior profile) relies solely on extractionFailed /
+  // the attempt ceiling, so the run-status round trip must be skipped - it would otherwise double the
+  // poll's request volume on the common fresh-save path.
+  it("skips the run-status round trip on a fresh save (no prior profile)", async () => {
+    const stuck = my({ extractedAt: null, extractionFailed: false }); // never advances, never flips
+    const d = deps([stuck, stuck, stuck], "pending");
+    const out = await pollProfileSave(d, { ...base, hadPriorProfile: false, maxAttempts: 3 });
+    expect(out).toEqual({ outcome: "error", hadPriorProfile: false }); // ceiling reached
+    expect(d.getRunStatus).not.toHaveBeenCalled();
+  });
 });

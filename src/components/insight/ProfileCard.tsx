@@ -121,7 +121,7 @@ export function ProfileCard({
               }}
             >
               <InfoCircle />
-              GitHub skipped — add your username to prove skills from your code.
+              We couldn’t verify skills from GitHub for this profile — check the username or try again.
               <button className="link-accent" type="button" onClick={onEdit} style={{ marginLeft: "auto", flexShrink: 0 }}>
                 Add GitHub
               </button>

@@ -143,8 +143,10 @@ export const PostingsSchema = z
   .object({ kind: z.literal("postings"), rows: z.array(ScoredPostingRowSchema), total: z.number() })
   .strict();
 
-/** The two fit-intent invite payloads carry no fields (the whole payload IS the marker); a literal-kind
- *  validator keeps the classifier symmetric with the card kinds and rejects a widened shape. */
+/** The two fit-intent invite payloads carry no fields (the whole payload IS the marker). NOT wired into
+ *  the classifier in this slice - `classifyCardData` (chat-ui.ts) still does a bare `data.kind === "..."`
+ *  check, so these validate nothing today. Pre-staged strict validators for 030, which wires them into
+ *  the classifier symmetrically with the card kinds (real rejection of a widened/malformed shape). */
 export const AuthInviteSchema = z.object({ kind: z.literal("auth-invite") }).strict();
 export const ProfileInviteSchema = z.object({ kind: z.literal("profile-invite") }).strict();
 
