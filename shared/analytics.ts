@@ -34,6 +34,14 @@ const QUERY_SETTINGS = {
   // Return count()/UInt64 as JSON numbers (our counts are tiny; no precision risk) so callers get
   // numbers, not strings.
   output_format_json_quote_64bit_integers: 0,
+  // Make `x IN (...)` return 0 (never NULL) for a NULL left-hand value. ClickHouse's DEFAULT
+  // (transform_null_in = 0) evaluates `NULL IN ('a')` to NULL, NOT 0 (verified on the live server, v26.2).
+  // The searchPostings scorer's cityMatch term `(city IN (...))` sits INSIDE the score arithmetic, so a
+  // NULL there makes the whole `score` NULL and `WHERE score > 0` silently DROPS an otherwise-strong match
+  // that merely lists no city. transform_null_in = 1 yields the intended "no city point" (0) instead. Safe
+  // for every WHERE-clause IN too (NULL and 0 both exclude the row there), and the concrete city / currency
+  // sets never contain NULL, so the NULL==NULL equality this setting also enables never fires.
+  transform_null_in: 1,
 } as const;
 
 /** Escape a value as a ClickHouse single-quoted string literal (backslash-style escaping). */
@@ -522,7 +530,9 @@ export function seniorityBand(text: string): SeniorityBand | "" {
  *  case-insensitive across the live case variants. Unmatched -> '' (never equals a requested band). */
 function seniorityBandSql(column: string): string {
   const clauses = BAND_KEYWORDS.map(({ band, keywords }) => {
-    const cond = keywords.map((k) => `${column} ILIKE ${chStr(`%${k}%`)}`).join(" OR ");
+    // likeEscape each keyword (as roleFilter does) so a future keyword carrying `_`/`%` matches
+    // literally, never as a wildcard - defense-in-depth; today's BAND_KEYWORDS are metacharacter-free.
+    const cond = keywords.map((k) => `${column} ILIKE ${chStr(`%${likeEscape(k)}%`)}`).join(" OR ");
     return `${cond}, ${chStr(band)}`;
   });
   return `multiIf(${clauses.join(", ")}, '')`;
@@ -532,9 +542,10 @@ function seniorityBandSql(column: string): string {
  * The searchPostings params: DERIVED filter VALUES only (the server builds these from the stored
  * profile; the profile object never crosses this boundary). `experience` is a band string; `limit`
  * defaults to the interface's 10 and is hard-capped at 50 (the emitter raises it to 50 to carry all
- * matches up to that cap). Strict, so an unknown key is rejected, not stripped.
+ * matches up to that cap). Strict, so an unknown key is rejected, not stripped. Analytics-internal (the
+ * search_postings TOOL input is a separate, narrower schema in trigger/tools.ts) - not exported.
  */
-export const SearchPostingsParams = z
+const SearchPostingsParams = z
   .object({
     titleTerms: z.array(z.string().min(1)).max(10).default([]),
     experience: z.string().min(1).nullish(),
@@ -544,7 +555,7 @@ export const SearchPostingsParams = z
     limit: z.number().int().positive().max(50).default(10),
   })
   .strict();
-export type SearchPostingsQuery = z.infer<typeof SearchPostingsParams>;
+type SearchPostingsQuery = z.infer<typeof SearchPostingsParams>;
 
 /**
  * The FIXED score formula (implemented verbatim per the epic):

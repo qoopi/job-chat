@@ -6,7 +6,9 @@ import {
   buildTemplateSql,
   createAnalytics,
   seniorityBand,
+  SENIORITY_BANDS,
 } from "@shared/analytics";
+import { SENIORITY_LEVELS } from "@shared/profile";
 
 describe("buildTemplateSql", () => {
   it("interpolates salary_compare cities + role and uses quantileExact over FINAL", () => {
@@ -530,6 +532,18 @@ describe("BAND_KEYWORDS one home (TS seniorityBand + SQL multiIf move together)"
     // own answer for this keyword, and the multiIf must carry an ILIKE clause built from it.
     expect(rowsSql).toContain(`= '${band}')`);
     expect(rowsSql).toContain(`experience_level ILIKE '%${keyword}%'`);
+  });
+});
+
+// AC-13 forces a SECOND home for the seniority values: shared/analytics.ts may NOT import
+// @shared/profile, so SENIORITY_BANDS (the scorer's bands) duplicates the profile's SENIORITY_LEVELS with
+// no compile-time link. A test MAY import both (the grep gate is on the source, not tests), so this guards
+// the latent coupling: a new profile seniority level must be added to the scorer's bands in lockstep, or
+// this fails - the one place the two lists are checked to agree.
+describe("SENIORITY_BANDS agrees with the profile SENIORITY_LEVELS (forced-duplication guard, AC-13)", () => {
+  it("the scorer's bands are exactly the profile's seniority enum (same values, same count)", () => {
+    expect(new Set(SENIORITY_BANDS)).toEqual(new Set(SENIORITY_LEVELS));
+    expect(SENIORITY_BANDS.length).toBe(SENIORITY_LEVELS.length);
   });
 });
 

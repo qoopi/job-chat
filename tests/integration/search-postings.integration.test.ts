@@ -58,6 +58,10 @@ const ROWS: PostingRow[] = [
   row({ external_id: "E", title: "Junior Engineer", company: "Stripe", city: "Berlin", location_kind: "remote", experience_level: "internship", published_at: "2026-07-19 10:00:00" }),
   // F: no title/exp/city/remote/salary match -> score 0 -> NOT a match (excluded)
   row({ external_id: "F", title: "Product Manager", company: "Amazon", city: "Paris", location_kind: "onsite", experience_level: "Mid", published_at: "2026-07-14 10:00:00" }),
+  // H: NULL city (the default), scores 0 under PARAMS (no title/exp/city/remote/salary match) so it does
+  // not disturb the ordering/meta above. Its own test below searches a term it DOES match to prove the
+  // null-city `city IN (...)` term yields 0 (not NULL) - so the row is not NULL-dropped by WHERE score > 0.
+  row({ external_id: "H", title: "Marketing Manager", company: "Spotify", experience_level: "Mid", published_at: "2026-07-13 10:00:00" }),
 ];
 
 describe.skipIf(!hasCreds)("searchPostings scores + orders by the fixed formula (AC-7/AC-8)", () => {
@@ -119,6 +123,23 @@ describe.skipIf(!hasCreds)("searchPostings scores + orders by the fixed formula 
     expect(res.rows).toHaveLength(3); // capped to the top 3 by score
     expect(res.total).toBe(6); // total stays the full pre-limit match count
     expect(res.rows.map((r) => r.score)).toEqual([12, 10, 9]);
+  });
+
+  it("keeps a NULL-city posting that matches on other terms: city IN (...) yields 0, not NULL (S3)", async () => {
+    // H has city = NULL and matches only the title term. With a `cities` filter present the score carries
+    // the real `(city IN ('Amsterdam'))` term; under transform_null_in = 1 a NULL city evaluates that to 0
+    // (the CH DEFAULT of 0 would make it NULL), so the score stays 3 and the row SURVIVES WHERE score > 0.
+    // Were IN(NULL) -> NULL, the whole score would go NULL and H would silently vanish - the regression
+    // this pins (and why QUERY_SETTINGS pins transform_null_in = 1).
+    const res = await analytics.searchPostings({
+      titleTerms: ["Marketing"],
+      cities: ["Amsterdam"],
+      limit: 50,
+    });
+    const h = res.rows.find((r) => r.title === "Marketing Manager");
+    expect(h).toBeDefined();
+    expect(h!.city).toBeNull(); // not listed
+    expect(h!.score).toBe(3); // 3 * title hit; the null-city IN term contributed 0, so no NULL-collapse
   });
 
   it("returns an honest empty result when nothing matches (no invented postings)", async () => {
