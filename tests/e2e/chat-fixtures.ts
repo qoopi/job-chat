@@ -1,6 +1,6 @@
 import type { DataInsight } from "@shared/insight";
 import type { StoredMessage } from "@/lib/chat-ui";
-import { FIXTURE_CONVERSATION, type ThreadItem } from "@/lib/fixtures/conversation";
+import { FIXTURE_CONVERSATION, type ThreadItem } from "./conversation";
 
 // E2E resume fixtures (server side). In E2E mode the chat page resolves its initial conversation from
 // here instead of Postgres, so the built app renders a deterministic thread with no DB. The 005 static

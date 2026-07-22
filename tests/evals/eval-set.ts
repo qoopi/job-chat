@@ -1,6 +1,6 @@
 import type { ChartType } from "@shared/insight";
-import { LAUNCH_QUESTIONS } from "../tests/fixtures/launch-questions";
-import { CONVERSATIONAL_PROMPTS, P2_INTENT_PROMPTS } from "../tests/fixtures/plain-prompts";
+import { LAUNCH_QUESTIONS } from "../fixtures/launch-questions";
+import { CONVERSATIONAL_PROMPTS, P2_INTENT_PROMPTS } from "../fixtures/plain-prompts";
 
 // The 30-case eval set: the regression net for agent flexibility (AC-6/AC-7/AC-4). Each case pins what
 // the SHIPPED prompt + catalog should do with a question - the tool it should call, the answer mode, the

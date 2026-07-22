@@ -4,13 +4,13 @@ import type { UIMessage } from "ai";
 import type { ConversationSummary } from "@shared/store";
 import { ChatClient } from "@/components/chat/ChatClient";
 import { storeToUiMessages } from "@/lib/chat-ui";
-import { e2eFixtureThread } from "@/lib/chat-fixtures";
 import {
   loadConversation,
   listOwnerConversations,
   resolveViewer,
 } from "@/lib/server-store";
 import { isE2E } from "@/lib/e2e";
+import { e2eFixtureThread } from "@/lib/e2e-fixtures";
 
 // The chat shell (mock 2a). Server-renders the conversation from the store (AC-13 resume: cards intact,
 // no analytics re-query) and hands it to the live client (ChatClient) which attaches the stream. The
@@ -51,7 +51,10 @@ export default async function ChatPage({
 
   if (e2e) {
     // No Postgres in the automated suite: resume from the fixture, or carry the landing question in. A
-    // fresh shell resumes nothing (no fixture lookup for "new").
+    // fresh shell resumes nothing (no fixture lookup for "new"). `e2eFixtureThread` imports the production
+    // STUB (src/lib/e2e-fixtures.ts, zero test data); only the E2E build (JOBCHAT_E2E=1) swaps in the real
+    // tests/ fixtures via next.config `turbopack.resolveAlias`, so a production build's module graph never
+    // pulls in test code - and prod never calls this at all (isE2E() is always false there).
     const fixture = isNewChat ? undefined : e2eFixtureThread(id);
     if (fixture) {
       title = fixture.title;

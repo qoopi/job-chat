@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { assertEvalEnabled, runCase, scoreCase, type EvalStreamModel, type Observed } from "../../evals/run";
-import { CHART_BEARING, EVAL_SET, type EvalCase } from "../../evals/eval-set";
+import { assertEvalEnabled, runCase, selectEvalCases, type EvalStreamModel, type Observed } from "../evals/runner";
+import { scoreCase } from "../evals/scorer";
+import { CHART_BEARING, EVAL_SET, type EvalCase } from "../evals/eval-set";
 import type { ModelMessage } from "../../trigger/parts";
 
 // AC-6 offline smoke for the eval harness (dev tooling - deliberately minimal; AC-7 is the real, live
 // gate). Two behaviours, both offline (no Bedrock): the runner REFUSES without JOBCHAT_EVAL=1, and its
 // deterministic scorer scores a scripted transcript exactly as expected. The eval SET itself sits outside
-// the vitest globs (top-level evals/), so this is the one place it is exercised in the suite.
+// the vitest globs (tests/evals/), so this is the one place it is exercised in the suite.
 describe("eval harness (offline smoke)", () => {
   it("Should_RefuseWithoutFlag_And_ScoreOneScriptedCase", () => {
     // Refuse without the flag (checked before any credential probe, so it fires with an empty env).
@@ -62,6 +63,51 @@ describe("eval harness (offline smoke)", () => {
     expect(CHART_BEARING).toHaveLength(12);
     // Every chart-bearing case is a query_postings case (the only path with a RAW agent pick, AC-4).
     expect(CHART_BEARING.every((c) => c.expect.tool === "query_postings")).toBe(true);
+  });
+});
+
+// 027: the JOBCHAT_EVAL_IDS subset filter (fixes the dead env 022's testing flagged). A real id-subset
+// filter so the spot-check the env name always promised actually works: match on case ids, report the
+// skipped count (no silent caps), unset = the full exam. Pure function, so covered offline.
+describe("selectEvalCases (JOBCHAT_EVAL_IDS subset filter)", () => {
+  it("runs the full set when the env is unset or empty, skipping nothing", () => {
+    for (const raw of [undefined, "", "  ", " , ,"]) {
+      const { cases, skipped } = selectEvalCases(EVAL_SET, raw);
+      expect(cases).toHaveLength(EVAL_SET.length);
+      expect(skipped).toBe(0);
+    }
+  });
+
+  it("restricts the run to the requested ids and reports the rest as skipped", () => {
+    const { cases, skipped } = selectEvalCases(EVAL_SET, "Q1,C1");
+    expect(cases.map((c) => c.id)).toEqual(["Q1", "C1"]);
+    expect(skipped).toBe(EVAL_SET.length - 2);
+  });
+
+  // 05-testing audit (2026-07-21): a repeated id must select its case ONCE, not run it twice - and must
+  // count as ONE skip toward "the rest", not deflate the skipped count by the duplicate.
+  it("dedupes a repeated id: selects it once, skipped counts every OTHER case exactly once", () => {
+    const { cases, skipped } = selectEvalCases(EVAL_SET, "Q1,Q1,C1");
+    expect(cases.map((c) => c.id)).toEqual(["Q1", "C1"]);
+    expect(skipped).toBe(EVAL_SET.length - 2);
+  });
+
+  it("tolerates whitespace and trailing commas around ids", () => {
+    const { cases } = selectEvalCases(EVAL_SET, " Q1 , , C1 ,");
+    expect(cases.map((c) => c.id)).toEqual(["Q1", "C1"]);
+  });
+
+  it("a single id selects exactly one live case (the one-case boot check)", () => {
+    const { cases, skipped } = selectEvalCases(EVAL_SET, "Q1");
+    expect(cases).toHaveLength(1);
+    expect(cases[0].id).toBe("Q1");
+    expect(skipped).toBe(EVAL_SET.length - 1);
+  });
+
+  it("ids that match nothing simply skip everything - never a silent full run", () => {
+    const { cases, skipped } = selectEvalCases(EVAL_SET, "NOPE");
+    expect(cases).toHaveLength(0);
+    expect(skipped).toBe(EVAL_SET.length);
   });
 });
 

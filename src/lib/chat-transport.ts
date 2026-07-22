@@ -5,7 +5,7 @@ import type { ChatTransport, UIMessage } from "ai";
 import { useTriggerChatTransport } from "@trigger.dev/sdk/chat/react";
 import { AGENT_ID } from "../../trigger/agent-id";
 import { mintChatToken, startChatSession } from "@/app/actions";
-import { MockChatTransport } from "./mock-transport";
+import { MockChatTransport } from "@/lib/e2e-transport";
 import { readPersistedSession, writePersistedSession } from "./chat-session-store";
 import type { jobChatAgent } from "../../trigger/chat";
 
@@ -23,10 +23,12 @@ export interface JobChatTransport extends ChatTransport<UIMessage> {
 
 // The transport seam. Production: the standard Trigger.dev chat transport (skill-endorsed, unchanged) -
 // it mints a session-scoped token from our ownership-checked `mintChatToken` action and streams the
-// durable run's `.out`. E2E: a scripted mock so the client loop runs with no Trigger/Bedrock. Both
-// hooks are called unconditionally (React rules) - the unused one does no I/O until driven, so shipping
-// the mock into the bundle is inert in production. `import type { jobChatAgent }` is erased at build, so
-// no server code (postgres, ClickHouse) leaks into the client.
+// durable run's `.out`. E2E: a scripted mock so the client loop runs with no Trigger/Bedrock. Both hooks
+// are called unconditionally (React rules), but the mock is only CONSTRUCTED under the e2e flag and its
+// substance lives in tests/ - src imports the `@/lib/e2e-transport` stub (zero mock bytes), and only the
+// E2E build (JOBCHAT_E2E=1) swaps in the real mock via next.config `turbopack.resolveAlias`, so a
+// production bundle ships no test code. `import type { jobChatAgent }` is erased at build, so no server
+// code (postgres, ClickHouse) leaks into the client.
 export function useJobChatTransport({
   e2e,
   conversationId,
@@ -41,7 +43,12 @@ export function useJobChatTransport({
     const s = readPersistedSession(conversationId);
     return s ? { [conversationId]: s } : undefined;
   });
-  const mock = useMemo(() => new MockChatTransport(hydrated), [hydrated]);
+  // Constructed only under the e2e flag: in production the seam resolves to the stub, whose constructor
+  // is never reached (real transport is returned), so no mock instance and no mock bytes ship.
+  const mock = useMemo(
+    () => (e2e ? new MockChatTransport(hydrated) : null),
+    [e2e, hydrated],
+  );
   const real = useTriggerChatTransport<typeof jobChatAgent>({
     task: AGENT_ID,
     accessToken: async ({ chatId }) => {
@@ -58,5 +65,5 @@ export function useJobChatTransport({
     // resumes exactly where this one left off; a null clears the stored key when the session closes.
     onSessionChange: writePersistedSession,
   });
-  return e2e ? mock : real;
+  return e2e && mock ? mock : real;
 }
