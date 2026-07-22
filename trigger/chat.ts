@@ -10,7 +10,7 @@ import { getAgentLimits, getGuardConfig } from "@shared/env";
 import { AGENT_ID } from "./agent-id";
 import { ADVISER_V2 } from "./prompts/adviser-v2";
 import { buildCatalogTools, type EmitPart } from "./tools";
-import { persistAssistantTurn } from "./persistence";
+import { persistAssistantTurn, hydrateHistory } from "./persistence";
 import { createChatRun, type StreamModelArgs } from "./run";
 
 // The conversation loop: ONE durable Trigger.dev chat.agent per conversation (keyed on chatId = our
@@ -106,6 +106,16 @@ export const jobChatAgent = chat.agent({
   run: (payload) => chatRun(payload),
   // Mint uuid response ids so responseMessage.id is a uuid the store can key the assistant row on.
   uiMessageStreamOptions: { generateMessageId },
+  // R6/F11: register the DB-owned history seam. Returning the persisted rows (raw, via hydrateHistory)
+  // makes the SDK skip its snapshot machinery entirely ("customers own persistence") - Postgres is the
+  // SOLE history store, deleting the parallel snapshot reads/writes and one class of redelivery source.
+  // createChatRun still owns the MODEL-input rebuild (buildModelHistory over the store), so this raw
+  // return only seeds the SDK accumulator and the user count persistIncomingUserTurns reads - which is why
+  // it is deliberately uncoalesced (see hydrateHistory).
+  hydrateMessages: async ({ chatId, incomingMessages }) =>
+    withStore(async (store) =>
+      hydrateHistory((await store.getConversation(chatId))?.messages ?? [], incomingMessages),
+    ),
   // Persist the assistant turn on completion - normal, stopped, OR errored. A stopped turn carries a
   // responseMessage with its aborted parts cleaned up (a partial card survives to resume). An ERRORED
   // turn fires with `error` set and the response undefined-or-partial; persistAssistantTurn synthesizes
