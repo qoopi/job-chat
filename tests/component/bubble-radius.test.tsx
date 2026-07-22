@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { Bubble } from "@/components/chat/Bubble";
 
-// AC-17: a bubble whose content wraps past one line carries `.wrapped` (which CSS maps to --r-lg); a
+// A bubble whose content wraps past one line carries `.wrapped` (which CSS maps to --r-lg); a
 // single-line bubble keeps the plain `.bubble` (--r-pill). jsdom does no layout, so we stand in for the
 // browser's measurement by making scrollHeight a function of the rendered text length - short text
 // measures as one line, long text as multiple. The detection code under test (getComputedStyle +

@@ -15,7 +15,7 @@ import { setAuthDialogOpen } from "@/lib/layers";
 
 // 017: Google-ONLY sign-in (email/password removed). The lazy auth dialog opens on a Sign-in tap AND at
 // the guest cap moment, offers ONLY "Continue with Google", and every dismiss (cancel / Esc / backdrop)
-// returns to the chat untouched. AC-9 (partial): with the REAL dialog above an open LCP, Esc closes the
+// returns to the chat untouched. Esc layering: with the REAL dialog above an open LCP, Esc closes the
 // dialog only and leaves the LCP (interaction-spec "Priority of layers"). External boundaries mocked as
 // chat-client.test.tsx does; here no turn streams, so the transport is inert.
 const reconnectMock = vi.fn(async () => null);
@@ -132,8 +132,8 @@ describe("google-only auth dialog (017)", () => {
     expect(screen.queryByRole("button", { name: "Create account" })).toBeNull();
   });
 
-  // Audit (05-testing, AC-D33): the dialog's aria-label proved the TITLE; nothing asserted the sub-line
-  // or the adoption note verbatim - both are load-bearing contract copy.
+  // The dialog's aria-label proves the TITLE only; the sub-line and the adoption note are
+  // load-bearing contract copy - assert them verbatim.
   test("Should_ShowGoogleOnlyRefreshCopy_When_DialogOpens (AC-D33 exact copy)", () => {
     render(
       <ChatClient
@@ -164,9 +164,9 @@ describe("google-only auth dialog (017)", () => {
     });
   });
 
-  // Prod defect (2026-07-21): the better-auth client RESOLVES with { error } on HTTP failures (the 403
-  // INVALID_ORIGIN class) - it does not throw, so the old try/catch surfaced nothing and left the button
-  // dead in `loading` forever. The dialog must show the error and re-enable the button.
+  // The better-auth client RESOLVES with { error } on HTTP failures (the 403 INVALID_ORIGIN class) -
+  // it does not throw, so a bare try/catch surfaces nothing and leaves the button dead in `loading`.
+  // The dialog must show the error and re-enable the button.
   test("Should_ShowErrorAndReenableButton_When_SignInResolvesWithError", async () => {
     signInSocialMock.mockResolvedValue({ error: { status: 403 } });
     render(<AuthDialog onClose={vi.fn()} />);
@@ -184,7 +184,7 @@ describe("google-only auth dialog (017)", () => {
   });
 });
 
-// 017 fix round 2 (must-fix 1): the HOST decides the post-sign-in destination it hands /auth/complete.
+// The HOST decides the post-sign-in destination it hands /auth/complete.
 // A landing-initiated sign-in lands the user INSIDE the app (`/chat/new`), not back on the marketing "/";
 // a chat-initiated sign-in keeps returning to that same conversation. Both `next` values still flow
 // through the route's resolve-then-compare-origin safeNext guard (a same-origin leading-slash path).
@@ -277,9 +277,8 @@ describe("google redirect error surfacing (017 strand 2)", () => {
   });
 });
 
-// AUDIT (05-testing, independent pass): the task requires `?error=` surfacing on BOTH hosts (chat +
-// landing) - useOpenAuthDialogOnError is called from both ChatClient and LandingComposer, but only the
-// chat host had a test above. Close that gap here on the landing host (dynamic-imported AuthDialog).
+// ?error= surfacing must work on BOTH hosts (chat + landing): useOpenAuthDialogOnError is called
+// from both ChatClient and LandingComposer. This covers the landing host (dynamic-imported AuthDialog).
 describe("google redirect error surfacing on the LANDING host (017 strand 2)", () => {
   afterEach(() => window.history.replaceState(null, "", "/"));
 
@@ -322,7 +321,7 @@ describe("auth dialog open (AC-10)", () => {
     expect(composer().disabled).toBe(true);
   });
 
-  // refresh #2 s8: the guest cap no longer AUTO-opens the dialog - it shows the register card and keeps
+  // The guest cap no longer AUTO-opens the dialog - it shows the register card and keeps
   // the composer enabled; the dialog opens on the NEXT send (the queued draft) or the card's button.
   test("Should_NotAutoOpen_ButOpenOnNextSend_When_GuestCapHit", async () => {
     sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
@@ -417,7 +416,7 @@ describe("Esc layer priority: real dialog above the LCP (AC-9)", () => {
   });
 
   test("Should_NotDisturbLowerLayer_When_DialogEscHandlerRegisteredFirst", () => {
-    // Order-independence (should-fix 1): register the dialog's Esc listener BEFORE a lower-layer window
+    // Order-independence: register the dialog's Esc listener BEFORE a lower-layer window
     // handler - the REVERSE of the app's natural mount order (where the LCP binds first). Even so, the
     // dialog's `stopImmediatePropagation` suppresses the lower handler, so a single Esc never falls
     // through the dialog to the layer beneath it, whichever listener happens to be registered first.

@@ -48,7 +48,7 @@ function replay(script: ScriptStep[], signal: AbortSignal | undefined): Readable
   return new ReadableStream<UIMessageChunk>({
     async start(controller) {
       for (const step of script) {
-        if (signal?.aborted) break; // stop() aborts: leave the partial answer already enqueued (AC-9)
+        if (signal?.aborted) break; // stop() aborts: leave the partial answer already enqueued
         if (step.delayMs) await abortableSleep(step.delayMs, signal);
         if (signal?.aborted) break;
         controller.enqueue(step.chunk);

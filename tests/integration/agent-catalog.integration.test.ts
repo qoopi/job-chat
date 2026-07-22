@@ -7,11 +7,11 @@ import { buildCatalogTools, type EmitPart } from "../../trigger/tools";
 import { loadFixtureTable } from "../fixtures/load";
 import { LAUNCH_QUESTIONS } from "../fixtures/launch-questions";
 
-// AC-11 demo gate: the agent's tool catalog, run against the seeded reference dataset in real
+// Demo gate: the agent's tool catalog, run against the seeded reference dataset in real
 // ClickHouse, answers all 7 launch questions with the designated tool, the designated visual (Q5/Q6
 // donut), and the expected verdict value from the fixture case table. This proves the tool ->
 // visual -> value contract deterministically; the LLM's question->tool routing is verified in the
-// live dev-server round trip (Completion Report) and 006's e2e. Skipped without ClickHouse creds.
+// live dev-server round trip and the e2e suite. Skipped without ClickHouse creds.
 const hasCreds = Boolean(process.env.CLICKHOUSE_URL);
 // A distinct table from analytics.integration.test's `postings_test` - vitest runs suites in
 // parallel workers, so a shared fixture-table name would race (drop/create collisions).

@@ -3,7 +3,7 @@ import { convertToModelMessages, type UIMessage } from "ai";
 import type { Store, Message } from "@shared/store";
 import { hydrateHistory, persistIncomingUserTurns, type RunMessage } from "../../trigger/persistence";
 
-// R6 (F11): registering the SDK's `hydrateMessages` seam switches the built-in snapshot machinery OFF -
+// Registering the SDK's `hydrateMessages` seam switches the built-in snapshot machinery OFF -
 // Postgres becomes the sole chat-history store. The seam returns the DB history for the SDK's accumulator;
 // `createChatRun` still owns the MODEL-input rebuild (buildModelHistory over the store), so the seam
 // return is deliberately RAW: the persisted rows verbatim (row ids, no coalescing, no verdict
@@ -48,7 +48,7 @@ describe("hydrateHistory (the SDK hydrateMessages seam)", () => {
     expect(out.map((m) => m.id)).toEqual(["r1"]);
   });
 
-  // 05-testing audit gap fill: the id-dedupe case above only proves hydrateHistory's OWN output does not
+  // The id-dedupe case above only proves hydrateHistory's OWN output does not
   // double the row. It never drives that deduped return through the real production bridge (the SDK's
   // convertToModelMessages, then persistIncomingUserTurns) to prove the redelivered-id shape - turn-1's
   // id-continuous arrival from 024 - does not increment the new-turn count and double-persist. This closes

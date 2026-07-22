@@ -14,12 +14,12 @@ import {
 } from "@shared/store";
 import { FIXTURE_INGESTED_AT } from "../fixtures/postings.fixture";
 
-// The faked run-path seams the eval injects so the ONLY network the harness touches is Bedrock (epic
-// ruling): an IN-MEMORY Store (no real Postgres) and a fixture-derived Analytics (no real ClickHouse -
-// scoring judges the agent's CHOICES, not the numbers). Verbatim from the pre-relocation evals/run.ts.
+// The faked run-path seams the eval injects so the ONLY network the harness touches is Bedrock:
+// an IN-MEMORY Store (no real Postgres) and a fixture-derived Analytics (no real ClickHouse -
+// scoring judges the agent's CHOICES, not the numbers).
 
 /**
- * The in-memory Store the epic ruling calls for: createChatRun persists incoming user turns, counts them
+ * The in-memory Store: createChatRun persists incoming user turns, counts them
  * for the guard, and rebuilds the model history from its Store - all absorbed in memory here. Only the
  * run-path methods carry real behaviour; the auth/history methods (unused by the run) are minimal.
  */
@@ -139,8 +139,8 @@ export function createMemoryStore(): Store {
 /**
  * A fixture-derived Analytics: every query returns the SAME small, schema-valid QueryResult built from
  * the reference dataset's domain values (tests/fixtures/postings.fixture.ts). It never executes a query
- * or computes a real aggregate - the harness scores the agent's CHOICES, not the data (epic no-real-CH
- * ruling). The rows carry a superset of the columns any verdict/insight reads, so buildInsight /
+ * or computes a real aggregate - the harness scores the agent's CHOICES, not the data. The rows carry
+ * a superset of the columns any verdict/insight reads, so buildInsight /
  * buildComposedInsight always produce a valid, non-empty card (=> the run registers "data" mode).
  */
 export function fakeAnalytics(): Analytics {
@@ -216,7 +216,7 @@ export function fakeAnalytics(): Analytics {
 }
 
 /**
- * The corpus shape the eval injects into the system prompt (018 strand 5), matching the live ground
+ * The corpus shape the eval injects into the system prompt, matching the live ground
  * truth so a market-wide question exercises the SAME DATA SCOPE note production ships (mostly Google).
  */
 export function fakeCoverageProfile(): Promise<CoverageProfile> {

@@ -2,15 +2,11 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-// Audit focus (013 testing pass, AC-18): the Completion Report claims "every color flips under
-// [data-theme=Dark]" for the ported auth-dialog CSS. No existing test asserted this (AC-18 is a manual
-// side-by-side gate - see plain-conformance.test.ts's AC-5/AC-16 precedent for other manual-gate ACs).
-// This is the deterministic slice of that claim: every color-bearing declaration in the new selectors
-// must reference a themed custom property (var(--token), which [data-theme="Dark"] overrides elsewhere
-// in this file), so a future edit cannot silently hardcode a light-mode-only color. `.overlay`'s scrim
-// is the one deliberate exception - it is a literal rgba() in the design handoff mock itself (frame 3a,
-// jobchat.dev.dc.html) with no dark-mode variant, i.e. intentionally theme-invariant, not an oversight;
-// pinned here so that stays a decision, not a drift.
+// Every color-bearing declaration in the auth-dialog selectors must reference a themed custom
+// property (var(--token), which [data-theme="Dark"] overrides elsewhere in globals.css), so a future
+// edit cannot silently hardcode a light-mode-only color. `.overlay`'s scrim is the one deliberate
+// exception - a literal rgba() in the design handoff mock itself (frame 3a) with no dark variant,
+// i.e. intentionally theme-invariant; pinned here so that stays a decision, not a drift.
 const CSS_PATH = resolve(process.cwd(), "src/app/globals.css");
 const css = readFileSync(CSS_PATH, "utf8");
 

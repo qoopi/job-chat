@@ -1,4 +1,4 @@
-// Manual dev-server round trip (task 004 validation) - NOT a vitest test (lives outside
+// Manual dev-server round trip - NOT a vitest test (lives outside
 // tests/{unit,integration}). Drives ONE real turn through the deployed dev worker: LLM routing on
 // Bedrock -> catalog tool -> streamed data-insight part -> Postgres persistence. Run it with
 // `bunx trigger.dev@latest dev` already up:  `bun run tests/manual/live-chat-smoke.ts`.

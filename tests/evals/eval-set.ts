@@ -2,17 +2,18 @@ import type { ChartType } from "@shared/insight";
 import { LAUNCH_QUESTIONS } from "../fixtures/launch-questions";
 import { CONVERSATIONAL_PROMPTS, P2_INTENT_PROMPTS } from "../fixtures/plain-prompts";
 
-// The 30-case eval set: the regression net for agent flexibility (AC-6/AC-7/AC-4). Each case pins what
+// The eval set (35 cases): the regression net for agent flexibility. Each case pins what
 // the SHIPPED prompt + catalog should do with a question - the tool it should call, the answer mode, the
 // params it should pass, and (for query_postings cases) the RAW chartType it should pick. The runner
-// (evals/run.ts) drives each question through the real prompt + Bedrock and scores the agent's CHOICES
-// against these expectations deterministically; it never judges the returned data (epic no-real-CH
-// ruling). Composition of the 30:
-//   - 7 launch questions        -> the six fixed templates (imported from the 003 fixture, DRY)
-//   - 12 composed questions      -> query_postings, the AC-4 chart-bearing sample (>= 12 pinned)
-//   - 4 P2-intent + 4 small-talk -> plain mode, no tool (imported from the 009 conformance fixture)
+// drives each question through the real prompt + Bedrock and scores the agent's CHOICES
+// against these expectations deterministically; it never judges the returned data. Composition:
+//   - 7 launch questions        -> the six fixed templates (imported from the launch-questions fixture, DRY)
+//   - 12 composed questions      -> query_postings, the chart-bearing sample (>= 12 pinned)
+//   - 4 follow-ups               -> context inheritance + multi-city (tool/mode/params, no chart gate)
+//   - 4 P2-intent + 4 small-talk -> plain mode, no tool (imported from the conformance fixture)
 //   - 3 off-domain               -> plain mode, no tool (answer-or-honest-no-live-data + steer)
-// The banned-opener list + tone harness live in ONE home (tests/fixtures/plain-prompts.ts, 009); the
+//   - 1 market-wide scope        -> plain mode, scope-qualified to the sample
+// The banned-opener list + tone harness live in ONE home (tests/fixtures/plain-prompts.ts); the
 // runner imports them there for format scoring - this file only marks which cases get the tone check.
 
 /** The two answer modes the prompt defines: a DATA answer renders an insight card; PLAIN is prose only. */
@@ -25,11 +26,11 @@ export interface EvalExpect {
   tool?: string;
   /** A SUBSET the tool-call input must contain (present keys with matching values); never exact-object. */
   params?: Record<string, unknown>;
-  /** Present => a chart-bearing case (the AC-4 sample): the RAW chartType pick the agent should make. */
+  /** Present => a chart-bearing case (the chart-bearing sample): the RAW chartType pick the agent should make. */
   chartType?: ChartType | "table";
-  /** Apply the AC-5 plain-tone conformance check to the answer text (<= 2 sentences, no "!", no filler). */
+  /** Apply the plain-tone conformance check to the answer text (<= 2 sentences, no "!", no filler). */
   formatRules?: boolean;
-  /** Market-wide scope case (018 strand 5): the answer should QUALIFY the scope to the sample (name the
+  /** Market-wide scope case: the answer should QUALIFY the scope to the sample (name the
    *  sample / its dominant employer) rather than present it as the whole market. Informational, never gates. */
   scopeQualified?: boolean;
 }
@@ -38,13 +39,13 @@ export interface EvalCase {
   id: string;
   question: string;
   /** Prior user turns to run (unscored) BEFORE `question`, establishing the history a follow-up inherits
-   *  from (018 strand 4). The runner drives each in order, persisting the answer, then scores `question`. */
+   *  from. The runner drives each in order, persisting the answer, then scores `question`. */
   context?: string[];
   expect: EvalExpect;
 }
 
 // The 7 launch questions -> the six fixed templates. Chart type is PINNED per template (not an agent
-// pick), so these carry no `chartType` expectation and are NOT part of the AC-4 chart-bearing sample.
+// pick), so these carry no `chartType` expectation and are NOT part of the chart-bearing sample.
 const LAUNCH_CASES: EvalCase[] = LAUNCH_QUESTIONS.map((q) => ({
   id: q.id,
   question: q.question,
@@ -56,7 +57,7 @@ const LAUNCH_CASES: EvalCase[] = LAUNCH_QUESTIONS.map((q) => ({
 // title/city/employment_type grouping, or a two-dimension cross-tab), so the designed answer is the
 // seventh tool. `chartType` is the RAW pick the v2 chart-choice rules call for: a category by a measure
 // -> bars, a time bucket -> trend, a small share-of-whole -> donut, two groupings -> table. These 12 are
-// the AC-4 chart-bearing sample.
+// the chart-bearing sample.
 const COMPOSED_CASES: EvalCase[] = [
   {
     id: "C1",
@@ -180,18 +181,16 @@ const COMPOSED_CASES: EvalCase[] = [
   },
 ];
 
-// 018 strand 4/5 (+5): contextual follow-ups (a two-turn inheritance case + a multi-city case), a
+// Contextual follow-ups (a two-turn inheritance case + a multi-city case), a
 // fragmentation case (title grouping), a salary/currency case, and a market-wide scope case. Kept
-// non-chart-bearing (no `chartType`) so they exercise tool/mode/params without touching the AC-4 chart
+// non-chart-bearing (no `chartType`) so they exercise tool/mode/params without touching the chart
 // gate; the verdict/currency/scope correctness is proven in the offline unit + integration suites.
 const FOLLOWUP_CASES: EvalCase[] = [
   {
     // Inheritance: "those" = the companies from the prior turn. ADVISER_V2's own FOLLOW-UP INHERITANCE
     // example is verbatim "how many of those are in SF? -> the same company grouping plus city", so the
     // prompt-MANDATED route is to re-issue top_companies (which already groups by company) with the city
-    // added, resolving SF -> San Francisco. The assertion keeps proving the SF inheritance via params.city
-    // (018 review-fix R1: corrected from the old query_postings(measures,city) expectation, which the
-    // strict scorer never matched to the mandated top_companies route).
+    // added, resolving SF -> San Francisco. The assertion keeps proving the SF inheritance via params.city.
     id: "C13",
     question: "How many of those are in SF?",
     context: ["Which companies are hiring the most?"],
@@ -234,7 +233,7 @@ const FOLLOWUP_CASES: EvalCase[] = [
 ];
 
 // P2-intent (find-me-a-job / what-fits-me): applying, matching, and personal fit are out of scope, so the
-// adviser holds the clarify-path tone in plain mode - no tool, no card. Drawn from the 009 fixture (DRY).
+// adviser holds the clarify-path tone in plain mode - no tool, no card. Drawn from the shared prompts fixture.
 const P2_CASES: EvalCase[] = P2_INTENT_PROMPTS.slice(0, 4).map((question, i) => ({
   id: `P2-${i + 1}`,
   question,
@@ -242,15 +241,15 @@ const P2_CASES: EvalCase[] = P2_INTENT_PROMPTS.slice(0, 4).map((question, i) => 
 }));
 
 // Small talk / definitions / judgement calls: no chart improves the answer, so plain mode, no tool. Drawn
-// from the 009 conversational sample (skip index 1, "is now a good time...", the most data-tempting one).
+// from the conversational sample (skip index 1, "is now a good time...", the most data-tempting one).
 const CONVERSATIONAL_CASES: EvalCase[] = [0, 2, 3, 4].map((idx, i) => ({
   id: `S-${i + 1}`,
   question: CONVERSATIONAL_PROMPTS[idx],
   expect: { mode: "plain", formatRules: true },
 }));
 
-// Off-domain for the postings data (weather, a past sports result, a live stock price). 2026-07-21
-// vision refinement (answer-anything-then-steer): the agent ANSWERS what it can - a known fact briefly,
+// Off-domain for the postings data (weather, a past sports result, a live stock price).
+// Answer-anything-then-steer: the agent ANSWERS what it can - a known fact briefly,
 // or an honest "I don't fetch that live" (NEVER a fabricated live number) - then steers back to the job
 // market. Plain mode, NO tool, NO error card (report_unanswerable is retired from the scope path). The
 // strict scorer enforces this: any data tool (a wrong guess) or an old report_unanswerable call fails
@@ -264,7 +263,7 @@ const OFF_DOMAIN_CASES: EvalCase[] = [
   expect: { mode: "plain", formatRules: true },
 }));
 
-// 018 strand 5 (+1): a market-wide question the sample cannot honestly answer as "the whole market" -
+// A market-wide question the sample cannot honestly answer as "the whole market" -
 // the agent stays in plain mode and QUALIFIES the scope to its sample (mostly Google). The scope
 // qualification is checked informationally (the DATA SCOPE note is injected into the eval's system prompt).
 const SCOPE_CASES: EvalCase[] = [
@@ -285,5 +284,5 @@ export const EVAL_SET: EvalCase[] = [
   ...SCOPE_CASES,
 ];
 
-/** The AC-4 chart-bearing sample: every case carrying a RAW chartType expectation (pinned at 12). */
+/** The chart-bearing sample: every case carrying a RAW chartType expectation (pinned at 12). */
 export const CHART_BEARING: EvalCase[] = EVAL_SET.filter((c) => c.expect.chartType !== undefined);

@@ -18,14 +18,14 @@ import {
 } from "../../trigger/parts";
 import { extractAssistantPersistence } from "../../trigger/persistence";
 
-// Synthetic query results mirroring the AC-11 fixture's hand-computed rows (tests/fixtures), so the
+// Synthetic query results mirroring the reference fixture's hand-computed rows (tests/fixtures), so the
 // pure part-building is unit-testable without a ClickHouse client. The live 7/7 run lives in the
 // integration suite.
 function result(rows: Record<string, unknown>[], sampleN: number): QueryResult {
   return { sql: "SELECT 1", rows, meta: { sampleN, freshestAt: "2026-07-18 06:00:00" } };
 }
 
-// 018 review-fix (BOUNDED confirm): an error/refusal turn persists EMPTY content, and buildModelHistory
+// An error/refusal turn persists EMPTY content, and buildModelHistory
 // drops empty rows - so an error turn immediately followed by a user follow-up used to rebuild as two
 // CONSECUTIVE user messages, which Bedrock's strict role-alternation rejects. This pins that the rebuilt
 // model input stays validly alternating (no two same-role messages adjacent) across that error->followup
@@ -66,7 +66,7 @@ describe("buildModelHistory keeps valid role alternation across a dropped error 
   });
 });
 
-// F8 (prose rule, one home each): with persistence now storing prose VERBATIM, buildModelHistory is the
+// With persistence now storing prose VERBATIM, buildModelHistory is the
 // home that substitutes the code-derived verdict for a card turn's model-facing content - so the model
 // still sees the honest verdict, never the model's own (possibly fabricated) prose, and never the error
 // narration. Reads the persisted card off `parts`; a card-less turn keeps its prose.
@@ -125,7 +125,7 @@ describe("buildModelHistory substitutes the verdict for card turns (F8)", () => 
     expect(rebuilt[1].content).toBe(`${c1.verdict} ${c2.verdict}`);
   });
 
-  // 05-testing audit (022): the test above compares against `card.verdict` - a value computed by the
+  // The test above compares against `card.verdict` - a value computed by the
   // SAME builder call under test, so a wrong-but-consistent verdict would still pass. This pins the
   // model-facing text against an INDEPENDENT literal (verdictFor's top_companies branch, trigger/parts.ts
   // line ~163: "${company} is hiring the most, with ${count} openings.") over a fixed two-turn history,
@@ -254,7 +254,7 @@ describe("buildInsight produces a strict-valid data-insight with the headline va
     if (insight.kind === "chart") expect(insight.series).toEqual([]);
   });
 
-  // AC-3: the open-set flag threads from the analytics result through buildInsight into the insight
+  // The open-set flag threads from the analytics result through buildInsight into the insight
   // meta, so InsightCard can render "N open postings" for a current-state read.
   it("carries the openSet flag into the insight meta for a current-state result", () => {
     const r: QueryResult = {
@@ -314,7 +314,7 @@ describe("toModelOutput is compact - the model sees the verdict + labels, not th
     expect(out.verdict).toBe(insight.verdict);
     expect(out.sampleN).toBe(10);
     expect(out).not.toHaveProperty("series");
-    // 018 strand 2: the row LABELS (entities) ground the model's chip/follow-up reasoning.
+    // The row LABELS (entities) ground the model's chip/follow-up reasoning.
     expect(out.labels).toEqual(["Google", "YouTube"]);
   });
 
@@ -367,7 +367,7 @@ describe("refusalPart carries the guard reason for the UI to render like an acti
 });
 
 describe("extractAssistantPersistence pulls the persisted content + card payload (AC-13)", () => {
-  // F8 (prose rule, one home each): persistence stores what HAPPENED - the model's prose VERBATIM plus the
+  // Persistence stores what HAPPENED - the model's prose VERBATIM plus the
   // card payload. The verdict substitution moves to buildModelHistory (model input) and the render layer
   // suppresses the prose when a card renders, so Postgres stays a faithful record with no rewritten history.
   it("persists the model's prose VERBATIM alongside the card (no verdict substitution at persist)", () => {
@@ -415,7 +415,7 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
     expect(parts).toBeNull();
   });
 
-  // AC-10/AC-13 regression: on a tool failure the tool emits a loading skeleton then a data-error
+  // Regression: on a tool failure the tool emits a loading skeleton then a data-error
   // under the SAME id. The persisted card must be the ERROR marker, never the stuck loading skeleton
   // (which would resume as a spinner that never resolves and lose the error).
   it("persists the error marker, not the loading skeleton, when a tool fails", () => {
@@ -430,9 +430,9 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
     expect(parts).toEqual({ kind: "system" });
   });
 
-  // F8: an error-card turn persists its prose VERBATIM too (the store is a faithful record). The single
+  // An error-card turn persists its prose VERBATIM too (the store is a faithful record). The single
   // answer surface is enforced downstream - the render layer suppresses the prose when the error card
-  // renders (AC-25), and buildModelHistory drops it from the model input - never at persist.
+  // renders, and buildModelHistory drops it from the model input - never at persist.
   it("persists the accompanying prose verbatim when a turn ends in a system error card", () => {
     const message = {
       role: "assistant",
@@ -457,7 +457,7 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
     expect(extractAssistantPersistence(message).parts).toBeNull();
   });
 
-  // P1 polish: a 0-row tool result emits a skeleton then an empty marker under the same id. The empty
+  // A 0-row tool result emits a skeleton then an empty marker under the same id. The empty
   // marker supersedes the skeleton and is NOT persistable, so the turn persists no card (plain-prose
   // answer) - never a stuck skeleton nor an empty "No data" card.
   it("drops a skeleton superseded by an empty marker - the empty turn persists no card", () => {
@@ -518,7 +518,7 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
 
 // ---- query_postings composed path (parallel to the TemplateName-keyed template path) --------------
 
-// AC-4: chartTypeForShape is the deterministic server-side fallback. The agent proposes a chartType
+// chartTypeForShape is the deterministic server-side fallback. The agent proposes a chartType
 // (the RAW pick, recorded by the tool); this returns the SERVED type - the agent's pick when it fits
 // the data shape, else the shape's fit type. Case table + override behavior.
 describe("Should_FallBackToFitChartType_When_RawPickUnfit (chartTypeForShape, AC-4)", () => {
@@ -541,7 +541,7 @@ describe("Should_FallBackToFitChartType_When_RawPickUnfit (chartTypeForShape, AC
     expect(chartTypeForShape({ dimensions: ["company"], measures: ["count"] }, "donut", 12)).toBe("bars");
   });
 
-  // Ruling 29 (2026-07-21): a donut is a share of a whole, meaningful only for a COUNT/share measure.
+  // A donut is a share of a whole, meaningful only for a COUNT/share measure.
   // A single-dimension NON-count result (median/p25/p75) NEVER renders as a donut - it falls back to
   // bars even at <= 6 slices. A 2-measure result (count + a salary) is not a pure share either -> bars.
   it("restricts donut to a count measure - a non-count share-of-whole falls back to bars (ruling 29)", () => {
@@ -549,21 +549,21 @@ describe("Should_FallBackToFitChartType_When_RawPickUnfit (chartTypeForShape, AC
     expect(chartTypeForShape({ dimensions: ["location_kind"], measures: ["p25_salary"] }, "donut", 3)).toBe("bars");
   });
 
-  // 018 strand 3: two measures on one categorical axis have no shared scale (a count next to a salary),
+  // Two measures on one categorical axis have no shared scale (a count next to a salary),
   // so a single-dimension 2-measure result routes to a TABLE, never grouped shared-axis bars.
   it("routes a two-measure single-dimension result to a table (no shared-axis nonsense)", () => {
     expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["count", "median_salary"] }, "donut", 4)).toBe("table");
     expect(chartTypeForShape({ dimensions: ["experience_level"], measures: ["p25_salary", "p75_salary"] }, "bars", 4)).toBe("table");
   });
 
-  // 018 strand 3: a trend needs >= 3 points to read as a line; fewer routes to a table.
+  // A trend needs >= 3 points to read as a line; fewer routes to a table.
   it("routes a time bucket with fewer than 3 points to a table (a trend needs >= 3 points)", () => {
     expect(chartTypeForShape({ dimensions: [], bucket: "month" }, "trend", 2)).toBe("table");
     expect(chartTypeForShape({ dimensions: [], bucket: "month" }, "trend", 1)).toBe("table");
     expect(chartTypeForShape({ dimensions: [], bucket: "month" }, "trend", 3)).toBe("trend");
   });
 
-  // 018 strand 3: a donut is honest only for a TRUE whole - its slices must sum to the sample. A
+  // A donut is honest only for a TRUE whole - its slices must sum to the sample. A
   // truncated top-N (slices summing below sampleN) falls back to bars even at <= 6 slices.
   it("serves a donut only when the slices sum to the sample (a true whole), else bars", () => {
     expect(
@@ -574,10 +574,8 @@ describe("Should_FallBackToFitChartType_When_RawPickUnfit (chartTypeForShape, AC
     ).toBe("bars");
   });
 
-  // 05-testing audit gap fill: donutIsWhole uses a strict `sliceSum === sampleN` equality. The case above
-  // only exercises a slice sum far below the sample (40 of 3488); this pins the exact boundary - slices
-  // summing to EXACTLY the sample (a true whole) vs one short of it (a truncated top-N, however small the
-  // shortfall) so an off-by-one wholeness check would be caught.
+  // donutIsWhole uses a strict `sliceSum === sampleN` equality; pin the exact boundary - slices summing
+  // to EXACTLY the sample (a true whole) vs one short of it - so an off-by-one wholeness check is caught.
   it("pins the donut wholeness boundary: slices == sampleN is a whole, one short of it is not", () => {
     expect(
       chartTypeForShape({ dimensions: ["experience_level"], measures: ["count"] }, "donut", 3, { sliceSum: 10, sampleN: 10 }),
@@ -703,8 +701,8 @@ describe("buildComposedInsight builds a strict-valid insight for the seventh too
     expect(insight.verdict).toContain("10");
   });
 
-  // Gap fill (05-testing audit): a bare salary aggregate (no dimension, no bucket) was untested - the
-  // branch distinct from both the ranked-leader and the bucketed-range phrasing.
+  // A bare salary aggregate (no dimension, no bucket) - the branch distinct from both the
+  // ranked-leader and the bucketed-range phrasing.
   it("a bare salary aggregate (no dimension, no bucket) states the single value plainly", () => {
     const insight = buildComposedInsight({
       id: "q7",
@@ -716,8 +714,8 @@ describe("buildComposedInsight builds a strict-valid insight for the seventh too
     expect(insight.verdict.toLowerCase()).toContain("median salary");
   });
 
-  // Gap fill (05-testing audit): a bucketed (time-series) salary measure was untested - it must report
-  // the observed range, never a single leader (there is no dimension to rank by).
+  // A bucketed (time-series) salary measure must report the observed range, never a single leader
+  // (there is no dimension to rank by).
   it("a bucketed salary measure reports the observed range, not a leader", () => {
     const insight = buildComposedInsight({
       id: "q8",
@@ -732,17 +730,9 @@ describe("buildComposedInsight builds a strict-valid insight for the seventh too
     expect(insight.verdict).toContain("170000");
   });
 
-  // PRODUCTION BUG (05-testing audit, loops back to developing): verdictForComposed's `ranked` check
-  // only tests whether the FIRST dimension is defined, not whether there is EXACTLY ONE - so a
-  // 2-dimension cross-tab (e.g. company x city) still takes the "leader" branch and names the top ROW's
-  // first-dimension value as if it led the whole breakdown. The Completion Report's own deviation (2)
-  // states "a trend / cross-tab / bare aggregate leads with the total or the observed range, so no false
-  // superlative is ever claimed" - the code does not match that stated design for the cross-tab case.
-  // Repro: Meta's single row (6) outranks Google's individual rows (5, 3), but Google's true total across
-  // both its rows (8) exceeds Meta's (6) - the verdict wrongly says "Meta leads" instead of reporting the
-  // total (as the bucketed/bare-aggregate branches correctly do). This test intentionally FAILS against
-  // the current code; do not patch trigger/parts.ts here (testing owns test completeness, not product
-  // code) - route the fix to developing.
+  // A 2-dimension cross-tab's top ROW is one cell, NOT the group leader - a group's other rows can sum
+  // higher (Meta's single row of 6 outranks Google's 5 and 3, but Google's true total of 8 exceeds 6).
+  // The verdict must report the total, never crown rows[0].
   it("does NOT name a false leader for a 2-dimension cross-tab (honesty: no superlative across a group-by pair)", () => {
     const insight = buildComposedInsight({
       id: "q6",
@@ -814,7 +804,7 @@ describe("buildComposedInsight builds a strict-valid insight for the seventh too
   });
 });
 
-// 018 strand 1: sampleN (the whole) is the ONE denominator every verdict shows, never the sum of the
+// sampleN (the whole) is the ONE denominator every verdict shows, never the sum of the
 // shown rows - a top-N LIMIT truncates that sum below the true total, and the source line shows sampleN,
 // so the two would disagree. These pin the verdict "of N" to sampleN when the shown rows sum LESS.
 describe("Strand 1: sampleN is the sole denominator (verdict matches the source line)", () => {
@@ -878,7 +868,7 @@ describe("Strand 1: sampleN is the sole denominator (verdict matches the source 
   });
 });
 
-// 018 strand 3: signal-quality gates - fragmentation, honest ties, currency threading, and the
+// Signal-quality gates - fragmentation, honest ties, currency threading, and the
 // template-side visual corrections (min trend points, donut only for a true whole).
 describe("Strand 3: signal-quality gates", () => {
   const composed = (
@@ -902,9 +892,9 @@ describe("Strand 3: signal-quality gates", () => {
     if (insight.kind === "chart") expect(insight.series.length).toBe(2);
   });
 
-  // 05-testing audit gap fill: the two tests above sit far below (1.2%) and far above (93%) the 0.1
-  // floor; neither pins the BOUNDARY itself. minLeaderShare compares with strict `<`, so a share exactly
-  // AT the floor must NOT fragment (it is not LESS than the floor) and a share just below it must.
+  // The two tests above sit far below (1.2%) and far above (93%) the 0.1 floor; this pins the
+  // BOUNDARY: minLeaderShare compares with strict `<`, so a share exactly AT the floor must NOT fragment
+  // and a share just below it must.
   it("pins the fragmentation floor boundary: exactly at 0.1 is a normal leader, just below it fragments", () => {
     const atFloor = buildComposedInsight({
       id: "fb1",
@@ -936,10 +926,8 @@ describe("Strand 3: signal-quality gates", () => {
     expect(insight.verdict.toLowerCase()).not.toContain("no single");
   });
 
-  // 018 review-fix (nit, rec 9 spirit for counts): a top-two count tie above the fragmentation floor still
-  // said "<X> leads with N" - a false superlative. rec 9 gives salary_compare an explicit "about the same"
-  // tie; the count-ranked path now has the equivalent. When the top two counts are equal, phrase it as a
-  // tie ("<X> and <Y> are level"), never "leads".
+  // A top-two count tie above the fragmentation floor is a tie, not a leader - phrase it "level",
+  // never a false "leads with" superlative (matching salary_compare's explicit "about the same" tie).
   it("a top-two count tie is reported as level, never a false 'leads with' superlative (rec 9 for counts)", () => {
     const insight = buildComposedInsight({
       id: "tie1",

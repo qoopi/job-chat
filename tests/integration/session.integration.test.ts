@@ -7,7 +7,7 @@ import {
   type MintToken,
 } from "../../trigger/session";
 
-// Strand 2 guards + landing handoff, integration against real Postgres. The session service is the
+// Guards + landing handoff, integration against real Postgres. The session service is the
 // injectable core the "use server" actions wrap: it bounds untrusted input, confirms the caller owns
 // the conversation, counts messages for the cap/budget, and refuses with a TYPED reason (no throws for
 // business outcomes). Turn 1 persists message #1 (no server-side trigger - the client's send path
@@ -50,7 +50,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     await sql.end();
   });
 
-  // AC-11 server slice: the landing handoff creates the conversation + persists user message #1 and
+  // The landing handoff creates the conversation + persists user message #1 and
   // returns the id + the persisted message's id. It does NOT trigger a run - turn 1 rides the client's
   // public send path (the transport lazily starts the session on the first sendMessage).
   it("startConversation creates the conversation + user message and returns its id (no server-side trigger) (AC-11)", async () => {
@@ -78,7 +78,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(reloaded?.messages[0]?.id).toBe(res.messageId);
   });
 
-  // Mechanism (a): a follow-up is a pure GATE. It does NOT persist, trigger, mint, or deliver
+  // A follow-up is a pure GATE. It does NOT persist, trigger, mint, or deliver
   // server-side - the client transport's `sendMessages` delivers the turn to `.in` (triggering the run)
   // and subscribes with wait (the only SDK path that streams a freshly-triggered follow-up live), and the
   // agent's `run()` persists the user turn before the backstop counts it.
@@ -123,7 +123,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(reloaded!.messages.filter((m) => m.role === "user")).toHaveLength(cap); // nothing added
   });
 
-  // must-fix B: unbounded input is refused at the boundary before any store write.
+  // Unbounded input is refused at the boundary before any store write.
   it("startConversation refuses over-long input (invalid_input) before any persist", async () => {
     const userId = freshGuestId();
     await store.getOrCreateUser(userId);
@@ -169,7 +169,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(after[0].c).toBe(1); // still just the earlier one
   });
 
-  // AC-15: the (cap+1)-th user message is refused with a typed reason.
+  // The (cap+1)-th user message is refused with a typed reason.
   it("sendMessage refuses with guest_cap once the guest hits the cap (AC-15)", async () => {
     const userId = freshGuestId();
     await store.getOrCreateUser(userId);
@@ -191,7 +191,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(reloaded!.messages.filter((m) => m.role === "user")).toHaveLength(cap);
   });
 
-  // should-fix ownership: Guest B, handed Guest A's conversation id, cannot inject a message in it - it
+  // Ownership: Guest B, handed Guest A's conversation id, cannot inject a message in it - it
   // reads as not_found (before the OLD code discarded the caller and enforced the guard against the
   // OWNER, letting the injection through).
   it("sendMessage refuses a cross-guest conversation with not_found (ownership)", async () => {
@@ -228,12 +228,12 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
 
     const res = await svc.sendMessage(conv.id, "a real follow-up", owner);
     expect(res).toEqual({ ok: true });
-    // Mechanism (a): the owner's gate returns ok but does not persist (the client delivers).
+    // The owner's gate returns ok but does not persist (the client delivers).
     const reloaded = await store.getConversation(conv.id);
     expect(reloaded!.messages.filter((m) => m.role === "user")).toHaveLength(0);
   });
 
-  // AC-20: the global daily budget is the kill switch - a fresh guest is refused even on message #1.
+  // The global daily budget is the kill switch - a fresh guest is refused even on message #1.
   it("refuses every guest with daily_budget when the global budget is exhausted (AC-20)", async () => {
     const userId = freshGuestId();
     await store.getOrCreateUser(userId);
@@ -251,7 +251,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(count[0].c).toBe(0);
   });
 
-  // AC-20 cross-user check: the budget must be a GLOBAL count, not accidentally scoped to the caller.
+  // Cross-user check: the budget must be a GLOBAL count, not accidentally scoped to the caller.
   // A fresh guest with zero messages of their own is still refused once ANOTHER guest's traffic alone
   // exhausts the shared budget - this fails if `messageCounts` for the budget check were ever scoped
   // by userId (a fresh guest would then read 0 and wrongly be allowed through).
@@ -299,7 +299,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(await svc.mintChatToken(crypto.randomUUID(), guestId)).toEqual({ ok: false, reason: "not_found" });
   });
 
-  // should-fix ownership (mint side): a token is minted only for the caller's OWN conversation.
+  // Ownership (mint side): a token is minted only for the caller's OWN conversation.
   it("mintChatToken mints for the owner but refuses a cross-guest conversation (not_found)", async () => {
     const owner = freshGuestId();
     const attacker = freshGuestId();
@@ -319,7 +319,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(mintToken).toHaveBeenCalledTimes(1); // never minted for the attacker
   });
 
-  // AC-14 (account variant): ownership is by resolved userId, kind-agnostic. An account owner's
+  // Account variant: ownership is by resolved userId, kind-agnostic. An account owner's
   // conversation is not_found to a DIFFERENT account (both refusal layers - sendMessage + mintChatToken)
   // and gates through for the owning account itself.
   it("refuses a not-owner ACCOUNT caller with not_found on both layers; owner gates through (AC-14)", async () => {
@@ -342,7 +342,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(await svc.sendMessage(conv.id, "a real follow-up", owner, "account")).toEqual({ ok: true });
   });
 
-  // AC-21: deleteConversation is ownership-gated exactly like sendMessage/mintChatToken. A non-owner -
+  // deleteConversation is ownership-gated exactly like sendMessage/mintChatToken. A non-owner -
   // guest OR account - reads as not_found and the conversation survives; the owner's delete removes it.
   describe("deleteConversation ownership (AC-21)", () => {
     function svc() {
@@ -479,10 +479,10 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       expect((await store.getConversationOwner(convC.id))?.user_id).toBe(canonical);
     });
 
-    // 012 review-fix (security): a signed-in caller whose forged/stale guest cookie points at ANOTHER
+    // Security: a signed-in caller whose forged/stale guest cookie points at ANOTHER
     // account's row must never bind onto or adopt from it. The store guards refuse (0 rows), so
     // resolveIdentity falls back to a fresh canonical row for this auth id - the victim's row and
-    // conversations are untouched. (013 additionally binds adoption to the sign-in transition; this is
+    // conversations are untouched. (adoption is additionally bound to the sign-in transition; this is
     // the defense-in-depth layer beneath it.)
     it("refuses a forged guest cookie pointing at another account - mints a fresh row, victim untouched", async () => {
       const victim = freshGuestId();
@@ -503,7 +503,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
       expect((await store.getConversationOwner(victimConv.id))?.user_id).toBe(victim); // not stolen
     });
 
-    // 012 review-fix (the auth_user_id UNIQUE race, deterministic): the losing request read
+    // The auth_user_id UNIQUE race, deterministic: the losing request read
     // findUserByAuthId -> null, then its linkAuthUser lost to the winner's concurrent stamp. resolveIdentity
     // must re-read and return the winner's canonical identity (typed, no 500) and adopt the loser's device
     // conversations onto it. Simulated by pre-inserting the winner + a one-shot findUserByAuthId that

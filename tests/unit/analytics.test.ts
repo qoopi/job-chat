@@ -30,7 +30,7 @@ describe("buildTemplateSql", () => {
     expect(sql).not.toContain("now()");
   });
 
-  // 018 strand 1: a window wider than the LIMIT must keep TODAY and drop the oldest, so the trend orders
+  // A window wider than the LIMIT must keep TODAY and drop the oldest, so the trend orders
   // day DESC + LIMIT (newest slice) and flags reverse for chronological display - never `ORDER BY day`
   // ASC, which would keep the oldest 400 days and drop the most recent.
   it("orders postings_trend newest-first (+ reverse) so the LIMIT drops the oldest days, not today", () => {
@@ -104,7 +104,7 @@ describe("buildTemplateSql", () => {
     );
   });
 
-  // Task 008: country is a chStr-equality filter on the two v1 templates the composed builder cannot
+  // Country is a chStr-equality filter on the two v1 templates the composed builder cannot
   // serve (latest_postings is an entity list; salary_distribution is the v1-only histogram shape).
   it("adds a country equality filter to latest_postings (same shape as city)", () => {
     const { sql } = buildTemplateSql("latest_postings", { country: "United States" }, "postings");
@@ -122,7 +122,7 @@ describe("buildTemplateSql", () => {
   });
 });
 
-// 018 strand 3: salary aggregates are filtered to the DOMINANT currency (never a mixed-currency median)
+// Salary aggregates are filtered to the DOMINANT currency (never a mixed-currency median)
 // and flagged `salary` so executeBuilt resolves the base currency for the source line + money formatter.
 describe("Should_FilterToDominantCurrency_When_SalaryAggregate (018 strand 3)", () => {
   const DOMINANT = "salary_currency IN (SELECT salary_currency FROM postings FINAL";
@@ -263,7 +263,7 @@ describe("Should_RejectUnknownParams_When_ComposedQueryBuilt (AC-2)", () => {
     expect(sql).toContain("city = 'trail\\\\'");
   });
 
-  // 018 review-fix (nit, strand 4): `city` and `cities` coexisting used to AND (`city = X AND city IN (...)`),
+  // `city` and `cities` coexisting used to AND (`city = X AND city IN (...)`),
   // a possibly-empty intersection. The FOLLOW-UP INHERITANCE rule REPLACES a filter rather than adding, so
   // when both are present `cities` (the multi-city list) WINS and the single `city` is dropped - never an
   // empty-intersection surprise. Documented in the schema; pinned here.
@@ -308,7 +308,7 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     expect(sql).toContain("ORDER BY count DESC");
   });
 
-  // "median salary by experience level" (AC-1 example): salary measure implies the NOT NULL filter.
+  // "median salary by experience level": salary measure implies the NOT NULL filter.
   it("median_salary by experience_level implies the NOT NULL salary filter", () => {
     const { sql } = buildComposedSql(
       { measures: ["median_salary"], dimensions: ["experience_level"] },
@@ -327,7 +327,7 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     expect(sql).toContain("round(quantileExact(0.75)((salary_min + salary_max) / 2)) AS p75_salary");
   });
 
-  // "top companies in the US" (AC-1 example): a country filter alongside a company dimension.
+  // "top companies in the US": a country filter alongside a company dimension.
   it("count by company filtered to a country", () => {
     const { sql } = buildComposedSql(
       { measures: ["count"], dimensions: ["company"], country: "United States" },
@@ -339,7 +339,7 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
 
   // A time bucket is a GROUP BY expression aliased `bucket` for stable Recharts keys. A pure trend is
   // ordered NEWEST-first (bucket DESC) + LIMIT so a series longer than the cap keeps recent buckets and
-  // drops the oldest; the reverse flag flips the rows back to chronological for display (018 strand 1).
+  // drops the oldest; the reverse flag flips the rows back to chronological for display.
   it("a pure time-bucket trend orders bucket DESC (+ reverse) so the newest buckets survive the LIMIT", () => {
     const built = buildComposedSql({ measures: ["count"], bucket: "week" }, "postings");
     expect(built.sql).toContain("toStartOfWeek(published_at) AS bucket");
@@ -371,8 +371,7 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     );
   });
 
-  // A dimension AND a time bucket together (epic technical design: "Where the composed query has both
-  // dimensions and a time bucket, the bucket is a GROUP BY expression... keep deterministic ORDER BY").
+  // A dimension AND a time bucket together.
   // Default sort is chronological (bucket ASC) even with a dimension present; the dimension becomes the
   // remaining ASC tiebreaker. Distinct from the single-dimension and bucket-only cases above.
   it("a dimension plus a time bucket groups by both, sorted chronologically by default", () => {
@@ -412,7 +411,7 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
 
   // location_kind (Enum8) is toString'd so it serializes/orders by name, and grouped by the raw
   // expression so the `location_kind` alias never shadows the column.
-  // 018 strand 1: a bucketed CROSS-TAB (a dimension alongside the bucket) is a table, not a trend, so it
+  // A bucketed CROSS-TAB (a dimension alongside the bucket) is a table, not a trend, so it
   // keeps chronological ASC order and is NOT reversed - only a pure trend flips to newest-first.
   it("a dimension + bucket keeps ASC order and does not set reverse (only a pure trend does)", () => {
     const built = buildComposedSql({ measures: ["count"], dimensions: ["company"], bucket: "week" }, "postings");
@@ -426,7 +425,7 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     expect(sql).toContain("GROUP BY toString(location_kind)");
   });
 
-  // 018 strand 4: a multi-city filter ("openings in LA or NYC") is a chStr-escaped IN-list on city.
+  // A multi-city filter ("openings in LA or NYC") is a chStr-escaped IN-list on city.
   it("builds a cities IN-list filter, each value escaped", () => {
     const { sql } = buildComposedSql(
       { measures: ["count"], cities: ["Los Angeles", "New York"] },
@@ -443,10 +442,9 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     expect(sql).toContain("city IN ('x\\' OR \\'1\\'=\\'1')");
   });
 
-  // 05-testing audit gap fill: the two tests above use a single-element cities array (a clean pair, then
-  // an injection payload as the ONLY element) - neither proves escaping is applied PER-ELEMENT across a
-  // multi-city list, so a bug that escaped only cities[0] (or joined the raw array before wrapping) would
-  // slip through. This probes an injection payload in a NON-first position alongside a clean city.
+  // Escaping must be applied PER-ELEMENT across a multi-city list - a bug that escaped only cities[0]
+  // (or joined the raw array before wrapping) would slip through. Probe an injection payload in a
+  // NON-first position alongside a clean city.
   it("escapes a quote break-out in a non-first element of a multi-city IN-list", () => {
     const { sql } = buildComposedSql(
       { measures: ["count"], cities: ["Los Angeles", "x' OR '1'='1", "New York"] },
@@ -522,7 +520,7 @@ describe("executeBuilt fires the rows and meta queries concurrently (perf)", () 
     await done;
   });
 
-  // 018 strand 1: a reverse-flagged (newest-first) trend slice is flipped back to chronological order
+  // A reverse-flagged (newest-first) trend slice is flipped back to chronological order
   // for the display axis. The rows query returns day DESC; the result must come back day ASC.
   it("reverses a newest-first trend slice so the display axis runs oldest -> newest", async () => {
     const descRows = [
@@ -545,7 +543,7 @@ describe("executeBuilt fires the rows and meta queries concurrently (perf)", () 
     expect(res.rows.map((r) => r.day)).toEqual(["2026-07-18", "2026-07-19", "2026-07-20"]);
   });
 
-  // 018 strand 3: a salary aggregate's meta query resolves the dominant currency, which threads into
+  // A salary aggregate's meta query resolves the dominant currency, which threads into
   // result.meta.currency (the source line + money formatter read it). A count query carries no currency.
   it("threads the resolved currency into meta for a salary aggregate", async () => {
     const client = {
@@ -580,7 +578,7 @@ describe("executeBuilt fires the rows and meta queries concurrently (perf)", () 
     expect(res.meta.currency).toBeUndefined();
   });
 
-  // 018 strand 5: coverageProfile returns the corpus shape from ONE query and memoizes on the instance.
+  // coverageProfile returns the corpus shape from ONE query and memoizes on the instance.
   it("computes the corpus shape and memoizes (one query per instance)", async () => {
     let calls = 0;
     const client = {
@@ -614,7 +612,7 @@ describe("executeBuilt fires the rows and meta queries concurrently (perf)", () 
     expect(p2).toBe(p1);
   });
 
-  // 018 review-fix (should-fix S5): a REJECTED coverage query must NOT be cached forever. The `??=` memo
+  // A REJECTED coverage query must NOT be cached forever. The `??=` memo
   // stored the promise eagerly, so one transient ClickHouse error poisoned the cache for the whole isolate
   // life and silently dropped the DATA SCOPE note on every later turn. The cache must clear on rejection so
   // the next call retries. Driven through the REAL memo (not an injected profile): first query throws,

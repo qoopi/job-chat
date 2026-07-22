@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// AC-19 (visual slice): the landing serves the three credit links. Asserted page-wide - the mock 4b
+// The landing serves the three credit links. Asserted page-wide - the mock 4b
 // puts the hackathon credit in the header and GitHub + searchnapply in the footer.
 test("Should_RenderCreditLinks_On_Landing", async ({ page }) => {
   await page.goto("/");

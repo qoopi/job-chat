@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-// AC-13's "resume renders from the store with NO re-run of analytics" is a static property of the
+// "Resume renders from the store with NO re-run of analytics" is a static property of the
 // resume code path, not something a Playwright network listener can observe: ClickHouse is only ever
 // called from the Next.js server process (shared/analytics.ts + shared/clickhouse.ts), so a real
 // re-query regression would never surface as a page-level browser request. chat-resume.spec.ts's

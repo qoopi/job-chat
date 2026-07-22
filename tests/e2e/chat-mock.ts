@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 
-// Chunk-script builders for the E2E mock transport (src/lib/mock-transport.ts). Each spec pins the next
+// Chunk-script builders for the E2E mock transport (tests/e2e/mock-transport.ts). Each spec pins the next
 // turn's `UIMessageChunk` sequence on `window.__CHAT_SCRIPT__`; the mock replays it as the agent's
 // response, so the whole client loop (skeleton reconciliation, stop, retry, refusal) runs against the
 // built app with no Trigger.dev / Bedrock. NOT a spec file (no `.spec` suffix) - Playwright ignores it.
@@ -33,7 +33,7 @@ export function liveInsight(id = `live-card-${cardSeq++}`) {
   };
 }
 
-/** Skeleton first, then (after a beat, so the skeleton is observable) the filled insight (AC-4/8). */
+/** Skeleton first, then (after a beat, so the skeleton is observable) the filled insight. */
 export function insightScript(fillDelayMs = 700): ScriptStep[] {
   const insight = liveInsight();
   const loading = { id: insight.id, kind: "chart", chartType: "bars", status: "loading" };
@@ -45,7 +45,7 @@ export function insightScript(fillDelayMs = 700): ScriptStep[] {
   ];
 }
 
-/** A partial text answer that hangs mid-sentence, so a spec can Stop before the rest arrives (AC-9). */
+/** A partial text answer that hangs mid-sentence, so a spec can Stop before the rest arrives. */
 export function partialThenHangScript(): ScriptStep[] {
   return [
     { chunk: { type: "start" } },
@@ -57,7 +57,7 @@ export function partialThenHangScript(): ScriptStep[] {
   ];
 }
 
-/** The compact error card (AC-10): kind = "system" | "unanswerable". */
+/** The compact error card: kind = "system" | "unanswerable". */
 export function errorScript(kind: "system" | "unanswerable"): ScriptStep[] {
   return [
     { chunk: { type: "start" } },
@@ -66,7 +66,7 @@ export function errorScript(kind: "system" | "unanswerable"): ScriptStep[] {
   ];
 }
 
-/** The polite limit notice (AC-15): reason = "guest_cap" | "daily_budget". */
+/** The polite limit notice: reason = "guest_cap" | "daily_budget". */
 export function refusalScript(reason: "guest_cap" | "daily_budget"): ScriptStep[] {
   return [
     { chunk: { type: "start" } },

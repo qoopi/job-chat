@@ -8,10 +8,10 @@ import {
   startsWithBannedOpener,
 } from "../fixtures/plain-prompts";
 
-// AC-5 deterministic slice: the conformance sample is the named 19-prompt fixture, and the tone harness
+// The deterministic slice: the conformance sample is the named 19-prompt fixture, and the tone harness
 // (sentence count + banned-opener check) behaves. The live pass/fail (every plain answer <= 2 sentences,
-// no "!", no banned opener against Bedrock) is a manual gate recorded in the Completion Report - it needs
-// a live LLM, like AC-16's edge rule and AC-18's visual review.
+// no "!", no banned opener against Bedrock) is a manual gate - it needs
+// a live LLM, like the other manual gates.
 describe("AC-5 plain-answer conformance harness", () => {
   it("samples the named 19 prompts (7 launch + 5 conversational + 1 abbreviation + 6 P2-intent)", () => {
     expect(SAMPLE_PROMPTS).toHaveLength(19);

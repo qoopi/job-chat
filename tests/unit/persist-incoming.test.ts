@@ -3,7 +3,7 @@ import type { Store, Message } from "@shared/store";
 import { persistIncomingUserTurns } from "../../trigger/persistence";
 import { MAX_INPUT_CHARS } from "../../trigger/guard";
 
-// The single persist site for a follow-up user turn (mechanism a, 004 round 3). Because a follow-up is
+// The single persist site for a follow-up user turn. Because a follow-up is
 // delivered by the client transport's `sendMessages` (deliver+watch - the only SDK path that streams a
 // freshly-triggered turn live) rather than by the server action, the agent's `run()` persists the user
 // turn before the guard counts it. This is count-based (persist the tail of user messages beyond what the

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deriveTitle } from "@shared/store";
 
-// AC-14: a conversation title is derived from the first user question, trimmed to 60 chars on a
+// A conversation title is derived from the first user question, trimmed to 60 chars on a
 // word boundary, and is never null/empty.
 describe("deriveTitle (AC-14)", () => {
   it("returns a short question unchanged", () => {

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { ADVISER_V2, ADVISER_V2_VERSION } from "../../trigger/prompts/adviser-v2";
 
 // The system prompt is a versioned, designed artifact. These assertions pin the load-bearing rules
-// (AC-5 brevity, the two answer modes, honesty, the error taxonomy) so a future edit that drops one
+// (brevity, the two answer modes, honesty, the error taxonomy) so a future edit that drops one
 // fails loudly. The live behavioural conformance (12-prompt sample) is measured in the dev round trip.
 // The frozen v1 baseline was retired (principles finding 9); v2 is the only prompt.
 describe("adviser-v2 system prompt", () => {
@@ -12,7 +12,7 @@ describe("adviser-v2 system prompt", () => {
     expect(ADVISER_V2_VERSION).toBe("adviser-v2");
   });
 
-  // 016 reconciliation: the flat "at most two sentences" resolves to answer-BODY <=2 sentences (small
+  // The flat "at most two sentences" resolves to answer-BODY <=2 sentences (small
   // answers like "Yes." stay small) PLUS one short steer sentence permitted on a redirect turn - so the
   // taxonomy's mandated answer+steer no longer contradicts the brevity cap.
   it("carries over the two answer modes and the answer-body <=2-sentence rule, permitting one steer sentence on redirect", () => {
@@ -32,7 +32,7 @@ describe("adviser-v2 system prompt", () => {
     expect(ADVISER_V2.toLowerCase()).toMatch(/no matching|no postings matched|nothing matched|empty/);
   });
 
-  // 2026-07-21 vision refinement: report_unanswerable is retired from the scope path entirely. The
+  // report_unanswerable is retired from the scope path entirely. The
   // prompt no longer routes anything to it - a silent re-add of the instruction is a regression.
   it("no longer references report_unanswerable (retired from the scope path)", () => {
     expect(ADVISER_V2).not.toContain("report_unanswerable");
@@ -63,7 +63,7 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toContain("good:");
   });
 
-  // 010-polish round (v1-Q5 double-card fix): exactly one data tool per answer - one question, one card.
+  // Exactly one data tool per answer - one question, one card.
   // The strict eval scorer fails a right tool called beside a second data tool; the prompt now forbids it.
   it("pins the single-data-tool rule: exactly one data tool per answer, never a second card", () => {
     const p = ADVISER_V2.toLowerCase();
@@ -71,7 +71,7 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toMatch(/never call a second data tool|no second data tool/);
   });
 
-  // 018 strand 2: when a tool succeeds the card is the WHOLE answer - the model adds no prose (the
+  // When a tool succeeds the card is the WHOLE answer - the model adds no prose (the
   // fabrication surface, where the model narrated companies with zero DB rows, is closed).
   it("forbids prose framing when a tool renders a card (the card is the answer)", () => {
     const p = ADVISER_V2.toLowerCase();
@@ -79,13 +79,13 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toMatch(/card.*(is|are).*(the )?(complete )?answer/);
   });
 
-  // 018 strand 2: the model may never name an entity or number absent from the tool result it received.
+  // The model may never name an entity or number absent from the tool result it received.
   it("forbids naming any entity or number absent from the tool result", () => {
     const p = ADVISER_V2.toLowerCase();
     expect(p).toMatch(/not present in the tool result|absent from (that|the) result|row labels/);
   });
 
-  // 018 strand 4: a follow-up inheritance rule (carry the prior turn's filters, change only the named one)
+  // A follow-up inheritance rule (carry the prior turn's filters, change only the named one)
   // and a multi-city example so "in LA or NYC" resolves via the cities IN-list.
   it("encodes the follow-up inheritance rule and multi-city guidance", () => {
     expect(ADVISER_V2).toContain("FOLLOW-UP INHERITANCE");
@@ -95,7 +95,7 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toContain("cities");
   });
 
-  // 018 strand 5: a data-scope honesty rule - qualify whole-market questions to the sample, never present
+  // A data-scope honesty rule - qualify whole-market questions to the sample, never present
   // the sample as the entire market (the concrete numbers arrive at runtime via the DATA SCOPE note).
   it("encodes the data-scope honesty rule (qualify whole-market questions to the sample)", () => {
     const p = ADVISER_V2.toLowerCase();
@@ -104,7 +104,7 @@ describe("adviser-v2 system prompt", () => {
     expect(p).toMatch(/qualify/);
   });
 
-  // 2026-07-21 vision refinement (answer-anything-then-steer): the agent answers ANY question, then
+  // Answer-anything-then-steer: the agent answers ANY question, then
   // politely steers back to jobs. These pins hold the taxonomy + guardrails the prompt now encodes.
   it("encodes the answer-anything-then-steer vision", () => {
     const p = ADVISER_V2.toLowerCase();
@@ -143,11 +143,9 @@ describe("adviser-v2 system prompt", () => {
   });
 });
 
-// Gap fill (05-testing audit): the cutover itself (task requirement 4 - "Cut trigger/chat.ts over to
-// v2") had no regression test. createChatRun treats `system` as an opaque string (its own tests wire a
-// placeholder "SYS"), and chat.agent()'s returned object does not expose its config for inspection, so a
-// silent revert to ADVISER_V1 would pass every other test in the suite. A static source-content check
-// (precedent: tests/unit/chat-resume-boundary.test.ts) is the cheap, deterministic seam available here.
+// The cutover itself needs a pin: createChatRun treats `system` as an opaque string and chat.agent()
+// does not expose its config for inspection, so a silent revert to ADVISER_V1 would pass every other
+// test in the suite. A static source-content check is the cheap, deterministic seam available.
 describe("trigger/chat.ts is cut over to adviser-v2 (the shipped system prompt)", () => {
   it("wires ADVISER_V2, not the frozen ADVISER_V1, as the agent's system prompt", () => {
     const src = readFileSync(resolve(process.cwd(), "trigger/chat.ts"), "utf8");

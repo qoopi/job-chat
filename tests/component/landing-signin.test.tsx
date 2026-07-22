@@ -8,7 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 
-// refresh #2 s10: the landing header reads the session server-side (resolveViewer) and seeds
+// The landing header reads the session server-side (resolveViewer) and seeds
 // LandingSignIn. Guest -> "Sign in" (opens the lazy dialog, unchanged). Signed-in -> a primary "Open your
 // chats" (-> the most recent conversation, else /chat/new) + the same account chip/menu as the chat title
 // bar (Sign out lives INSIDE the menu now). Sign-out mirrors the sidebar (Better Auth signOut + rotate the

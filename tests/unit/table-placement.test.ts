@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { LCP_TABLE_THRESHOLD, LCP_TABLE_PREVIEW_ROWS, tablePlacement } from "@/lib/table-placement";
 
-// AC-8: the deterministic, client-side placement rule. A table of <= 8 rows renders inline; over the
+// The deterministic, client-side placement rule. A table of <= 8 rows renders inline; over the
 // threshold it becomes a preview card that opens the full table in the LCP. The rule is a pure count
 // check so the agent never decides placement and a resumed payload renders the same way. Boundary is
-// the AC's literal contract (8 -> inline, 9 -> lcp), not recomputed the way the code computes it.
+// the literal contract (8 -> inline, 9 -> lcp), not recomputed the way the code computes it.
 
 const rowsOf = (n: number): unknown[] => Array.from({ length: n }, (_, i) => ({ i }));
 

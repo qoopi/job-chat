@@ -10,7 +10,7 @@ import {
 } from "@testing-library/react";
 import { closeAuthDialog } from "@/lib/auth-dialog";
 
-// refresh #2 s8 (was AC-13): the guest cap is a warm register moment, VISIBLE at every message origin -
+// The guest cap is a warm register moment, VISIBLE at every message origin -
 // the chat composer AND the landing composer - as an accent-soft card inviting a free account ("Create
 // account"), NOT a red error and NOT a silent refusal. The composer stays ENABLED (no auto-open); a send
 // while capped opens the dialog with the draft queued. Both external boundaries are mocked.
@@ -39,7 +39,7 @@ vi.mock("@/app/actions", () => ({
 const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
 
-// Google-only (017): the dialog's own onGoogle calls signIn.social; no email/password affordance is
+// Google-only: the dialog's own onGoogle calls signIn.social; no email/password affordance is
 // wired anywhere, so the mock offers only what the real authClient surface exposes now.
 vi.mock("@/lib/auth-client", () => ({
   authClient: {
@@ -94,7 +94,7 @@ test("Should_ShowRegisterCardAndKeepComposerEnabled_When_Capped: chat composer",
   expect(box.placeholder).toBe("Create an account to keep asking…");
 });
 
-// AC-9 (R3): a cap refusal persists NOTHING (the refused message never enters the thread); the capped
+// A cap refusal persists NOTHING (the refused message never enters the thread); the capped
 // state re-derives on the NEXT send attempt from the one refusal notice already in the thread. So a
 // capped guest who sends again is re-refused with the SAME notice - no second server round trip, no
 // second refusal turn appended, the composer still usable.
@@ -142,13 +142,13 @@ test("Should_OpenDialogWithDraftQueued_When_SendWhileCapped: chat composer", asy
   ).toBeTruthy();
   expect(box.value).toBe("One more question");
   expect(sendMessageMock).toHaveBeenCalledTimes(1);
-  // AC-D32 / ruling 1: the draft is stashed in sessionStorage so it survives the Google full-page redirect
+  // The draft is stashed in sessionStorage so it survives the Google full-page redirect
   expect(
     sessionStorage.getItem(`jobchat_queued_draft:${CONVERSATION_ID}`),
   ).toBe("One more question");
 });
 
-// AC-D32: on the signed-in return (a full-page reload after the Google redirect), ChatClient takes the
+// On the signed-in return (a full-page reload after the Google redirect), ChatClient takes the
 // sessionStorage-carried draft and auto-sends it exactly once, then clears it. `fromAuth` marks the
 // genuine post-auth arrival (set by /auth/complete) - the only navigation that may replay a queued draft.
 test("Should_AutoSendQueuedDraft_When_SignInSucceedsAfterCap", async () => {
@@ -180,7 +180,7 @@ test("Should_AutoSendQueuedDraft_When_SignInSucceedsAfterCap", async () => {
   ).toBeNull(); // cleared (once)
 });
 
-// Audit (05-testing, ruling 1 mutation check): takeQueuedDraft is a read-ONCE-and-clear. Prove the
+// takeQueuedDraft is a read-ONCE-and-clear. Prove the
 // exactly-once guarantee lives at the sessionStorage layer itself, not just in the component's one-time
 // mount ref - a SECOND ChatClient mount for the same conversation (a StrictMode double-invoke, or a real
 // client remount) after the first already consumed the draft must NOT send it again.
@@ -220,8 +220,8 @@ test("Should_NotDoubleSend_When_TheSameConversationMountsASecondTime", async () 
   expect(sendMessageMock).toHaveBeenCalledTimes(1);
 });
 
-// Audit (05-testing, ruling 1): a refused/failed auto-send of the queued draft must not lose the text -
-// it has to land back in the composer exactly like any other failed send (failSend), not vanish.
+// A refused/failed auto-send of the queued draft must not lose the text - it lands back in the
+// composer exactly like any other failed send (failSend), not vanish.
 test("Should_KeepTextInComposer_When_AutoSentQueuedDraftIsRefused", async () => {
   sessionStorage.setItem(
     `jobchat_queued_draft:${CONVERSATION_ID}`,
@@ -250,7 +250,7 @@ test("Should_KeepTextInComposer_When_AutoSentQueuedDraftIsRefused", async () => 
   ).toBeNull();
 });
 
-// Fix round, item 2: the "/chat/new" key is SHARED (conversationId "new"), unlike a real conversation's
+// The "/chat/new" key is SHARED (conversationId "new"), unlike a real conversation's
 // UUID. A capped guest stashes under "new" then ABANDONS the sign-in; LATER they arrive at /chat/new
 // signed-in via an ORDINARY navigation (landing "Your profile" / "Open your chats"), NOT a post-auth
 // return - so `fromAuth` is absent. That stale draft must NOT auto-send (no unintended conversation /
@@ -275,7 +275,7 @@ test("Should_NotAutoSendStaleNewDraft_When_OrdinarySignedInMountFindsIt", async 
   expect(sessionStorage.getItem(`jobchat_queued_draft:new`)).toBeNull();
 });
 
-// Fix round, master ruling (arrival side): a genuine "/chat/new" post-auth arrival (fromAuth) with a
+// Arrival side: a genuine "/chat/new" post-auth arrival (fromAuth) with a
 // landing-stashed draft auto-sends it once via the fresh-chat path (startConversation), exactly like the
 // chat path replays its queued draft. This is the landing cap moment carried across sign-in.
 test("Should_AutoSendQueuedNewDraft_When_PostAuthArrivalAtChatNew", async () => {
@@ -299,7 +299,7 @@ test("Should_AutoSendQueuedNewDraft_When_PostAuthArrivalAtChatNew", async () => 
   expect(sessionStorage.getItem(`jobchat_queued_draft:new`)).toBeNull();
 });
 
-// Fix round, master ruling (stash side): the LANDING cap carries the blocked question across sign-in
+// Stash side: the LANDING cap carries the blocked question across sign-in
 // exactly like the chat path - a guest_cap on the landing stashes the draft under the "/chat/new"
 // destination key so the post-auth arrival replays it (same sessionStorage mechanism as the chat path).
 test("Should_QueueLandingDraftUnderNewKey_When_CappedOnLanding", async () => {

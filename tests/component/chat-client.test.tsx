@@ -10,16 +10,16 @@ import {
 } from "@testing-library/react";
 import type { UIMessage } from "ai";
 
-// ChatClient.send() has TWO distinct paths that can produce a cap/budget refusal (decision 19 / 004
-// handoff): the E2E/agent-side path (the transport streams a `data-refusal` part mid-run - covered by
-// e2e `live-chat-loop.spec.ts::AC-15`) and the PROD action-side path (the `sendMessage` server action
+// ChatClient.send() has TWO distinct paths that can produce a cap/budget refusal: the E2E/agent-side
+// path (the transport streams a `data-refusal` part mid-run - covered by
+// e2e `live-chat-loop`) and the PROD action-side path (the `sendMessage` server action
 // itself returns `{ ok: false, reason }` BEFORE any run starts, and ChatClient synthesizes the same
 // `data-refusal` part via `setMessages`). Only the first path had a test; this closes the gap on the
 // second one - it must render the identical notice, through the identical MessageList/RefusalNotice
 // path, not a bespoke banner. The real transport and server action are mocked (external boundaries);
 // ChatClient's own branching is what is under test.
 //
-// It also proves the send contract after R4: every turn - including turn 1 on arrival - rides the public
+// It also proves the send contract: every turn - including turn 1 on arrival - rides the public
 // send path via the transport's `sendMessages` (append + subscribe-with-wait). The peekSettled
 // `reconnectToStream` is NOT used to deliver a fresh turn. The transport owns its own session (there is
 // no `setSession` seam). Both `sendMessages` and `reconnectToStream` are spied.
@@ -77,7 +77,7 @@ test("action-refusal: the sendMessage action's cap refusal renders the SAME regi
   fireEvent.change(box, { target: { value: "One more question" } });
   fireEvent.keyDown(box, { key: "Enter" });
 
-  expect(await screen.findByText(/reached the guest limit/i)).toBeTruthy(); // refresh #2 s8 register card
+  expect(await screen.findByText(/reached the guest limit/i)).toBeTruthy(); // register card
   expect(document.querySelector(".register-card")).toBeTruthy();
   expect(document.querySelector(".err-card")).toBeNull();
   expect(sendMessageMock).toHaveBeenCalledWith(
@@ -106,7 +106,7 @@ test("action-refusal: an ok send does NOT render a notice (control case)", async
   expect(document.querySelector(".notice")).toBeNull();
 });
 
-// --- AC-22: optimistic echo (the user bubble renders at composer-clear time, not after the round trip) ---
+// --- optimistic echo: the user bubble renders at composer-clear time, not after the round trip ---
 
 test("Should_EchoUserBubbleSynchronously_When_Sent: the user bubble renders before any transport round trip; the server echo reconciles to one", async () => {
   // Hold the gate unresolved - the bubble must appear WITHOUT waiting for the server round trip (the
@@ -136,11 +136,9 @@ test("Should_EchoUserBubbleSynchronously_When_Sent: the user bubble renders befo
   expect(screen.getAllByText("Median salary in Berlin?")).toHaveLength(1);
 });
 
-// Gap closed in 05-testing: the dev's Completion Report claimed the refusal/failure rollback was covered
-// by the test above, but that test only exercises the happy path - it never asserts the bubble is gone
-// after a refusal or a thrown send. Pseudo-mutation check: commenting out both `rollbackEcho()` call
-// sites left all 6 pre-existing tests in this file green, proving the orphan-bubble regression had no
-// test that would catch it. These two close that gap (flow C: a blocked/failed message is not shown as sent).
+// The happy-path test above never asserts the bubble is gone after a refusal or a thrown send -
+// commenting out both `rollbackEcho()` call sites left every older test green. These two pin the
+// rollback: a blocked/failed message is not shown as sent.
 test("Should_RollbackOptimisticBubble_When_SendRefused: a cap/budget refusal removes the optimistic bubble, not just shows the notice", async () => {
   sendMessageMock.mockResolvedValue({ ok: false, reason: "guest_cap" });
   render(
@@ -159,7 +157,7 @@ test("Should_RollbackOptimisticBubble_When_SendRefused: a cap/budget refusal rem
 
   await screen.findByText(/reached the guest limit/i); // the refusal (register card) lands
   // The optimistic bubble must be gone - not orphaned as a "sent" message the refusal contradicts. Scoped
-  // to the bubble class (not a bare queryByText): AC-11 correctly restores the same text into the
+  // to the bubble class (not a bare queryByText): the send path correctly restores the same text into the
   // composer's textarea, which a bare document-wide text query would also match and hide the regression.
   expect(
     screen.queryByText("Refused question", { selector: ".bubble.user" }),
@@ -197,17 +195,16 @@ test("Should_RollbackOptimisticBubble_When_SendThrows: a thrown/failed send remo
 });
 
 // --- concurrent-send: TWO independent protections, verified by TWO tests ---
-// Regression for the code-review should-fix: `send` had NO reentrancy guard and follow-up chips were
-// `disabled={used}` ONLY (not gated by streaming/pending). A chip clicked while a turn is in flight
-// fired a second concurrent `sendMessage({messageId})` which truncates-after-id (dropping the other
-// send's optimistic bubble -> spurious "Could not send" + an orphan persisted turn + a duplicate run,
-// the AC-16 class). The fix is BOTH pending-gated chips (the chip is `disabled` while a turn streams,
-// matching the composer's own streaming-disabled state) AND a `sendingRef` reentrancy guard at the top
-// of `send`. These are DISTINCT protections that need distinct tests: the disabled chip is proven here
-// (jsdom never dispatches a click to a disabled button, so this path never even reaches `send`), and the
-// `sendingRef` guard - which bites only a same-tick reentrant call before the control re-renders to its
-// disabled state - is proven separately in the next test. Do NOT merge them: a single chip-click test
-// leaves the guard un-exercised (reverting the guard line stays green), which overstates its coverage.
+// --- concurrent-send: TWO independent protections, verified by TWO tests ---
+// A chip clicked while a turn is in flight fired a second concurrent `sendMessage({messageId})` which
+// truncates-after-id (dropping the other send's optimistic bubble -> spurious "Could not send" + an
+// orphan persisted turn + a duplicate run). The fix is BOTH pending-gated chips (disabled while a
+// turn streams, matching the composer) AND a `sendingRef` reentrancy guard at the top of `send`. These
+// are DISTINCT protections needing distinct tests: the disabled chip is proven here (jsdom never
+// dispatches a click to a disabled button, so this path never reaches `send`), and the `sendingRef`
+// guard - which bites only a same-tick reentrant call before the control re-renders - is proven
+// separately in the next test. Do NOT merge them: a single chip-click test leaves the guard
+// un-exercised (reverting the guard line stays green).
 test("Should_DisableFollowupChip_When_TurnInFlight: a follow-up chip is pending-disabled mid-stream, so clicking it fires no 2nd send (the chip pending-gate; the reentrancy guard is proven separately)", async () => {
   // A settled prior turn with a follow-up chip is on screen.
   const initial: UIMessage[] = [

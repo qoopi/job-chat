@@ -5,9 +5,9 @@ import type { UIMessage } from "ai";
 import type { Conversation } from "@shared/store";
 import type { DataInsight } from "@shared/insight";
 
-// AC-19: New chat starts fresh IN PLACE (clear thread, close LCP, focus composer, no bounce to the
-// landing); the first message afterwards starts a brand-new conversation (the landing handoff). AC-21:
-// deleting the OPEN conversation clears to that same fresh-chat state. Driven through the REAL ChatClient;
+// New chat starts fresh IN PLACE (clear thread, close LCP, focus composer, no bounce to the
+// landing); the first message afterwards starts a brand-new conversation (the landing handoff). Deleting
+// the OPEN conversation clears to that same fresh-chat state. Driven through the REAL ChatClient;
 // the transport + server actions are external boundaries and mocked exactly as the sibling ChatClient tests.
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(async () => new ReadableStream({ start: (c) => c.close() }));

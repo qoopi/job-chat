@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { UIMessage, UIMessageChunk } from "ai";
 import type { DataInsight } from "@shared/insight";
 
-// AC-3: reloading mid-stream resumes the in-flight turn and completes the answer WITHOUT duplicating any
+// Reloading mid-stream resumes the in-flight turn and completes the answer WITHOUT duplicating any
 // earlier content. At reload the settled turns are hydrated from the store and the in-flight turn's user
 // message is the tail (its answer is not persisted yet); the persisted session (isStreaming: true) drives
 // useChat `resume` -> `reconnectToStream`, which streams the answer. This drives the real useChat merge

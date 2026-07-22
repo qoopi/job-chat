@@ -84,7 +84,7 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
   beforeAll(async () => {
     writer = createWriterClient();
     await loadFixtureTable(writer, TABLE);
-    // A spy that records exactly the query text sent to ClickHouse (the AC-6 "client hook").
+    // A spy that records exactly the query text sent to ClickHouse.
     const spy = {
       query: (params: Parameters<ClickHouseClient["query"]>[0]) => {
         executed.push(params.query);
@@ -103,8 +103,8 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
   });
 
   // Security: chStr() is the only thing standing between a free-text param and a raw-interpolated
-  // ClickHouse string literal (the deliberate deviation from query_params - see the module header
-  // and the task's Completion Report). Unit tests check the escaped text; this proves it holds
+  // ClickHouse string literal (the deliberate deviation from query_params - see the module header).
+  // Unit tests check the escaped text; this proves it holds
   // against ClickHouse's REAL parser, not just a string match - each payload must stay inert (no
   // rows match, since none of the fixture companies are garbage) and must not error out (a broken
   // escaper produces invalid SQL, which ClickHouse rejects).
@@ -144,7 +144,7 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
     expect(res.rows).toEqual([]); // no fixture city is garbage, so a real filter matches nothing
   });
 
-  // 018 strand 5: coverageProfile runs against real ClickHouse over the seeded fixture (10 rows, one
+  // coverageProfile runs against real ClickHouse over the seeded fixture (10 rows, one
 // snapshot). Google leads (4 of 10); 8 of 10 carry a salary range; 4 distinct companies.
   it("coverageProfile returns the corpus shape from the seeded fixture (AC / 018 strand 5)", async () => {
     const profile = await analytics.coverageProfile();
@@ -156,11 +156,10 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
     expect(profile.freshestAt).toBe(FIXTURE_INGESTED_AT);
   });
 
-  // 05-testing audit gap fill (018 strand 3): every existing dominant-currency test is either a string-
-  // shape unit test against a mocked client, or runs against the AC-11 fixture, which is all-USD - the
-  // real GROUP BY/ORDER BY count() DESC selection logic has never executed against genuinely mixed
-  // currencies on real ClickHouse. This seeds its own small table (3 USD rows, 1 EUR row - USD is the
-  // dominant currency) and proves the salary aggregate filters to USD only and meta.currency surfaces it.
+  // The dominant-currency GROUP BY / ORDER BY count() DESC selection must execute against genuinely
+  // mixed currencies on real ClickHouse (the shared fixture is all-USD; string-shape unit tests use a
+  // mocked client). Seeds its own table (3 USD rows, 1 EUR row) and proves the salary aggregate
+  // filters to USD only and meta.currency surfaces it.
   it("filters a salary aggregate to the dominant currency on a real mixed-currency dataset", async () => {
     const MIXED_TABLE = "postings_test_currency";
     const base = {
@@ -201,7 +200,7 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
       executed.length = 0;
       const res = await analytics.runQuery(q.tool as TemplateName, q.params);
 
-      // AC-6: meta.sql (result.sql) equals the statement ClickHouse actually received.
+      // meta.sql (result.sql) equals the statement ClickHouse actually received.
       expect(executed[0]).toBe(res.sql);
       expect(res.sql).toContain(`FROM ${TABLE} FINAL`);
 
@@ -210,7 +209,7 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
       expect(res.meta.sampleN).toBe(EXPECTED_SAMPLE_N[q.id]);
       expect(res.meta.freshestAt).toBe(FIXTURE_INGESTED_AT);
 
-      // AC-11: the launch case table's expected verdict matches the live query output.
+      // The launch case table's expected verdict matches the live query output.
       const h = headline(q.tool, res.rows);
       expect(h.verdict).toBe(q.expectedVerdict);
       if (q.expectedLabel !== undefined) expect(h.label).toBe(q.expectedLabel);

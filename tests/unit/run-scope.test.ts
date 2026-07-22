@@ -10,7 +10,7 @@ import type { Message, Store } from "@shared/store";
 
 import type { CoverageProfile } from "@shared/analytics";
 
-// 018 strand 5: createChatRun appends a one-line DATA SCOPE note (from the corpus profile) to the system
+// createChatRun appends a one-line DATA SCOPE note (from the corpus profile) to the system
 // prompt so the agent can qualify whole-market questions to the real sample. A minimal store stub lets
 // the gate reach the model seam, where we capture the exact `system` string handed to the model.
 
@@ -116,7 +116,7 @@ describe("createChatRun DATA SCOPE injection (018 strand 5)", () => {
   });
 });
 
-// R3 gate (AC-4/8/9): the load-bearing dedup + the refuse-before-persist order. Order in createChatRun
+// The load-bearing dedup + the refuse-before-persist order. Order in createChatRun
 // is guards FIRST (a refused turn persists nothing - not even its user row), THEN persist the incoming
 // user turn(s), THEN the already-answered check. Retry is recognized by the WIRE trigger, never guessed
 // from the persisted tail - a failed turn now leaves a trailing assistant error row, so a tail-role
@@ -243,7 +243,7 @@ describe("createChatRun gate: dedup + refuse-before-persist (R3)", () => {
     expect((emitted[0] as { data: { reason: string } }).data.reason).toBe("guest_cap");
   });
 
-  // Documented edge (022 Completion Report, Open issues): guards run BEFORE the already-answered skip
+  // Documented edge: guards run BEFORE the already-answered skip
   // check, so a REDELIVERED submit envelope for a turn that is already answered - landing when the
   // caller is EXACTLY at the cap (the crash-continuation-at-cap corner) - is refused instead of silently
   // skipped. This is harmless ONLY if the refusal is stream-only: nothing persists, so neither a

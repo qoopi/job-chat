@@ -1,6 +1,6 @@
 import type { PostingRow } from "@shared/postings";
 
-// The AC-11 reference dataset: a deterministic 10-row postings subset. Expected verdict values are
+// The reference dataset: a deterministic 10-row postings subset. Expected verdict values are
 // worked out by hand from these rows (see launch-questions.ts) and stay stable regardless of live
 // ingest because tests load this into a separate `postings_test` table. All ingested_at are equal so
 // `freshestAt` is deterministic. Do not edit without recomputing the expected-values case table.

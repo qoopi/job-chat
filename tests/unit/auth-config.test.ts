@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { auth, authPoolConfig } from "@/lib/auth";
 
-// Strand 1 (017): the reviewer should-fixes made assertable off `auth.options` (Better Auth stores the
-// resolved config verbatim). Google-only (no emailAndPassword), nextCookies LAST, trustedOrigins set,
-// account linking still trusting Google, and the SSL cert handling no longer SILENTLY downgrading a
-// `verify-*` mode to no verification (the reviewer finding). These are the acceptance bar for the
-// gold-standard checklist (auth-best-practices-2026-07-21.md).
+// Asserted off `auth.options` (Better Auth stores the resolved config verbatim): Google-only (no
+// emailAndPassword), nextCookies LAST, trustedOrigins set, account linking still trusting Google,
+// and sslmode verify-* never silently downgraded to no verification.
 
 describe("auth config: google-only + reviewer should-fixes", () => {
   it("Should_RemoveEmailPassword_When_GoogleOnly", () => {
@@ -40,7 +38,7 @@ describe("auth config: google-only + reviewer should-fixes", () => {
   });
 
   it("Should_NotSetAllowDifferentEmails_When_GoogleOnly", () => {
-    // CVE-2026-53516 checklist (gold standard s8): allowDifferentEmails must stay false/omitted - setting
+    // CVE-2026-53516 checklist: allowDifferentEmails must stay false/omitted - setting
     // it true would let a Google login on a DIFFERENT email link onto an existing account.
     const linking = auth.options.account?.accountLinking as { allowDifferentEmails?: unknown } | undefined;
     expect(linking?.allowDifferentEmails).toBeUndefined();

@@ -6,7 +6,7 @@ import {
   writePersistedSession,
 } from "@/lib/chat-session-store";
 
-// R1 (F1): the transport's per-conversation session state must survive a reload so `reconnectToStream`
+// The transport's per-conversation session state must survive a reload so `reconnectToStream`
 // can resume a live turn (or no-op a settled one) and a follow-up subscribes from the persisted cursor
 // instead of replaying the prior turn. This pins the browser-durable store the SDK's `onSessionChange`
 // writes and the `sessions` hydration reads - keyed per conversation, cleared when the session closes.

@@ -37,7 +37,7 @@ describe("locationKindLabel", () => {
 describe("PostingSchema publishedAt boundary", () => {
   it("rejects a timezone-less timestamp (would silently shift when parsed as local time)", () => {
     // Regression: z.string() accepted this and new Date() read it as LOCAL time,
-    // so 2026-07-17T23:38:42 stored as 03:38:42 in a UTC+4 runner. Must fail fast.
+    // so a zoneless 23:38:42 gets stored as 03:38:42 in a UTC+4 runner. Must fail fast.
     const result = PostingSchema.safeParse({ ...base, publishedAt: "2026-07-17T23:38:42" });
     expect(result.success).toBe(false);
   });

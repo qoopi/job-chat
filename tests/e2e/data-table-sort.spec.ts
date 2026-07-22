@@ -17,12 +17,12 @@ test.describe("DataTable - sortable header actually sorts", () => {
 
     const header = table.getByRole("columnheader", { name: /Published At/ });
 
-    // click 1: desc -> newest first (Stripe, 2026-07-16)
+    // click 1: desc -> newest first (Stripe)
     await header.click();
     await expect(header).toHaveText("Published At ▾");
     await expect(firstRowCompany()).toHaveText("Stripe");
 
-    // click 2: asc -> oldest first (Databricks, 2026-07-11)
+    // click 2: asc -> oldest first (Databricks)
     await header.click();
     await expect(header).toHaveText("Published At ▴");
     await expect(firstRowCompany()).toHaveText("Databricks");
@@ -50,12 +50,12 @@ test.describe("DataTable - sortable header actually sorts", () => {
     await sortButton.focus();
     await expect(sortButton).toBeFocused();
 
-    // Enter -> descending (newest first: Stripe, 2026-07-16)
+    // Enter -> descending (newest first: Stripe)
     await page.keyboard.press("Enter");
     await expect(header).toHaveAttribute("aria-sort", "descending");
     await expect(firstRowCompany()).toHaveText("Stripe");
 
-    // Space -> ascending (oldest first: Databricks, 2026-07-11)
+    // Space -> ascending (oldest first: Databricks)
     await page.keyboard.press("Space");
     await expect(header).toHaveAttribute("aria-sort", "ascending");
     await expect(firstRowCompany()).toHaveText("Databricks");

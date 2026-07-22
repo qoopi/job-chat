@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { DataInsight } from "@shared/insight";
 
-// AC-18: a single-scalar answer (a one-row, one-cell table whose only content is the number the verdict
+// A single-scalar answer (a one-row, one-cell table whose only content is the number the verdict
 // already states) renders as the verdict sentence alone - no degenerate one-cell table card and no
 // Chart|Table tabs. Chips and "Show query" are unaffected.
 vi.mock("@/components/insight/charts/InsightChart", () => ({

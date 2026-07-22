@@ -12,7 +12,7 @@ describe("buildCatalogTools", () => {
     const tools = buildCatalogTools({ analytics: {} as Analytics, emit: () => {} });
     for (const name of CATALOG_TOOL_NAMES) expect(tools).toHaveProperty(name);
     expect(tools).toHaveProperty("query_postings");
-    // 2026-07-21 vision refinement: report_unanswerable is retired from the scope path - the agent
+    // report_unanswerable is retired from the scope path - the agent
     // answers anything then steers, so there is no scope escape-hatch tool to over-fire an error card.
     expect(tools).not.toHaveProperty("report_unanswerable");
   });
@@ -36,7 +36,7 @@ describe("buildCatalogTools", () => {
     expect((out as { verdict: string }).verdict).toContain("Google");
   });
 
-  // P1 polish: a 0-row result emits NO card. The tool clears its loading skeleton with an empty marker
+  // A 0-row result emits NO card. The tool clears its loading skeleton with an empty marker
   // (same id -> supersedes the skeleton in place, no dangling card) and hands the model a plain-mode
   // signal so the answer is plain prose, not an empty "No data" insight card.
   it("emits an empty marker (no filled card) and a plain-mode output when the query returns no rows", async () => {
@@ -60,7 +60,7 @@ describe("buildCatalogTools", () => {
     expect((out as { empty?: boolean }).empty).toBe(true);
   });
 
-  // AC-10: a tool/infra failure is taxonomized as a `system` error part, and the tool does NOT throw
+  // A tool/infra failure is taxonomized as a `system` error part, and the tool does NOT throw
   // (the agent keeps control to apologize) - it hands the model a compact error marker.
   it("emits a system error part when the query fails, without throwing", async () => {
     const emitted: EmitPart[] = [];
@@ -124,7 +124,7 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
     expect(arg).not.toHaveProperty("chartType");
     expect(arg).toMatchObject({ measures: ["count"], dimensions: ["company"], country: "United States" });
 
-    // The RAW pick is recorded on the tool result (the 010 harness measurement surface, AC-4).
+    // The RAW pick is recorded on the tool result (the eval harness reads it here).
     expect((out as { rawChartType?: string }).rawChartType).toBe("bars");
   });
 

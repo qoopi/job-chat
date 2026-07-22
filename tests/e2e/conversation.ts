@@ -1,10 +1,10 @@
 import type { DataInsight } from "@shared/insight";
 import type { ErrorKind, RefusalReason } from "@/lib/insight-format";
 
-// A fixture conversation for the static port (005). Every insight is shaped exactly like the analytics
-// catalog output (shared/analytics.ts SELECT columns) so 006 swaps the data source, not the components.
-// One card per chart primitive + a plain answer + an error card exercise the surface for the AC-18 gate
-// and the chart-smoke test.
+// A fixture conversation for the static port. Every insight is shaped exactly like the analytics
+// catalog output (shared/analytics.ts SELECT columns) so the live path swaps the data source, not the components.
+// One card per chart primitive + a plain answer + an error card exercise the surface for the
+// chart-smoke test.
 
 export type ThreadItem =
   | { role: "user"; text: string; time?: string }

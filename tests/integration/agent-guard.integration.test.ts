@@ -3,7 +3,7 @@ import postgres, { type Sql } from "postgres";
 import { createStore, type Store } from "@shared/store";
 import { checkConversationGuards, checkMessageGuards } from "../../trigger/guard";
 
-// The AGENT-SIDE backstop (must-fix A): the browser holds a write-scoped session token and the
+// The AGENT-SIDE backstop: the browser holds a write-scoped session token and the
 // standard transport can append follow-ups straight to the session inbox, bypassing the server
 // action's early cap/budget refusal. This proves the same guard - counted via the store, keyed only
 // on the conversation id the durable run holds - refuses a turn past the cap/budget ON THE AGENT
@@ -100,7 +100,7 @@ describe.skipIf(!hasCreds)("agent guard backstop against real Postgres", () => {
     expect(refusal).toBeNull();
   });
 
-  // AC-13 (guard slice): the run() backstop picks the cap by the OWNER's identity kind, read from the
+  // The run() backstop picks the cap by the OWNER's identity kind, read from the
   // widened owner lookup - a signed-in owner (auth_user_id set) gets the higher SIGNED_IN cap, a guest
   // owner (auth_user_id null) the lower guest cap. The global daily budget is unchanged.
   it("applies the signed-in cap for an account owner and the guest cap for a guest owner (AC-13)", async () => {

@@ -12,7 +12,7 @@ import { renderHook } from "@testing-library/react";
 // e2e-transport.ts modules: prod (e2e=false) never reaches the stub's constructor (no throw), and the
 // stub's throw is reachable ONLY when e2e=true with no build-time alias in place (the exact reason the
 // seam needs next.config's turbopack.resolveAlias swap for a real Playwright e2e build, not a runtime
-// import - see 027's Completion Report "Deviations").
+// import).
 
 const sendMessagesMock = vi.fn();
 const reconnectToStreamMock = vi.fn();

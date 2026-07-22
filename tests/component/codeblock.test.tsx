@@ -3,9 +3,9 @@ import { afterEach, describe, expect, test } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { CodeBlock } from "@/components/insight/CodeBlock";
 
-// refresh #2 s1: the Show-query SQL must read as clean, complete SQL - every token type contrasts on
+// The Show-query SQL must read as clean, complete SQL - every token type contrasts on
 // its own surface. The token classes carry the palette; here we assert the tokenizer TAGS each type so
-// the CSS can color them. New in refresh #2: function names (count, quantile, ...) get a `.fn` class
+// the CSS can color them. Function names (count, quantile, ...) get a `.fn` class
 // (they used to fall through as plain identifiers, indistinct from column names).
 const SQL =
   "SELECT count(*), quantile(0.5)(salary_usd) AS median FROM jobs.postings WHERE city = 'San Francisco'";

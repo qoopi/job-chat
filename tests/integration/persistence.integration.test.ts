@@ -4,7 +4,7 @@ import { createStore, type Store } from "@shared/store";
 import { buildInsight } from "../../trigger/parts";
 import { extractAssistantPersistence, persistAssistantTurn } from "../../trigger/persistence";
 
-// AC-13: when a turn completes the agent persists the assistant message + full card payload, so a
+// When a turn completes the agent persists the assistant message + full card payload, so a
 // returning guest's conversation restores from the store without re-running queries. Integration
 // against real Postgres (the agent's onTurnComplete uses this exact path). Skipped without creds.
 const hasCreds = Boolean(process.env.DATABASE_URL);

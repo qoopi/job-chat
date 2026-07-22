@@ -138,7 +138,7 @@ describe("series key detection (charts read DataPoint[] by convention)", () => {
   });
 
   it("valueKeysOf returns the plottable measures, excluding the `n` sample-size context column", () => {
-    // 018 strand 3: `n` (the sample size for salary_compare) is never a plotted series, so it is dropped
+    // `n` (the sample size for salary_compare) is never a plotted series, so it is dropped
     // - a count of ~3 beside a median of ~180000 would render an invisible, misleading second bar.
     expect(valueKeysOf(compare, "city")).toEqual(["median"]);
     expect(valueKeysOf(companies, "company")).toEqual(["count"]);

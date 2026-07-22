@@ -2,8 +2,8 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { Conversation, Message } from "@shared/store";
 import type { Viewer } from "@/lib/server-store";
 
-// Audit focus (013 testing pass): the resume-ownership gate in chat/[id]/page.tsx now reads
-// `viewer.ownerIds.includes(loaded.conversation.user_id)` (ruling 2) instead of a bare guest-cookie
+// The resume-ownership gate in chat/[id]/page.tsx now reads
+// `viewer.ownerIds.includes(loaded.conversation.user_id)` instead of a bare guest-cookie
 // compare. This is a Server Component - a plain async function - so it is called directly here (no
 // render, no DOM) with its two collaborators (`@/lib/server-store`, ChatClient) mocked as the boundary.
 // Proves the fail-closed property: a non-owner never sees another caller's thread, regardless of which
@@ -100,7 +100,7 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
   });
 
   it("Should_HydrateThread_When_SignedInAccountOwnsItOnAnyDevice", async () => {
-    // no guest cookie on THIS device - the resolved Viewer's account id is what matches (ruling 2's point)
+    // no guest cookie on THIS device - the resolved Viewer's account id is what matches
     loadConversationMock.mockResolvedValue({
       conversation: conversation("account-1"),
       messages: [aMessage],
@@ -181,7 +181,7 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
     expect(listOwnerConversationsMock).not.toHaveBeenCalled();
   });
 
-  // 017 fix round 2 (must-fix 1): `/chat/new` is the landing-initiated sign-in's destination - a FRESH
+  // `/chat/new` is the landing-initiated sign-in's destination - a FRESH
   // chat shell (armed to start a new conversation on the first send), NOT a stored-conversation resume and
   // NOT a 404. "new" bypasses the UUID gate: nothing is loaded, but the signed-in account's history still
   // seeds the sidebar so the user lands "into the app".
@@ -219,7 +219,7 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
     expect(element.props.signedIn).toBe(true);
   });
 
-  // refresh #2 s10/s7: the landing's "Your profile" navigates to `/chat/new?profile=1`, which must open
+  // The landing's "Your profile" navigates to `/chat/new?profile=1`, which must open
   // the profile on arrival - prove the searchParams wiring itself (ChatClient's own open-on-arrival
   // behavior is covered separately in lcp.test.tsx).
   it("Should_ArmProfileOnArrival_When_ProfileParamIsOne", async () => {
