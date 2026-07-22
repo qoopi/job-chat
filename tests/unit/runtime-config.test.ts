@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { getAgentLimits, getGuardConfig } from "@shared/env";
 
 // Config slice + guard config. These accessors read only their own env slice (ISP), so the
-// server actions and the agent can read them WITHOUT the AWS/ClickHouse creds getEnv() requires -
-// and they fall back to the conservative defaults when the vars are unset.
+// server actions and the agent can read them WITHOUT any AWS/ClickHouse creds - and they fall
+// back to the conservative defaults when the vars are unset.
 
 describe("getGuardConfig", () => {
   it("defaults to guest cap 10, signed-in cap 30, and daily budget 200 when unset", () => {

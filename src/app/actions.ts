@@ -1,7 +1,6 @@
 "use server";
 
 import { cookies, headers } from "next/headers";
-import postgres, { type Sql } from "postgres";
 import { auth, runs, tasks } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore, type ConversationSummary } from "@shared/store";
@@ -12,6 +11,7 @@ import { getGuardConfig } from "@shared/env";
 import { isE2E } from "@/lib/e2e";
 import { auth as authServer } from "@/lib/auth";
 import { GUEST_COOKIE } from "@/lib/guest-cookie";
+import { getJobchatSql } from "@/lib/jobchat-sql";
 import { AGENT_ID } from "../../trigger/agent-id";
 import {
   chatTokenScopes,
@@ -31,12 +31,6 @@ import type { jobChatAgent } from "../../trigger/chat";
 
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 
-// One lazy Postgres pool cached on globalThis (dev HMR reuses ONE client, not a leak per reload); see auth.ts.
-const globalForSql = globalThis as unknown as { __jobchatSql?: Sql };
-function sql(): Sql {
-  return (globalForSql.__jobchatSql ??= postgres(process.env.DATABASE_URL!));
-}
-
 // The transport's startSession action: called lazily on the first sendMessage - atomically creates the
 // Session, triggers the first run, returns the session-scoped token. THE turn-1 delivery seam.
 export const startChatSession = chat.createStartSessionAction<typeof jobChatAgent>(AGENT_ID);
@@ -50,7 +44,7 @@ const mintToken: MintToken = (conversationId) =>
 
 function service() {
   return createSessionService({
-    store: createStore(sql()),
+    store: createStore(getJobchatSql()),
     guards: getGuardConfig(),
     mintToken,
     now: () => new Date(),
@@ -88,7 +82,7 @@ async function resolveCaller(): Promise<Identity | null> {
   const guestId = await guestIdFromCookie();
   const authUserId = await currentAuthUserId();
   if (!guestId && !authUserId) return null;
-  return resolveIdentity(createStore(sql()), { authUserId, guestId });
+  return resolveIdentity(createStore(getJobchatSql()), { authUserId, guestId });
 }
 
 /** First visit mints an httpOnly cookie guest id + a users row. SECURITY: the guest id is an UNSIGNED
@@ -108,7 +102,7 @@ export async function ensureGuest(): Promise<string> {
   }
   // E2E has no Postgres: the cookie is the slice under test (the users-row half is covered by integration tests).
   if (isE2E()) return guestId;
-  await createStore(sql()).getOrCreateUser(guestId);
+  await createStore(getJobchatSql()).getOrCreateUser(guestId);
   return guestId;
 }
 
@@ -118,7 +112,7 @@ export async function startConversation(
 ): Promise<SessionResult> {
   const guestId = await ensureGuest();
   const authUserId = await currentAuthUserId();
-  const identity = await resolveIdentity(createStore(sql()), {
+  const identity = await resolveIdentity(createStore(getJobchatSql()), {
     authUserId,
     guestId,
   });
@@ -158,7 +152,7 @@ export async function completeSignIn(): Promise<{
   const user = await currentAuthUser();
   if (!user) return { ok: false };
   const guestId = await guestIdFromCookie();
-  await resolveIdentity(createStore(sql()), { authUserId: user.id, guestId });
+  await resolveIdentity(createStore(getJobchatSql()), { authUserId: user.id, guestId });
   // Delete with the SAME path the cookie was SET with; a path mismatch can leave the browser cookie in place.
   if (guestId) (await cookies()).delete({ name: GUEST_COOKIE, path: "/" });
   return { ok: true, name: user.name };
@@ -171,7 +165,7 @@ export async function clearGuestSession(): Promise<void> {
 export async function listMyConversations(): Promise<ConversationSummary[]> {
   const identity = await resolveCaller();
   if (!identity) return [];
-  return createStore(sql()).listConversations(identity.userId);
+  return createStore(getJobchatSql()).listConversations(identity.userId);
 }
 
 /** Delete one of the caller's OWN conversations (non-owner reads as not_found - never deletes another's thread). */
@@ -221,7 +215,7 @@ export async function saveProfile(
   if (!identity || identity.kind !== "account") {
     return { ok: false, reason: "unauthorized" };
   }
-  const store = createStore(sql());
+  const store = createStore(getJobchatSql());
   const owner = await store.getConversationOwner(input.conversationId);
   if (!owner || owner.user_id !== identity.userId) {
     return { ok: false, reason: "unauthorized" };
@@ -265,7 +259,7 @@ export async function saveProfile(
 export async function getMyProfile(): Promise<MyProfile | null> {
   const identity = await resolveCaller();
   if (!identity || identity.kind !== "account") return null;
-  const row = await createStore(sql()).getProfile(identity.userId);
+  const row = await createStore(getJobchatSql()).getProfile(identity.userId);
   if (!row) return null;
   return {
     profile: row.profile,
@@ -280,7 +274,7 @@ export async function getMyProfile(): Promise<MyProfile | null> {
 export async function deleteProfile(conversationId?: string): Promise<{ ok: boolean }> {
   const identity = await resolveCaller();
   if (!identity || identity.kind !== "account") return { ok: false };
-  const store = createStore(sql());
+  const store = createStore(getJobchatSql());
   await store.deleteProfile(identity.userId);
   if (conversationId) {
     const owner = await store.getConversationOwner(conversationId);

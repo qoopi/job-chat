@@ -61,10 +61,6 @@ export function formatMoney(value: number, currency = "USD"): string {
   return `${prefix}${n}`;
 }
 
-export function formatUsd(value: number): string {
-  return formatMoney(value, "USD");
-}
-
 /** Data-freshness label from a ClickHouse timestamp; "" when unparseable or pre-2000, because max(ingested_at)
  *  over an EMPTY result set is the 1970 epoch (must never render as "20654d ago"). */
 export function freshnessLabel(chTs: string): string {

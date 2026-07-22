@@ -8,7 +8,6 @@ import {
   messageText,
   proseSpans,
   reconcileMessagesById,
-  resolveInsightTarget,
   resolveLcpContent,
   storeToUiMessages,
   type StoredMessage,
@@ -111,42 +110,6 @@ describe("classifyCardData", () => {
   it("classifies the two invite markers by kind", () => {
     expect(classifyCardData({ kind: "auth-invite" })).toEqual({ kind: "auth-invite" });
     expect(classifyCardData({ kind: "profile-invite" })).toEqual({ kind: "profile-invite" });
-  });
-});
-
-// The LCP target is an identity `{ messageId, partId }`; the panel body is
-// re-resolved from the (immutable) messages so a resumed conversation shows the same LCP. The resolver
-// walks to the message, matches the data part by the SAME id convention MessageList keys its cards on,
-// and returns the insight (null for a missing message/part or a non-insight part).
-describe("resolveInsightTarget", () => {
-  const tableInsight: DataInsight = {
-    id: "t1",
-    kind: "table",
-    verdict: "Amazon leads hiring across the market.",
-    rows: [{ company: "Amazon", count: 214 }],
-    followups: [],
-    meta: { sql: "SELECT 1", sampleN: 3483, updatedAt: "2026-07-18 19:12:00" },
-  };
-  const messages: UIMessage[] = [
-    { id: "u1", role: "user", parts: [{ type: "text", text: "Top companies?" }] },
-    { id: "a1", role: "assistant", parts: [{ type: "data-insight", id: "a1-c0", data: tableInsight } as UIMessage["parts"][number]] },
-  ];
-
-  it("returns the insight for a matching messageId + partId", () => {
-    const got = resolveInsightTarget(messages, { messageId: "a1", partId: "a1-c0" });
-    expect(got?.verdict).toBe("Amazon leads hiring across the market.");
-  });
-
-  it("returns null for an unknown message or part", () => {
-    expect(resolveInsightTarget(messages, { messageId: "zzz", partId: "a1-c0" })).toBeNull();
-    expect(resolveInsightTarget(messages, { messageId: "a1", partId: "nope" })).toBeNull();
-  });
-
-  it("returns null when the targeted part is not an insight", () => {
-    const withError: UIMessage[] = [
-      { id: "a2", role: "assistant", parts: [{ type: "data-error", id: "a2-e", data: { kind: "system" } } as UIMessage["parts"][number]] },
-    ];
-    expect(resolveInsightTarget(withError, { messageId: "a2", partId: "a2-e" })).toBeNull();
   });
 });
 

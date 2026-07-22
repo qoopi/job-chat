@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ProfileSchema, type Profile } from "./profile";
+import { ProfileSchema } from "./profile";
 
 export const CHART_TYPES = ["trend", "bars", "histogram", "donut"] as const;
 export const ChartTypeSchema = z.enum(CHART_TYPES);
@@ -60,12 +60,27 @@ export const DataInsightSchema = z.discriminatedUnion("kind", [
 ]);
 export type DataInsight = z.infer<typeof DataInsightSchema>;
 
-export type ErrorKind = "system" | "unanswerable";
+/** Error-card kinds; the const array is the one home the persist gate + card classifier derive from, so a
+ *  new marker can't be silently dropped by either. */
+export const ERROR_KINDS = ["system", "unanswerable"] as const;
+export type ErrorKind = (typeof ERROR_KINDS)[number];
 
 /** Guard refusal reasons; the reason name is the UI contract, the cap VALUE differs by kind. */
-export type GuardRefusal = "guest_cap" | "daily_budget";
+export const GUARD_REFUSALS = ["guest_cap", "daily_budget"] as const;
+export type GuardRefusal = (typeof GUARD_REFUSALS)[number];
 
-export type RefusalReason = GuardRefusal | "too_long";
+export const REFUSAL_REASONS = [...GUARD_REFUSALS, "too_long"] as const;
+export type RefusalReason = (typeof REFUSAL_REASONS)[number];
+
+/** True if `v` is a known error-card kind marker. */
+export function isErrorKind(v: unknown): v is ErrorKind {
+  return typeof v === "string" && (ERROR_KINDS as readonly string[]).includes(v);
+}
+
+/** True if `v` is a known refusal-reason marker. */
+export function isRefusalReason(v: unknown): v is RefusalReason {
+  return typeof v === "string" && (REFUSAL_REASONS as readonly string[]).includes(v);
+}
 
 // Each part rides the SDK's `data-<kind>` wire prefix: convertToModelMessages requires a known or
 // `data-`/`tool-`-prefixed part type, or the SDK throws on every turn.
@@ -87,11 +102,6 @@ export const ScoredPostingRowSchema = z
 export type ScoredPostingRow = z.infer<typeof ScoredPostingRowSchema>;
 
 /** Profile card payload. Appended out-of-band (not a turn) - INVISIBLE to the turn machinery. */
-export type ProfileCardPart = { kind: "profile-card"; profile: Profile };
-export type PostingsPart = { kind: "postings"; rows: ScoredPostingRow[]; total: number };
-export type AuthInvitePart = { kind: "auth-invite" };
-export type ProfileInvitePart = { kind: "profile-invite" };
-
 export const ProfileCardSchema = z
   .object({ kind: z.literal("profile-card"), profile: ProfileSchema })
   .strict();

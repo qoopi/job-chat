@@ -6,7 +6,6 @@ import {
   errorCopy,
   refusalCopy,
   formatMoney,
-  formatUsd,
   freshnessLabel,
   isSingleScalar,
   labelKeyOf,
@@ -46,15 +45,15 @@ describe("refusalCopy (guest cap / daily budget - polite limit)", () => {
   });
 });
 
-describe("formatUsd (verdict/axis money - numbers are the heroes)", () => {
+describe("formatMoney default USD (verdict/axis money - numbers are the heroes)", () => {
   it("renders whole thousands as $Nk", () => {
-    expect(formatUsd(182000)).toBe("$182k");
+    expect(formatMoney(182000)).toBe("$182k");
   });
   it("rounds to the nearest thousand", () => {
-    expect(formatUsd(181600)).toBe("$182k");
+    expect(formatMoney(181600)).toBe("$182k");
   });
   it("renders sub-thousand values in full", () => {
-    expect(formatUsd(750)).toBe("$750");
+    expect(formatMoney(750)).toBe("$750");
   });
 });
 

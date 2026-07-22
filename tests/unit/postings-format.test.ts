@@ -60,6 +60,10 @@ describe("hasSalary / isSeniorPlus", () => {
     expect(isSeniorPlus(row({ experience: "Staff" }))).toBe(true);
     expect(isSeniorPlus(row({ experience: "Mid" }))).toBe(false);
   });
+  it("isSeniorPlus counts executive/head (lead band per BAND_KEYWORDS, matching the scorer)", () => {
+    expect(isSeniorPlus(row({ experience: "Executive" }))).toBe(true);
+    expect(isSeniorPlus(row({ experience: "Head of Engineering" }))).toBe(true);
+  });
 });
 
 describe("corpusHonesty", () => {
