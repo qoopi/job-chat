@@ -2,6 +2,8 @@ import type { UIMessage } from "ai";
 import {
   AuthInviteSchema,
   DataInsightSchema,
+  isErrorKind,
+  isRefusalReason,
   PostingsSchema,
   ProfileCardSchema,
   ProfileInviteSchema,
@@ -21,8 +23,8 @@ function isPersistablePayload(data: unknown): boolean {
   if (ProfileInviteSchema.safeParse(data).success) return true;
   if (typeof data !== "object" || data === null) return false;
   const d = data as Record<string, unknown>;
-  if (d.kind === "system" || d.kind === "unanswerable") return true; // error marker
-  if (d.reason === "guest_cap" || d.reason === "daily_budget" || d.reason === "too_long") return true; // refusal marker
+  if (isErrorKind(d.kind)) return true; // error marker
+  if (isRefusalReason(d.reason)) return true; // refusal marker
   return false;
 }
 

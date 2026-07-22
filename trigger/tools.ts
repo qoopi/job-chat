@@ -73,6 +73,20 @@ export interface CatalogDeps {
   profile?: Profile | null;
 }
 
+/** Tool-failure tail: never leak the raw error - log it server-side, emit a `system` error part, return the
+ *  model-facing canned message. One home for every catalog tool's catch block. */
+function emitToolError(
+  deps: CatalogDeps,
+  id: string,
+  label: string,
+  err: unknown,
+  message: string,
+): { error: string } {
+  console.error(`[${label}] query failed`, err);
+  deps.emit(errorPart(id, "system"));
+  return { error: message };
+}
+
 function catalogTool(name: TemplateName, deps: CatalogDeps) {
   // Cast to one concrete Zod type: indexing the union collapses tool()'s inference to `never`. Runtime re-validates.
   const inputSchema = TEMPLATE_PARAM_SCHEMAS[name] as z.ZodType<Record<string, unknown>>;
@@ -93,10 +107,7 @@ function catalogTool(name: TemplateName, deps: CatalogDeps) {
         deps.emit({ type: "data-insight", id, data: insight });
         return toModelOutput(insight);
       } catch (err) {
-        // Never leak the raw error - tag it `system`; but log server-side so a prod failure isn't invisible.
-        console.error(`[catalog:${name}] query failed`, err);
-        deps.emit(errorPart(id, "system"));
-        return { error: "The query failed - tell the user something went wrong and to try again." };
+        return emitToolError(deps, id, `catalog:${name}`, err, "The query failed - tell the user something went wrong and to try again.");
       }
     },
   });
@@ -146,9 +157,7 @@ function composedTool(deps: CatalogDeps) {
         // Record the RAW chartType pick: the eval scores the pick before any fallback; the served chart may differ.
         return { ...toModelOutput(insight), rawChartType: rawPick };
       } catch (err) {
-        console.error(`[catalog:query_postings] query failed`, err);
-        deps.emit(errorPart(id, "system"));
-        return { error: "The query failed - tell the user something went wrong and to try again." };
+        return emitToolError(deps, id, "catalog:query_postings", err, "The query failed - tell the user something went wrong and to try again.");
       }
     },
   });
@@ -211,9 +220,7 @@ function searchPostingsTool(deps: CatalogDeps) {
               : "The postings card is the complete answer - add no prose beside it.",
         };
       } catch (err) {
-        console.error(`[search_postings] query failed`, err);
-        deps.emit(errorPart(id, "system"));
-        return { error: "The search failed - tell the user something went wrong and to try again." };
+        return emitToolError(deps, id, "search_postings", err, "The search failed - tell the user something went wrong and to try again.");
       }
     },
   });

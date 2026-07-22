@@ -6,28 +6,15 @@ import {
   barsChartCapsAt,
   freshnessLabel,
   isSingleScalar,
-  splitFirstNumber,
 } from "@/lib/insight-format";
 import { LCP_TABLE_PREVIEW_ROWS, tablePlacement } from "@/lib/table-placement";
 import { InsightChart } from "./charts/InsightChart";
 import { DataTable } from "./charts/DataTable";
 import { CodeBlock } from "./CodeBlock";
+import { Verdict } from "./Verdict";
 
 // The hero component: verdict (number in <b>), Chart|Table tabs, one visual, chips, and a "Show query" source line.
 type Tab = "chart" | "table";
-
-function Verdict({ text }: { text: string }) {
-  const split = splitFirstNumber(text);
-  if (!split) return <p className="verdict">{text}</p>;
-  const [pre, num, post] = split;
-  return (
-    <p className="verdict">
-      {pre}
-      <b>{num}</b>
-      {post}
-    </p>
-  );
-}
 
 export function InsightCard({
   insight,

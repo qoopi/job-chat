@@ -1,6 +1,5 @@
 import "server-only";
 import { cookies, headers } from "next/headers";
-import postgres, { type Sql } from "postgres";
 import {
   createStore,
   type ConversationSummary,
@@ -8,14 +7,10 @@ import {
 } from "@shared/store";
 import { auth as authServer } from "@/lib/auth";
 import { GUEST_COOKIE } from "@/lib/guest-cookie";
+import { getJobchatSql } from "@/lib/jobchat-sql";
 
-// Server-only Postgres for the resume render: a lazy singleton pool (build passes with no .env). Cached on
-// globalThis (shared key with actions.ts) so dev HMR reuses ONE porsager client, not a leak per reload.
-const globalForSql = globalThis as unknown as { __jobchatSql?: Sql };
 function store(): Store {
-  return createStore(
-    (globalForSql.__jobchatSql ??= postgres(process.env.DATABASE_URL!)),
-  );
+  return createStore(getJobchatSql());
 }
 
 /** The caller resolved for the resume render - read-only (NO adoption). `ownerIds` = who may resume (guest

@@ -10,6 +10,7 @@ import {
 } from "../../trigger/run";
 import { buildCatalogTools, type EmitPart } from "../../trigger/tools";
 import { persistAssistantTurn } from "../../trigger/persistence";
+import { MODEL_ID } from "../../trigger/model-id";
 import type { EvalCase } from "./eval-set";
 import { createMemoryStore, fakeAnalytics, fakeCoverageProfile } from "./fakes";
 
@@ -20,11 +21,9 @@ import { createMemoryStore, fakeAnalytics, fakeCoverageProfile } from "./fakes";
 // fixture-derived Analytics (see ./fakes). NOT a vitest test (tests/evals/ sits outside the vitest globs);
 // run with `JOBCHAT_EVAL=1 bun run eval`.
 
-// The shipped model - kept in step with trigger/chat.ts (the production seam). Redefined here rather than
-// imported because importing trigger/chat.ts would register the chat.agent() task outside the Trigger
-// runtime; this string is the only coupling. DRIFT RISK: if chat.ts's MODEL_ID changes and this does not,
-// the eval silently scores a DIFFERENT model than prod and the gate loses meaning.
-export const MODEL_ID = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0";
+// Re-exported for run.ts (harness log + transcript name); the model id's one home is trigger/model-id.ts,
+// imported by trigger/chat.ts too so the eval never scores a different model than prod.
+export { MODEL_ID };
 
 export function buildModel() {
   return createAmazonBedrock({

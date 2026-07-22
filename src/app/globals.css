@@ -296,18 +296,6 @@ a:hover {
   color: var(--shell-strong);
   padding: 0 var(--sp-2);
 }
-.sb-mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  display: grid;
-  place-items: center;
-  font-size: 13px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
 .sb-section {
   font-size: var(--fs-2xs);
   letter-spacing: 0.08em;
@@ -748,12 +736,6 @@ a:hover {
   pointer-events: none;
   background: var(--surface-2);
 }
-.chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
-}
 /* the primary follow-up chip (accent-soft, accent-line) - "Find me a job that fits" / "Open all N in
    panel". A resting accent look, distinct from the neutral chip's hover-only accent. */
 .chip-accent {
@@ -1093,12 +1075,6 @@ a:hover {
 .axis {
   font-size: 10px;
   fill: var(--text-3);
-  font-family: var(--font-sans);
-}
-.val {
-  font-size: 10.5px;
-  font-weight: 600;
-  fill: var(--text-2);
   font-family: var(--font-sans);
 }
 .legend {
@@ -1461,38 +1437,6 @@ a:hover {
   color: var(--text-3);
   text-align: center;
   padding: 6px 0 0;
-}
-
-/* ---------- page footer ---------- */
-.page-foot {
-  margin-top: auto;
-  padding: 8px var(--sp-5);
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-  flex-wrap: wrap;
-}
-.page-foot a {
-  color: var(--text-2);
-}
-.page-foot a:hover {
-  color: var(--accent-ink);
-}
-.page-foot .sep {
-  color: var(--border-strong);
-}
-
-/* fit badges */
-.fit-hi {
-  color: var(--accent-ink);
-  background: var(--accent-soft);
-}
-.fit-lo {
-  color: var(--text-2);
-  background: var(--surface-2);
 }
 
 /* empty state hero */

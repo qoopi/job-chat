@@ -6,6 +6,11 @@ import type { GuardRefusal } from "@shared/insight";
 
 export type CallerKind = "guest" | "account";
 
+/** Caller kind from a conversation owner: a null auth_user_id is a guest, else an account. */
+export function callerKindFor(owner: { auth_user_id: string | null }): CallerKind {
+  return owner.auth_user_id === null ? "guest" : "account";
+}
+
 function capFor(kind: CallerKind, guards: GuardConfig): number {
   // Fail-safe: an account with no signedInCap configured falls back to the (lower) guest cap.
   return kind === "account" ? (guards.signedInCap ?? guards.guestCap) : guards.guestCap;
@@ -47,6 +52,6 @@ export async function checkConversationGuards(
 ): Promise<GuardRefusal | null> {
   const owner = await deps.store.getConversationOwner(conversationId);
   if (!owner) return null;
-  const kind: CallerKind = owner.auth_user_id === null ? "guest" : "account";
+  const kind: CallerKind = callerKindFor(owner);
   return checkMessageGuards(deps, owner.user_id, kind);
 }

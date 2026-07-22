@@ -2,51 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ClickHouseClient } from "@clickhouse/client";
 import { applyClickhouseMigrations, createWriterClient } from "@shared/clickhouse";
 import { ingestPostings, type RowSink } from "@shared/ingest";
-import type { PostingsPage, SearchnapplyClient } from "@shared/searchnapply";
+import { page, pageOf, posting, scriptedClient } from "../fixtures/ingest.fixture";
 
 // Integration: real ClickHouse. Skipped when creds are absent (e.g. CI without secrets).
 const hasCreds = Boolean(process.env.CLICKHOUSE_URL);
 
 const ingestedAt = new Date("2026-07-18T06:00:00Z");
-
-function posting(id: number, title = `Job ${id}`) {
-  return {
-    id,
-    title,
-    company: "Google",
-    source: "GoogleCareers",
-    employmentType: "full-time",
-    experienceLevel: "Senior",
-    salary: id === 3 ? { normalizedMin: 96000, normalizedMax: 138000, currency: "USD" } : null,
-    locations: [{ city: "Tokyo", region: "Tokyo", country: "Japan", kind: 0 }],
-    publishedAt: "2026-07-17T23:38:42Z",
-  };
-}
-
-function page(ids: number[], pageNo: number, totalPages: number, totalCount: number): PostingsPage {
-  return { items: ids.map((id) => posting(id)), page: pageNo, pageSize: 100, totalCount, totalPages };
-}
-
-// Like `page`, but for pre-built posting items (used to vary content between two runs).
-function pageOf(
-  items: ReturnType<typeof posting>[],
-  pageNo: number,
-  totalPages: number,
-  totalCount: number,
-): PostingsPage {
-  return { items, page: pageNo, pageSize: 100, totalCount, totalPages };
-}
-
-function scriptedClient(pages: (PostingsPage | Error)[]): SearchnapplyClient {
-  return {
-    login: async () => "tok",
-    fetchPostingsPage: async (p) => {
-      const entry = pages[p - 1];
-      if (entry instanceof Error) throw entry;
-      return entry;
-    },
-  };
-}
 
 describe.skipIf(!hasCreds)("ingestPostings against real ClickHouse", () => {
   let ch: ClickHouseClient;

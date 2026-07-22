@@ -1,56 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ingestPostings, type RowSink } from "@shared/ingest";
-import type { PostingRow } from "@shared/postings";
-import type { PostingsPage } from "@shared/searchnapply";
-import type { SearchnapplyClient } from "@shared/searchnapply";
+import { ingestPostings } from "@shared/ingest";
+import { collectingSink, page, scriptedClient } from "../fixtures/ingest.fixture";
 
 const ingestedAt = new Date("2026-07-18T06:00:00Z");
-
-function posting(id: number) {
-  return {
-    id,
-    title: `Job ${id}`,
-    company: "Google",
-    source: "GoogleCareers",
-    employmentType: "full-time",
-    experienceLevel: "Senior",
-    salary: null,
-    locations: [{ city: "Tokyo", region: "Tokyo", country: "Japan", kind: 0 }],
-    publishedAt: "2026-07-17T23:38:42Z",
-  };
-}
-
-function page(items: number[], pageNo: number, totalPages: number, totalCount: number): PostingsPage {
-  return {
-    items: items.map(posting),
-    page: pageNo,
-    pageSize: 100,
-    totalCount,
-    totalPages,
-  };
-}
-
-function collectingSink() {
-  const batches: PostingRow[][] = [];
-  const sink: RowSink = {
-    async insert({ values }) {
-      batches.push(values);
-    },
-  };
-  return { sink, batches };
-}
-
-// A client that yields the given pages in order, optionally throwing on a page.
-function scriptedClient(pages: (PostingsPage | Error)[]): SearchnapplyClient {
-  return {
-    login: async () => "tok",
-    fetchPostingsPage: async (p) => {
-      const entry = pages[p - 1];
-      if (entry instanceof Error) throw entry;
-      return entry;
-    },
-  };
-}
 
 describe("ingestPostings", () => {
   it("pages the API and inserts one batch per page", async () => {

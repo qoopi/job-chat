@@ -1,6 +1,8 @@
 import type { UIMessage } from "ai";
 import {
   DataInsightSchema,
+  isErrorKind,
+  isRefusalReason,
   PostingsSchema,
   ProfileCardSchema,
   type ChartType,
@@ -77,11 +79,6 @@ export function resolveLcpContent(messages: UIMessage[], target: LcpTarget): Lcp
   return null;
 }
 
-export function resolveInsightTarget(messages: UIMessage[], target: LcpTarget): DataInsight | null {
-  const c = resolveLcpContent(messages, target);
-  return c?.kind === "table" ? c.insight : null;
-}
-
 /** Classify a card payload (live OR resumed) into a render decision: skeleton first, then a valid insight,
  *  then error/refusal markers; anything else is `unknown` (rendered as nothing) so a shape drift never throws. */
 export function classifyCardData(data: unknown): CardClass {
@@ -92,10 +89,10 @@ export function classifyCardData(data: unknown): CardClass {
   const insight = DataInsightSchema.safeParse(data);
   if (insight.success) return { kind: "insight", insight: insight.data };
   if (isRecord(data)) {
-    if (data.kind === "system" || data.kind === "unanswerable") {
+    if (isErrorKind(data.kind)) {
       return { kind: "error", errorKind: data.kind };
     }
-    if (data.reason === "guest_cap" || data.reason === "daily_budget" || data.reason === "too_long") {
+    if (isRefusalReason(data.reason)) {
       return { kind: "refusal", reason: data.reason };
     }
     // Each validates strictly - a malformed profile-card/postings payload falls through to `unknown`, never throwing.

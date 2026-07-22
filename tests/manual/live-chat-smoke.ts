@@ -6,6 +6,7 @@ import postgres from "postgres";
 import { createStore } from "../../shared/store";
 import { AgentChat } from "@trigger.dev/sdk/chat";
 import type { jobChatAgent } from "../../trigger/chat";
+import { AGENT_ID } from "../../trigger/agent-id";
 
 const QUESTION = process.argv[2] ?? "Which companies are hiring the most right now?";
 
@@ -19,7 +20,7 @@ async function main() {
   await store.appendMessage(conv.id, "user", QUESTION, null);
   console.log("[smoke] conversation", conv.id, "\n[smoke] question:", QUESTION);
 
-  const chat = new AgentChat<typeof jobChatAgent>({ agent: "job-chat-agent", id: conv.id });
+  const chat = new AgentChat<typeof jobChatAgent>({ agent: AGENT_ID, id: conv.id });
   const stream = await chat.sendRaw([
     { id: crypto.randomUUID(), role: "user", parts: [{ type: "text", text: QUESTION }] },
   ]);

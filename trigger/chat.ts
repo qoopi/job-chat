@@ -2,14 +2,15 @@ import { chat } from "@trigger.dev/sdk/ai";
 import { streamText, stepCountIs, type SystemModelMessage, type UIMessageChunk } from "ai";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
-import postgres from "postgres";
 import { createReadOnlyClient } from "@shared/clickhouse";
 import { createAnalytics, type Analytics } from "@shared/analytics";
-import { createStore, type Store } from "@shared/store";
+import { type Store } from "@shared/store";
 import type { Profile } from "@shared/profile";
 import { getAgentLimits, getGuardConfig } from "@shared/env";
-import type { CallerKind } from "./guard";
+import { callerKindFor, type CallerKind } from "./guard";
 import { AGENT_ID } from "./agent-id";
+import { MODEL_ID } from "./model-id";
+import { withStore } from "./store-session";
 import { ADVISER_V2 } from "./prompts/adviser-v2";
 import { buildCatalogTools, type EmitPart } from "./tools";
 import { persistAssistantTurn, hydrateHistory } from "./persistence";
@@ -19,7 +20,6 @@ export { AGENT_ID };
 export const AGENT_LIMITS = getAgentLimits();
 
 // Bedrock via the AWS default credential chain (env in prod, local profile in dev); building it does no I/O.
-const MODEL_ID = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0";
 const model = createAmazonBedrock({
   region: process.env.AWS_REGION ?? "eu-central-1",
   credentialProvider: fromNodeProviderChain(),
@@ -33,15 +33,6 @@ function analytics(): Analytics {
 
 const emit = (part: EmitPart) => chat.response.write(part as UIMessageChunk);
 
-async function withStore<T>(fn: (store: Store) => Promise<T>): Promise<T> {
-  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
-  try {
-    return await fn(createStore(sql));
-  } finally {
-    await sql.end();
-  }
-}
-
 type OwnerContext = { callerKind: CallerKind; profile: Profile | null };
 const GUEST_CONTEXT: OwnerContext = { callerKind: "guest", profile: null };
 
@@ -51,7 +42,7 @@ export async function resolveOwnerContext(store: Store, chatId: string): Promise
   try {
     const owner = await store.getConversationOwner(chatId);
     if (!owner) return GUEST_CONTEXT;
-    const callerKind: CallerKind = owner.auth_user_id === null ? "guest" : "account";
+    const callerKind: CallerKind = callerKindFor(owner);
     if (callerKind === "guest") return { callerKind, profile: null };
     const profile = (await store.getProfile(owner.user_id))?.profile ?? null;
     return { callerKind, profile };

@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import type { ScoredPostingRow } from "@shared/insight";
-import { splitFirstNumber } from "@/lib/insight-format";
 import {
   corpusHonesty,
   hasSalary,
@@ -14,23 +13,10 @@ import {
   shownCount,
   POSTINGS_INCHAT_CAP,
 } from "@/lib/postings-format";
+import { Verdict } from "./Verdict";
 
 // The job-postings card (an InsightCard child). Rows are score-ordered: ORDER IS THE RANK (no percentages/badges).
 // Two surfaces: the in-chat card (capped, honesty caption, no-matches variant) and the LCP full list (PostingsPanel).
-
-/** The verdict with its first number (the total) bolded, matching the InsightCard verdict treatment. */
-function Verdict({ text }: { text: string }) {
-  const split = splitFirstNumber(text);
-  if (!split) return <p className="verdict">{text}</p>;
-  const [pre, num, post] = split;
-  return (
-    <p className="verdict">
-      {pre}
-      <b>{num}</b>
-      {post}
-    </p>
-  );
-}
 
 /** The 5-column table body. A missing salary reads muted "not listed" (never blank). */
 function PostingsTable({ rows }: { rows: ScoredPostingRow[] }) {

@@ -3,11 +3,10 @@ import { z } from "zod";
 import { generateObject } from "ai";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
-import postgres from "postgres";
 import { ProfileSchema } from "@shared/profile";
-import { createStore, type Store } from "@shared/store";
 import { fetchGithubProfile } from "./github-profile";
 import { markProfileExtractionFailed, runProfileExtraction, type GenerateProfile } from "./profile-extraction";
+import { withStore } from "./store-session";
 
 // The background extraction task (durable, not a Vercel action, to survive the latency + 4MB PDF); the pure pipeline is profile-extraction.ts.
 
@@ -32,15 +31,6 @@ const generate: GenerateProfile = async ({ system, messages }) => {
   });
   return object;
 };
-
-async function withStore<T>(fn: (store: Store) => Promise<T>): Promise<T> {
-  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
-  try {
-    return await fn(createStore(sql));
-  } finally {
-    await sql.end();
-  }
-}
 
 export const extractProfileTask = schemaTask({
   id: "extract-profile",
