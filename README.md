@@ -137,6 +137,24 @@ bun run dev                  # Next.js app
 
 `bun run build` produces the production build.
 
+### For judges
+
+A low-privilege judge `.env` (a read-only ClickHouse user, a judge-only Postgres database, and blank
+optional keys) is provided as a Google Drive file linked from the submission form - never committed
+to this repo. Save it as `.env`. The ClickHouse corpus and the judge Postgres database are already
+provisioned, so skip the two `*:migrate` steps:
+
+```bash
+bun install
+# create your own free Trigger.dev project, then set its ref as the `project` field in trigger.config.ts
+bunx trigger.dev@latest dev  # chat.agent() runs in YOUR Trigger project (the judge .env carries no Trigger key)
+bun run dev                  # http://localhost:3000
+```
+
+`chat.agent()` runs execute in Trigger's cloud against the project named in `trigger.config.ts`, so
+the chat path needs a Trigger project you own: create a free one and swap the `project` ref before
+running `bun run dev`.
+
 ## Checks
 
 ```bash
