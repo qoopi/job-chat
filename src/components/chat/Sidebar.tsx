@@ -6,18 +6,16 @@ import type { Conversation } from "@shared/store";
 import { PlusIcon, ChevronLeftIcon } from "@/components/icons";
 import { freshnessLabel } from "@/lib/insight-format";
 
-// A history row's data: the stored fields plus a first-message preview (refresh #2 s5) - optional so a
+// A history row's data: the stored fields plus a first-message preview - optional so a
 // caller that has not fetched it (or a guest) simply renders no preview line.
 type HistoryItem = Pick<Conversation, "id" | "title" | "created_at"> & {
   preview?: string;
 };
 
 // The shell sidebar (interaction-spec s5). Guest: the teaser + Sign in (opens the lazy auth dialog).
-// Signed-in: the real history list (newest first, title + first-message preview + relative date, active
-// highlight, click loads, New chat on top, "No conversations yet" empty state). refresh #2 s5: the
-// identity/auth foot is gone - sign in / sign out live in the title bar now (AccountMenu). Pure
-// presentation - sign-in state + the history list are resolved by the caller (SSR seed + client refetch
-// after an in-page sign-in). Collapse + the built-for credit are untouched.
+// Signed-in: the history list (newest first, title + first-message preview + relative date, active
+// highlight, New chat on top, empty state). Identity/auth live in the title bar (AccountMenu), not
+// here. Pure presentation - sign-in state + the history list are resolved by the caller.
 function BrandCredit() {
   return (
     <div
@@ -28,7 +26,7 @@ function BrandCredit() {
         padding: "0 8px",
       }}
     >
-      {/* AC-20: the wordmark is a way home - it links to the landing. */}
+      {/* The wordmark is a way home - it links to the landing. */}
       <Link
         className="sb-brand"
         href="/"
@@ -66,24 +64,24 @@ export function Sidebar({
   onDeleteConversation,
 }: {
   signedIn?: boolean;
-  // refresh #2 s5/s6: identity moved to the TitleBar (AccountMenu); the sidebar no longer renders a name
+  // Identity moved to the TitleBar (AccountMenu); the sidebar no longer renders a name
   // or avatar.
   conversations?: HistoryItem[];
   activeId?: string;
   activeTitle?: string;
   onNewChat?: () => void;
   onSignIn?: () => void;
-  /** AC-21: delete a signed-in conversation (guarded server-side). Absent (guest) => no affordance. */
+  /** Delete a signed-in conversation (guarded server-side). Absent (guest) => no affordance. */
   onDeleteConversation?: (conversationId: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  // AC-21: which row is showing its inline "Delete this chat?" confirm (never a modal). Local UI state.
+  // Which row is showing its inline "Delete this chat?" confirm (never a modal). Local UI state.
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   if (collapsed) {
     return (
       <aside className="sidebar collapsed">
-        {/* AC-20: the collapsed wordmark is a way home too. */}
+        {/* The collapsed wordmark is a way home too. */}
         <Link
           href="/"
           style={{
@@ -148,7 +146,7 @@ export function Sidebar({
         </button>
       </div>
 
-      {/* New chat on top (AC-19): always starts a fresh chat IN PLACE (never a bounce to the landing). */}
+      {/* New chat on top: always starts a fresh chat IN PLACE (never a bounce to the landing). */}
       <button
         className="btn btn-primary btn-block"
         type="button"
@@ -166,7 +164,7 @@ export function Sidebar({
           ) : (
             conversations.map((c) =>
               confirmingId === c.id ? (
-                // AC-21: inline confirm (interaction-spec s1 pattern - never a modal).
+                // Inline confirm (interaction-spec s1 pattern - never a modal).
                 <div key={c.id} className="sb-item sb-confirm">
                   <span>Delete this chat?</span>
                   <div className="sb-confirm-actions">
@@ -196,7 +194,7 @@ export function Sidebar({
                     href={`/chat/${c.id}`}
                   >
                     {c.title}
-                    {/* refresh #2 s5: a muted first-message preview distinguishes duplicate titles. */}
+                    {/* A muted first-message preview distinguishes duplicate titles. */}
                     {c.preview ? (
                       <span className="sb-preview">{c.preview}</span>
                     ) : null}
