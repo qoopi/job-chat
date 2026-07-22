@@ -7,6 +7,53 @@ revealing the exact ClickHouse SQL - never a wall of text. Signed-in users can d
 get a structured profile (enriched with public GitHub signals) matched against live postings. Live
 at jobchat.dev.
 
+## Demo
+
+Live: https://jobchat.dev
+
+<!-- HERO SCREENSHOT SLOT - operator adds the hero screenshot here during the demo walk -->
+
+<!-- DEMO VIDEO SLOT - operator adds the 5-minute demo video link here during the demo walk -->
+
+## What was built
+
+- **Insight cards, not paragraphs** - every data answer is a one-line verdict plus an interactive
+  Recharts chart (bars, trend, donut, histogram) or a table; "Show query" reveals the exact executed
+  ClickHouse SQL.
+- **Analytics catalog** - six fixed ClickHouse query templates plus a schema-validated
+  composed-query builder (whitelisted measures/dimensions/filters) that answers anything else the
+  postings columns can express; no free-form or generative SQL.
+- **Durable chat agent** - one Trigger.dev `chat.agent()` run per conversation orchestrates Bedrock
+  and the ClickHouse tool catalog, streaming structured data parts to the UI in real time.
+- **Guardrails in the run** - per-caller message caps, a daily budget, and turn/step ceilings are
+  enforced inside the agent run itself.
+- **Guests and accounts** - guests chat with no sign-in; signing in (Google via Better Auth) adopts
+  the guest's conversations, adds cross-device sidebar history, and raises the message cap.
+- **Resume profiles** - a signed-in user uploads a resume PDF and a durable Trigger.dev task
+  extracts a schema-validated structured profile (Bedrock).
+- **GitHub enrichment** - the extraction folds in public GitHub signals (languages, topics, repos,
+  merged-PR count); deeper with a read-only PAT, gracefully capped without one.
+- **Fit matching** - fit-intent questions route by identity: guest -> sign-in invite,
+  signed-in-without-profile -> profile invite, profile-on-file -> `search_postings` ranks live
+  postings against the profile.
+- **Scheduled ingestion** - a Trigger.dev cron task pulls postings from the searchnapply REST API
+  into ClickHouse every 6 hours.
+
+## Tech stack
+
+| Layer | Choice |
+|---|---|
+| Runtime | Bun |
+| Framework | Next.js 16 (App Router), React 19; deployed on Vercel |
+| Agent | Trigger.dev `chat.agent()` - durable runs, Realtime streaming |
+| OLAP database | ClickHouse Cloud - `postings` + every analytical read |
+| OLTP database | ClickHouse Managed Postgres - users, conversations, messages, profiles |
+| LLM | Claude via AWS Bedrock - Sonnet 4.5 (chat), Haiku 4.5 (profile extraction) |
+| Auth | Better Auth (Google OAuth) |
+| Charts | Recharts |
+| Validation | Zod |
+| Tests | Vitest (unit + integration), Playwright (e2e), Bedrock eval harness |
+
 ## Architecture
 
 ```
@@ -43,6 +90,37 @@ Next.js (this repo, Vercel)          Trigger.dev cloud                Data
 operated by this team. Job.Chat consumes it strictly as an **external REST API** — a job-postings
 source for scheduled ingestion into ClickHouse. None of its code is part of this repository or
 this submission; everything here was built during the hackathon window.
+
+## Repo map
+
+| Path | What lives here |
+|---|---|
+| `src/` | The Next.js app - UI components (chat, insight cards, charts, landing), server actions, and `src/lib` (auth, chat transport, formatting). |
+| `shared/` | Framework-agnostic core shared by the app and the tasks - the ClickHouse analytics catalog, clients, ingestion, and the insight/profile types. |
+| `trigger/` | Trigger.dev tasks - the `chat.agent()` loop with its tools/prompt/guards, resume profile extraction + GitHub enrichment, and scheduled ingestion. |
+| `tests/` | Vitest unit + integration, Playwright e2e, fixtures, and the Bedrock eval harness (`tests/evals/`). |
+| `migrations/` | Postgres DDL (`migrations/*.sql`) and ClickHouse DDL (`migrations/clickhouse/*.sql`). |
+| `scripts/` | Migration runners (`ch:migrate`, `pg:migrate`). |
+
+## Hackathon
+
+Built for the **ClickHouse x Trigger.dev Virtual Summer Hackathon 2026**. The brief, "Beyond the
+Wall of Text", asks for a chat agent whose response is the product - visual, interactive, explorable
+- judged on the ratio of insight to words ("text is the garnish, not the meal"). Job.Chat answers
+every market question with a verdict-plus-chart insight card, never a paragraph.
+
+How the entry maps to the rubric:
+
+- **ClickHouse depth** - `postings` is the OLAP core (ReplacingMergeTree with dedup-correct FINAL
+  reads); every analytical read is parameterized SQL through the analytics catalog (six fixed
+  templates + a schema-validated composed-query builder, no generative SQL), and every card's "Show
+  query" reveals the exact executed ClickHouse SQL.
+- **Trigger.dev depth** - `chat.agent()` IS the product: one durable run per conversation
+  orchestrates Bedrock and the tool catalog and streams structured data parts to the UI via Trigger
+  Realtime. Resume profile extraction and scheduled ingestion are Trigger tasks too.
+- **OLTP + OLAP bonus path** - ClickHouse Managed Postgres (transactional: users, conversations,
+  messages, profiles) runs alongside ClickHouse (analytics), with the `users` table mirrored into
+  ClickHouse through the built-in CDC ClickPipe.
 
 ## Run it
 
