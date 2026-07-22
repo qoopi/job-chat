@@ -16,13 +16,13 @@ import { createChatRun, type StreamModelArgs } from "./run";
 // The conversation loop: ONE durable Trigger.dev chat.agent per conversation (keyed on chatId = our
 // conversation id). Bedrock runs the eu. Claude sonnet inference profile; the catalog tools are the
 // only path to ClickHouse; each data answer streams one `data-insight` part; and every completed
-// turn (normal OR stopped) persists the assistant message for resume (AC-13). Guards: the cap/budget
-// backstop (below), maxTurns + per-step ceiling from env (AC-17).
+// turn (normal OR stopped) persists the assistant message for resume. Guards: the cap/budget
+// backstop (below), maxTurns + per-step ceiling from env.
 
 export { AGENT_ID };
 export const AGENT_LIMITS = getAgentLimits();
 
-// Bedrock via the AWS default credential chain: env vars in the deployed Trigger task (007), the
+// Bedrock via the AWS default credential chain: env vars in the deployed Trigger task, the
 // local AWS profile in dev. Building the provider does no I/O - creds resolve per request.
 const MODEL_ID = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0";
 const model = createAmazonBedrock({
@@ -53,8 +53,8 @@ async function withStore<T>(fn: (store: Store) => Promise<T>): Promise<T> {
   }
 }
 
-// AC-19: mark the system block as a Bedrock prompt-cache point so repeat turns read it from cache (no
-// behavior change). Conformance correction 5: the toStreamTextOptions `systemProviderOptions` route
+// Mark the system block as a Bedrock prompt-cache point so repeat turns read it from cache (no
+// behavior change). The toStreamTextOptions `systemProviderOptions` route
 // silently no-ops here (the SDK builds a system block only after chat.prompt.set(), which we never
 // call, and our explicit `system:` after the spread overrides it anyway). Instead pass the structured
 // SystemModelMessage directly - the exact shape the SDK itself emits for a provider cache point (ai@7
@@ -67,7 +67,7 @@ const cachePointSystem = (system: string): SystemModelMessage => ({
 
 // The model seam (real path): stream the rebuilt history to Bedrock. The orchestration - persist the
 // incoming turn, apply the cap/budget/size backstop, and REBUILD the model input from the store so the
-// model sees the full alternating history (004 round 4) - lives in `createChatRun` (trigger/run.ts),
+// model sees the full alternating history - lives in `createChatRun` (trigger/run.ts),
 // with this as the injected model. `chat.toStreamTextOptions` contributes prepareStep (compaction /
 // background injection); our structured system + rebuilt `messages` win after the spread (the app never
 // calls `chat.prompt.set()`, so the SDK sets neither).
@@ -88,7 +88,7 @@ const chatRun = createChatRun({
   emit,
   now: () => new Date(),
   system: ADVISER_V2,
-  // The corpus shape for the DATA SCOPE prompt note (018 strand 5), memoized on the analytics singleton
+  // The corpus shape for the DATA SCOPE prompt note, memoized on the analytics singleton
   // so it costs one ClickHouse query per process, not per turn.
   coverageProfile: () => analytics().coverageProfile(),
   streamModel,
@@ -106,7 +106,7 @@ export const jobChatAgent = chat.agent({
   run: (payload) => chatRun(payload),
   // Mint uuid response ids so responseMessage.id is a uuid the store can key the assistant row on.
   uiMessageStreamOptions: { generateMessageId },
-  // R6/F11: register the DB-owned history seam. Returning the persisted rows (raw, via hydrateHistory)
+  // Register the DB-owned history seam. Returning the persisted rows (raw, via hydrateHistory)
   // makes the SDK skip its snapshot machinery entirely ("customers own persistence") - Postgres is the
   // SOLE history store, deleting the parallel snapshot reads/writes and one class of redelivery source.
   // createChatRun still owns the MODEL-input rebuild (buildModelHistory over the store), so this raw
@@ -119,8 +119,7 @@ export const jobChatAgent = chat.agent({
   // Persist the assistant turn on completion - normal, stopped, OR errored. A stopped turn carries a
   // responseMessage with its aborted parts cleaned up (a partial card survives to resume). An ERRORED
   // turn fires with `error` set and the response undefined-or-partial; persistAssistantTurn synthesizes
-  // the error card so a failed turn persists as a turn and reloads with Retry (AC-6/7), instead of the
-  // old `if (!responseMessage) return` that dropped exactly those turns.
+  // the error card so a failed turn persists as a turn and reloads with Retry.
   onTurnComplete: async ({ chatId, responseMessage, error }) => {
     await withStore((store) =>
       persistAssistantTurn(store, { conversationId: chatId, responseMessage, error }),

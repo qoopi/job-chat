@@ -2,7 +2,7 @@ import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
 import type { GuardRefusal } from "@shared/insight";
 
-// The message guards (cap AC-15 + global daily budget AC-20), counted via the store so the same
+// The message guards (per-user cap + global daily budget), counted via the store so the same
 // backstop holds on BOTH paths: the "use server" actions (early typed refusal, UX) and the durable
 // agent run (the hard backstop on the write-token's real path to Bedrock). One home for the count
 // logic so the two layers can never drift. The refusal taxonomy (`GuardRefusal`) lives in
@@ -10,7 +10,7 @@ import type { GuardRefusal } from "@shared/insight";
 
 /**
  * Which per-user cap applies: a signed-in account gets the higher `signedInCap`, a guest the lower
- * `guestCap` (AC-13). The action layer knows the kind from the resolved Identity; the run() backstop
+ * `guestCap`. The action layer knows the kind from the resolved Identity; the run() backstop
  * derives it from the owner's auth_user_id nullity (see `checkConversationGuards`).
  */
 export type CallerKind = "guest" | "account";
@@ -37,8 +37,8 @@ function utcMidnight(now: Date): Date {
 }
 
 /**
- * The global daily budget (the spend kill switch, AC-20) is checked first, then the per-user cap
- * (AC-13/AC-15) selected by caller `kind` (defaults to the guest cap - the fail-safe when a legacy
+ * The global daily budget (the spend kill switch) is checked first, then the per-user cap
+ * selected by caller `kind` (defaults to the guest cap - the fail-safe when a legacy
  * caller passes none). The two counts run in ONE round trip (Promise.all); the scoped count is
  * computed even when the budget is already blown - the rare case - so the common allow path is a
  * single trip.

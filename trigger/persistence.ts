@@ -30,14 +30,14 @@ function isPersistablePayload(data: unknown): boolean {
  * error/refusal emitted under the same id (failure). Loading skeletons that were never superseded are
  * then dropped (they fail `isPersistablePayload`), so a failed or refused turn resumes as its error /
  * refusal card, never a stuck skeleton. Payload: a single object for the usual one-card answer, an
- * array if several, `null` for a plain text-only answer. AC-13 resume source.
+ * array if several, `null` for a plain text-only answer. The resume source.
  */
 export function extractAssistantPersistence(message: MessageLike): {
   content: string;
   parts: unknown;
 } {
   const parts = message.parts ?? [];
-  // F8 (prose rule, one home each): persist the model's prose VERBATIM - what the assistant actually said.
+  // Persist the model's prose VERBATIM - what the assistant actually said.
   // The card is the single answer surface at RENDER (MessageList suppresses the prose when a card renders)
   // and the code-derived verdict is what the MODEL sees (buildModelHistory substitutes it for a card turn),
   // so neither concern rewrites the stored content - Postgres stays a faithful record of the turn.
@@ -60,12 +60,12 @@ export function extractAssistantPersistence(message: MessageLike): {
 }
 
 /** The card synthesized for a turn that errored with no (or no card-bearing) response message, so a
- *  failed turn always persists as a turn and resumes with its Retry affordance (AC-7). */
+ *  failed turn always persists as a turn and resumes with its Retry affordance. */
 const SYSTEM_ERROR_CARD = { kind: "system" } as const;
 
 /**
  * Persist the assistant turn (content + card payload) via the store. Called from the agent's
- * `onTurnComplete` on normal, stopped, AND errored completion. Errors are turns (AC-6/7): the SDK fires
+ * `onTurnComplete` on normal, stopped, AND errored completion. Errors are turns: the SDK fires
  * onTurnComplete for an errored turn with `error` set and the response message UNDEFINED-or-partial, so
  * persistence branches on `error` rather than bailing on a missing response - a failed turn persists its
  * error card (synthesized when the response carried none) so a reload renders the card with Retry.
@@ -114,7 +114,7 @@ export type RunMessage = { role: string; content?: unknown };
 
 /**
  * Persist the newly-arrived user turn(s) present in the run's reconstructed `messages` but not yet in
- * the store, BEFORE the guard backstop counts them. Mechanism (a): a follow-up is delivered by the
+ * the store, BEFORE the guard backstop counts them. A follow-up is delivered by the
  * client transport's `sendMessages` (append to `.in` + subscribe-with-wait - the only SDK 4.5.4 path
  * that streams a freshly-triggered turn live; `reconnectToStream` forces peekSettled), so the user turn
  * is no longer persisted by the server action - the agent's `run()` is the single persist site.
@@ -149,7 +149,7 @@ export async function persistIncomingUserTurns(
 }
 
 /**
- * Build the authoritative history the SDK's `hydrateMessages` seam returns (R6/F11). Registering the seam
+ * Build the authoritative history the SDK's `hydrateMessages` seam returns. Registering the seam
  * switches the SDK's snapshot machinery OFF - Postgres becomes the sole chat-history store - so this
  * return REPLACES the built-in snapshot+replay accumulator. It is deliberately RAW: the persisted rows as
  * UIMessages (row id preserved, content verbatim - NO coalescing, NO verdict substitution) followed by
