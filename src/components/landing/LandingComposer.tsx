@@ -25,8 +25,9 @@ const AuthDialog = dynamic(
   },
 );
 
-// The landing hero's interactive part (mock 4b): the ask box + intent chips that hand off to the chat
-// with the stream already attached on arrival (AC-3, interaction-spec section 7). On first paint it
+// The landing hero's interactive part (mock 4b): the ask box + intent chips that hand off to the chat,
+// carrying the question in `?q=` so turn 1 streams via the public send path on arrival (AC-11,
+// interaction-spec section 7). On first paint it
 // mints the guest cookie (AC-12). PROD posts the question to `startConversation`; a guest cap refusal
 // is now VISIBLE here (AC-13 - no silent refusal): a polite notice + a sign-in affordance that opens the
 // lazy dialog and queues the blocked question for auto-continuation on success (interaction-spec s6/s7).
@@ -61,14 +62,12 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
     setRefusal(null);
     try {
       if (e2e) {
-        router.push(
-          `/chat/${crypto.randomUUID()}?new=1&q=${encodeURIComponent(text)}`,
-        );
+        router.push(`/chat/${crypto.randomUUID()}?q=${encodeURIComponent(text)}`);
         return;
       }
       const r = await startConversation(text);
       if (r.ok) {
-        router.push(`/chat/${r.conversationId}?new=1`);
+        router.push(`/chat/${r.conversationId}?q=${encodeURIComponent(text)}`);
         return;
       }
       if (r.reason === "guest_cap" || r.reason === "daily_budget") {

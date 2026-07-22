@@ -16,10 +16,14 @@ import {
 const freshChat = () => `/chat/${randomUUID()}`;
 const composer = "Ask a follow-up";
 
-test("AC-3 Should_StreamAnswerOnArrival_When_LandingQuestionSubmitted", async ({
+// AC-11 (canonical arrival spec): turn 1 from the landing rides the SAME public send path as every
+// follow-up (no server-side envelope). The landing carries the question in ?q=; the chat page delivers it
+// via useChat.sendMessage on arrival. Prove it streams live end-to-end: message #1 shown, the answering
+// indicator up through the run-wake gap, and the answer streams to completion.
+test("AC-11 Should_DeliverTurnOneViaSendPath_When_ConversationStarts", async ({
   page,
 }) => {
-  await armScript(page, insightScript(3000)); // slow fill so the answering indicator is observable on arrival
+  await armScript(page, insightScript(500)); // brief fill: observe the indicator, then the streamed card
   await page.goto("/");
 
   await page
@@ -27,13 +31,18 @@ test("AC-3 Should_StreamAnswerOnArrival_When_LandingQuestionSubmitted", async ({
     .fill("Top companies hiring right now");
   await page.getByRole("button", { name: "Send" }).click();
 
-  // handoff: navigated into a chat, message #1 shown, the answering indicator up on arrival (006 ruling:
-  // an animated waiting indicator, never a hollow skeleton card, until real content streams)
+  // Handoff: navigated into a chat carrying ?q=, message #1 shown, the answering indicator up on arrival
+  // (006 ruling: an animated waiting indicator, never a hollow skeleton card, until real content streams).
   await expect(page).toHaveURL(/\/chat\/[0-9a-f-]+/);
   await expect(page.locator(".bubble.user")).toHaveText(
     "Top companies hiring right now",
   );
   await expect(page.locator(".answering").first()).toBeVisible();
+
+  // Turn 1 streams to completion via the send path - the same rendering follow-ups get.
+  await expect(page.locator(".insight .verdict")).toContainText(
+    "Amazon leads hiring with",
+  );
 });
 
 test("AC-4/AC-6 Should_RenderInsightCard_When_DataAnswerStreams", async ({

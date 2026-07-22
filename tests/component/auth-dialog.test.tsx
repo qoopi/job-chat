@@ -18,18 +18,14 @@ import { setAuthDialogOpen } from "@/lib/layers";
 // returns to the chat untouched. AC-9 (partial): with the REAL dialog above an open LCP, Esc closes the
 // dialog only and leaves the LCP (interaction-spec "Priority of layers"). External boundaries mocked as
 // chat-client.test.tsx does; here no turn streams, so the transport is inert.
-const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(
   async () => new ReadableStream({ start: (c) => c.close() }),
 );
-const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
     sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
-    setSession: setSessionMock,
-    getSession: getSessionMock,
   }),
 }));
 

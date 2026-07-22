@@ -1,6 +1,7 @@
 "use client";
 
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
+import type { ChatSessionPersistedState } from "@trigger.dev/sdk/chat";
 
 // The E2E transport. `useChat` accepts any `ChatTransport`; in E2E mode we swap the real Trigger.dev
 // transport for this one, which replays a scripted `UIMessageChunk` sequence the Playwright spec pins
@@ -66,15 +67,13 @@ const DEFAULT_SCRIPT: ScriptStep[] = [
   { chunk: { type: "finish" } as UIMessageChunk },
 ];
 
-interface MockSession {
-  publicAccessToken: string;
-  isStreaming?: boolean;
-}
-
 export class MockChatTransport implements ChatTransport<UIMessage> {
-  // The per-chat session state the arrival attach writes via `setSession`. `reconnectToStream` reads its
-  // `isStreaming` flag: a settled session no-ops (as the real transport does), a live one may resume.
-  private readonly sessions = new Map<string, MockSession>();
+  // The persisted per-chat session hydrated at construction (mirrors the real transport's `sessions`
+  // option, read from sessionStorage). `reconnectToStream` reads its `isStreaming` flag: only a
+  // still-streaming session may resume; a settled or absent one no-ops, as the real transport does.
+  constructor(
+    private readonly hydrated?: Record<string, ChatSessionPersistedState>,
+  ) {}
 
   private next(): ScriptStep[] {
     return (typeof window !== "undefined" && window.__CHAT_SCRIPT__) || DEFAULT_SCRIPT;
@@ -91,23 +90,15 @@ export class MockChatTransport implements ChatTransport<UIMessage> {
   reconnectToStream = async (
     options: { chatId?: string },
   ): Promise<ReadableStream<UIMessageChunk> | null> => {
-    // Honor the persisted session: a settled turn (isStreaming: false) must not replay anything on a
-    // reload - reconnect no-ops, exactly as the real transport does.
-    if (options.chatId && this.sessions.get(options.chatId)?.isStreaming === false) return null;
+    // Honor the persisted session: only a still-streaming turn resumes. A settled turn (isStreaming
+    // false) or an unknown session no-ops on reload - exactly as the real transport does.
+    const streaming =
+      !!options.chatId && this.hydrated?.[options.chatId]?.isStreaming === true;
+    if (!streaming) return null;
     // Resume of a still-streaming turn: when a test arms `__CHAT_REPLAY__`, replay it as the `.out` tail
     // (the real transport's resume-of-live-turn). Absent -> nothing to reconnect to.
     const tail = typeof window !== "undefined" ? window.__CHAT_REPLAY__ : undefined;
-    if (!tail || tail.length === 0) return null;
-    return replay(tail, undefined);
-  };
-
-  // The arrival attach hydrates a freshly-minted token + `isStreaming` so `reconnectToStream` resumes
-  // the just-triggered run (inert on the pure e2e path, which streams arrival via `sendMessages`).
-  setSession = (chatId: string, session: MockSession): void => {
-    this.sessions.set(chatId, {
-      publicAccessToken: session.publicAccessToken,
-      isStreaming: session.isStreaming,
-    });
+    return tail && tail.length > 0 ? replay(tail, undefined) : null;
   };
 
   // Stop's backend signal. E2E has no backend and the AI SDK stop already aborts the scripted stream, so

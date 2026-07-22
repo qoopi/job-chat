@@ -14,18 +14,14 @@ import { setAuthDialogOpen } from "@/lib/layers";
 // AC-8/AC-9: the table Left Chat Part, driven through the REAL ChatClient (its lcpTarget state, the
 // dock, and the close paths are what is under test). The transport + server action are external
 // boundaries and mocked exactly as chat-client.test.tsx does; here no turn is sent, so they are inert.
-const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(
   async () => new ReadableStream({ start: (c) => c.close() }),
 );
-const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
     sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
-    setSession: setSessionMock,
-    getSession: getSessionMock,
   }),
 }));
 vi.mock("@/app/actions", () => ({

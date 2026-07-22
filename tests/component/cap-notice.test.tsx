@@ -14,18 +14,14 @@ import { closeAuthDialog } from "@/lib/auth-dialog";
 // the chat composer AND the landing composer - as an accent-soft card inviting a free account ("Create
 // account"), NOT a red error and NOT a silent refusal. The composer stays ENABLED (no auto-open); a send
 // while capped opens the dialog with the draft queued. Both external boundaries are mocked.
-const setSessionMock = vi.fn();
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(
   async () => new ReadableStream({ start: (c) => c.close() }),
 );
-const getSessionMock = vi.fn(() => undefined);
 vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
     sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
-    setSession: setSessionMock,
-    getSession: getSessionMock,
   }),
 }));
 
@@ -160,7 +156,7 @@ test("Should_AutoSendQueuedDraft_When_SignInSucceedsAfterCap", async () => {
     `jobchat_queued_draft:${CONVERSATION_ID}`,
     "Queued question",
   );
-  sendMessageMock.mockResolvedValue({ ok: true, publicAccessToken: "tok" });
+  sendMessageMock.mockResolvedValue({ ok: true });
   render(
     <ChatClient
       conversationId={CONVERSATION_ID}
@@ -193,7 +189,7 @@ test("Should_NotDoubleSend_When_TheSameConversationMountsASecondTime", async () 
     `jobchat_queued_draft:${CONVERSATION_ID}`,
     "Queued question",
   );
-  sendMessageMock.mockResolvedValue({ ok: true, publicAccessToken: "tok" });
+  sendMessageMock.mockResolvedValue({ ok: true });
   const first = render(
     <ChatClient
       conversationId={CONVERSATION_ID}

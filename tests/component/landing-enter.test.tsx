@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 test("Should_Submit_When_EnterPressed: Enter sends the draft through startConversation", async () => {
-  startConversationMock.mockResolvedValue({ ok: true, conversationId: "conv-42" });
+  startConversationMock.mockResolvedValue({ ok: true, conversationId: "conv-42", messageId: "m-1" });
   render(<LandingComposer e2e={false} />);
 
   const box = screen.getByRole("textbox", { name: "What are you looking for" }) as HTMLTextAreaElement;
@@ -31,7 +31,10 @@ test("Should_Submit_When_EnterPressed: Enter sends the draft through startConver
   fireEvent.keyDown(box, { key: "Enter" });
 
   await waitFor(() => expect(startConversationMock).toHaveBeenCalledWith("Top companies hiring right now"));
-  await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/chat/conv-42?new=1"));
+  // Navigates carrying the question in ?q= so the chat page delivers turn 1 via the public send path.
+  await waitFor(() =>
+    expect(pushMock).toHaveBeenCalledWith("/chat/conv-42?q=Top%20companies%20hiring%20right%20now"),
+  );
 });
 
 test("Should_NotSubmit_When_ShiftEnterPressed: Shift+Enter is a newline, not a send", () => {

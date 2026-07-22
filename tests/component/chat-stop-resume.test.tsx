@@ -19,7 +19,6 @@ import type { UIMessage, UIMessageChunk } from "ai";
 const CONVERSATION_ID = "55555555-5555-4555-8555-555555555555";
 
 const stopGenerationMock = vi.fn(async () => true);
-const setSessionMock = vi.fn();
 const sendMessagesMock = vi.fn(
   async () => new ReadableStream<UIMessageChunk>({ start: (c) => c.close() }),
 );
@@ -45,7 +44,6 @@ vi.mock("@/lib/chat-transport", () => ({
   useJobChatTransport: () => ({
     sendMessages: sendMessagesMock,
     reconnectToStream: reconnectMock,
-    setSession: setSessionMock,
     stopGeneration: stopGenerationMock,
   }),
 }));

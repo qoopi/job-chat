@@ -2,7 +2,7 @@
 
 import { cookies, headers } from "next/headers";
 import postgres, { type Sql } from "postgres";
-import { auth, sessions } from "@trigger.dev/sdk";
+import { auth } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore, type ConversationSummary } from "@shared/store";
 import { getGuardConfig } from "@shared/env";
@@ -19,9 +19,7 @@ import {
   type MintResult,
   type MintToken,
   type SendResult,
-  type SendToInbox,
   type SessionResult,
-  type StartSession,
 } from "../../trigger/session";
 import type { jobChatAgent } from "../../trigger/chat";
 
@@ -41,39 +39,26 @@ function sql(): Sql {
   return (globalForSql.__jobchatSql ??= postgres(process.env.DATABASE_URL!));
 }
 
-// Start (or resume) the durable session and mint its browser token, server-side so the secret key
-// never reaches the browser. `mintToken` is the re-mint the transport reconnects with; both are
-// gated by the session core's ownership check.
-const startSessionAction =
-  chat.createStartSessionAction<typeof jobChatAgent>(AGENT_ID);
-const startSession: StartSession = async ({ chatId }) => {
-  const r = await startSessionAction({ chatId });
-  return {
-    publicAccessToken: r.publicAccessToken,
-    runId: r.runId,
-    sessionId: r.sessionId,
-  };
-};
+// The transport's `startSession` action (createStartSessionAction): the "use client" chat transport
+// calls it lazily on the first `sendMessage` for a chatId with no cached session - it atomically creates
+// the Session row, triggers the first run, and returns the browser's session-scoped token. This is THE
+// turn-1 delivery seam (the documented path), so turn 1 rides the same public send path as every
+// follow-up. Idempotent on (env, externalId). Exported for chat-transport.ts's `startSession` option.
+export const startChatSession = chat.createStartSessionAction<typeof jobChatAgent>(AGENT_ID);
+
+// The re-mint the transport reconnects with (its `accessToken` callback), server-side so the secret key
+// never reaches the browser; gated by the session core's ownership check on the surrounding action.
 const mintToken: MintToken = (conversationId) =>
   auth.createPublicToken({
     scopes: chatTokenScopes(conversationId),
     expirationTime: "1h",
   });
 
-// Deliver the user turn to the durable session inbox after the run is triggered. This is the only
-// server-side writer of `.in`; the preloaded agent run waits here for its first message (the browser
-// transport never sends one in our server-mediated flow). The session-scoped secret-key client
-// addresses the session by its externalId (= our conversation id).
-const sendToInbox: SendToInbox = (chatId, chunk) =>
-  sessions.open(chatId).in.send(chunk);
-
 function service() {
   return createSessionService({
     store: createStore(sql()),
     guards: getGuardConfig(),
-    startSession,
     mintToken,
-    sendToInbox,
     now: () => new Date(),
   });
 }
@@ -152,7 +137,8 @@ export async function ensureGuest(): Promise<string> {
   return guestId;
 }
 
-/** AC-3 landing handoff: create the conversation + user message #1 and trigger the run. */
+/** AC-11 landing handoff: create the conversation + persist user message #1, return its id. Turn 1 is
+ *  delivered on the client's public send path (no server-side trigger). */
 export async function startConversation(
   question: string,
 ): Promise<SessionResult> {
@@ -167,10 +153,10 @@ export async function startConversation(
 
 /**
  * Follow-up send GATE (mechanism a): input-bounded, ownership-checked, cap (AC-15) + daily-budget
- * (AC-20) guarded, and returns the scoped token the client transport attaches with. It does NOT persist
- * or trigger - the transport's `sendMessages` delivers the turn to `.in` (triggering the run) and
- * subscribes with wait (the only SDK path that streams a freshly-triggered follow-up live), and the
- * agent's `run()` persists the user turn before the backstop counts it.
+ * (AC-20) guarded. A pure gate - it does NOT persist, trigger, or mint. The client transport's
+ * `sendMessages` delivers the turn to `.in` (triggering the run) and subscribes with wait (the only SDK
+ * path that streams a freshly-triggered follow-up live), refreshing its token via the `accessToken`
+ * callback; the agent's `run()` persists the user turn before the backstop counts it.
  */
 export async function sendMessage(
   conversationId: string,

@@ -31,10 +31,32 @@ test("Should_RestoreCardsFromStore_When_GuestReturns", async ({ page }) => {
   expect(analyticsCalls, `unexpected analytics calls:\n${analyticsCalls.join("\n")}`).toEqual([]);
 });
 
-// AC-1: reloading a settled conversation renders each message and each card EXACTLY once - the R1
-// persisted session makes a reload's `reconnectToStream` no-op (isStreaming not set), so nothing replays
-// the already-hydrated turns. The fixture holds 5 insight cards (4 charts + 1 table) across 7 turns.
-test("Should_RenderEachMessageOnce_When_ReloadedMidStreamAndSettled", async ({ page }) => {
+// AC-1: reloading a SETTLED conversation renders each message and each card EXACTLY once. R1's gate: a
+// settled persisted session (isStreaming:false) makes `resume` false, so useChat never calls
+// `reconnectToStream` - nothing replays the already-hydrated turns. This seeds that settled session AND
+// arms a distinctive `__CHAT_REPLAY__` tail, then asserts the tail NEVER streams: that is what bites the
+// gate (without it, a reload would replay the tail as duplicate bubbles). The fixture holds 5 insight
+// cards (4 charts + 1 table) across 7 turns.
+test("Should_RenderEachMessageOnce_When_ReloadedSettled", async ({ page }) => {
+  const REPLAY_MARKER = "SETTLED-REPLAY-SHOULD-NOT-APPEAR";
+  await page.addInitScript(
+    ({ sessionKey, sessionValue, replay }) => {
+      window.sessionStorage.setItem(sessionKey, sessionValue);
+      (window as unknown as { __CHAT_REPLAY__?: unknown }).__CHAT_REPLAY__ = replay;
+    },
+    {
+      sessionKey: `jobchat_session:${CHAT_ID}`,
+      sessionValue: JSON.stringify({ publicAccessToken: "e2e-tok", isStreaming: false }),
+      replay: [
+        { chunk: { type: "start", messageId: "settled-replay" } },
+        { chunk: { type: "text-start", id: "s" } },
+        { chunk: { type: "text-delta", id: "s", delta: REPLAY_MARKER } },
+        { chunk: { type: "text-end", id: "s" } },
+        { chunk: { type: "finish" } },
+      ] satisfies ScriptStep[],
+    },
+  );
+
   await page.goto(CHAT);
   await page.reload();
 
@@ -42,6 +64,9 @@ test("Should_RenderEachMessageOnce_When_ReloadedMidStreamAndSettled", async ({ p
   await expect(page.locator(".insight")).toHaveCount(5);
   await expect(page.locator("svg.recharts-surface")).toHaveCount(4);
   await expect(page.locator("table.data-table")).toHaveCount(1);
+
+  // The settled-session gate bit: the armed replay tail never streamed (resume=false -> no reconnect).
+  await expect(page.locator(".bubble.ai", { hasText: REPLAY_MARKER })).toHaveCount(0);
 
   // Each user question renders exactly once (a replayed tail would double one of these).
   for (const q of [
