@@ -65,7 +65,7 @@ describe.skipIf(!hasCreds)("assistant-turn persistence against real Postgres", (
     const reloaded = await store.getConversation(conv.id);
     expect(reloaded).not.toBeNull();
     const assistant = reloaded!.messages.find((m) => m.role === "assistant");
-    // F8: persistence stores the model's prose VERBATIM ("Google is out in front."), not the verdict - the
+    // Persistence stores the model's prose VERBATIM ("Google is out in front."), not the verdict - the
     // render layer suppresses it and buildModelHistory substitutes the verdict, so Postgres stays faithful.
     expect(assistant?.content).toBe("Google is out in front.");
     // The full card payload survives verbatim - verdict, chart series, SQL, meta - the single answer surface.

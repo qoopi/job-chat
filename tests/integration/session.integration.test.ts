@@ -140,7 +140,7 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(count[0].c).toBe(0); // nothing created
   });
 
-  // 024 testing audit (item 4): the landing handoff (startConversation) is turn 1 for a BRAND NEW
+  // The landing handoff (startConversation) is turn 1 for a BRAND NEW
   // conversation - a guest who already exhausted their per-day guestCap in an EARLIER conversation must
   // still be refused HERE, before any row for the new conversation is created (checkMessageGuards scopes
   // the cap per userId across ALL of the guest's conversations, not per-conversation, so this is not the

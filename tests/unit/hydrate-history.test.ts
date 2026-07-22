@@ -51,12 +51,12 @@ describe("hydrateHistory (the SDK hydrateMessages seam)", () => {
   // The id-dedupe case above only proves hydrateHistory's OWN output does not
   // double the row. It never drives that deduped return through the real production bridge (the SDK's
   // convertToModelMessages, then persistIncomingUserTurns) to prove the redelivered-id shape - turn-1's
-  // id-continuous arrival from 024 - does not increment the new-turn count and double-persist. This closes
+  // id-continuous arrival - does not increment the new-turn count and double-persist. This closes
   // that gap: same shape as the count-semantics test above, but the incoming wire message's id ALREADY
   // exists in the persisted store (not a new id), so persistIncomingUserTurns must see zero new turns.
   it("does not double-persist turn-1's id-continuous arrival (redelivered id => zero new turns)", async () => {
     const persisted = [{ id: "r1", role: "user" as const, content: "q1" }];
-    // 024's id continuity: the arrival send carries the SAME id startConversation already persisted.
+    // Id continuity: the arrival send carries the SAME id startConversation already persisted.
     const incoming: UIMessage[] = [{ id: "r1", role: "user", parts: [{ type: "text", text: "q1" }] }];
 
     const hydrated = hydrateHistory(persisted, incoming);

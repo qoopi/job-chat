@@ -13,7 +13,7 @@ import type { DataInsight } from "@shared/insight";
 import { closeAuthDialog, openAuthDialog } from "@/lib/auth-dialog";
 import { setAuthDialogOpen } from "@/lib/layers";
 
-// 017: Google-ONLY sign-in (email/password removed). The lazy auth dialog opens on a Sign-in tap AND at
+// Google-ONLY sign-in (email/password removed). The lazy auth dialog opens on a Sign-in tap AND at
 // the guest cap moment, offers ONLY "Continue with Google", and every dismiss (cancel / Esc / backdrop)
 // returns to the chat untouched. Esc layering: with the REAL dialog above an open LCP, Esc closes the
 // dialog only and leaves the LCP (interaction-spec "Priority of layers"). External boundaries mocked as

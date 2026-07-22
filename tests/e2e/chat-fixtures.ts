@@ -3,7 +3,7 @@ import type { StoredMessage } from "@/lib/chat-ui";
 import { FIXTURE_CONVERSATION, type ThreadItem } from "./conversation";
 
 // E2E resume fixtures (server side). In E2E mode the chat page resolves its initial conversation from
-// here instead of Postgres, so the built app renders a deterministic thread with no DB. The 005 static
+// here instead of Postgres, so the built app renders a deterministic thread with no DB. The static
 // fixture is reused verbatim (same cards, same order) so the existing chart / table / a11y e2e specs
 // keep passing once the page runs off the live path. Chip "used" markers are dropped - one-shot chip
 // state is now live session state, not persisted.

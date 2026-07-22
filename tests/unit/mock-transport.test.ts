@@ -58,7 +58,7 @@ describe("MockChatTransport - honors the caller's AbortSignal (AC-9)", () => {
   });
 });
 
-// R1/R4: after the manual cursor threading is gone, the mock's reconnect models the SDK's persisted-
+// After the manual cursor threading is gone, the mock's reconnect models the SDK's persisted-
 // session behavior, hydrated at construction (mirroring the real transport's `sessions` option read from
 // sessionStorage) - a settled turn no-ops on reload (no replay), a still-streaming turn resumes.
 describe("MockChatTransport - reconnectToStream honors the persisted session (R1)", () => {

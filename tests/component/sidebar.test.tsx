@@ -25,7 +25,7 @@ import { Sidebar } from "@/components/chat/Sidebar";
 // The signed-in sidebar is a real history - newest first, title + relative date,
 // active highlight on the current route, each row loads its conversation, New chat starts a fresh one,
 // and an empty account reads "No conversations yet". Guests keep the teaser + Sign in (unchanged). The
-// order itself is 012's store test; here we assert the sidebar renders what it is given, in order.
+// order itself is the store's own test; here we assert the sidebar renders what it is given, in order.
 
 const ago = (ms: number) => new Date(Date.now() - ms);
 const convs: Pick<Conversation, "id" | "title" | "created_at">[] = [

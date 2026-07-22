@@ -126,7 +126,7 @@ test("Should_ResumeStreamWithoutDuplicating_When_ReloadedMidStream", async ({ pa
 });
 
 // The first follow-up after a reload streams ONLY the new turn - no earlier turn is re-rendered,
-// and the new answer appears exactly once. After R1/R2 the transport owns the cursor, so `sendMessages`
+// and the new answer appears exactly once. The transport owns the cursor, so `sendMessages`
 // subscribes from the right point and the mock never prepends a prior tail.
 test("Should_StreamOnlyNewTurn_When_FollowUpAfterReload", async ({ page }) => {
   const newAnswer: ScriptStep[] = [

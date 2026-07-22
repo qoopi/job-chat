@@ -35,7 +35,7 @@ describe("AC-5 plain-answer conformance harness", () => {
     expect(countSentences("  ")).toBe(0);
   });
 
-  // The banned-opener list is the ONE home (010's eval-set imports it); the predicate flags a filler
+  // The banned-opener list is the ONE home (the eval-set imports it); the predicate flags a filler
   // opener at the start of a reply, matched at a word boundary so it never trips a real word.
   it("enumerates a non-empty banned-opener list", () => {
     expect(BANNED_OPENERS.length).toBeGreaterThan(0);

@@ -330,7 +330,7 @@ test("Should_IgnoreReenteredSend_When_SendAlreadyInFlight: two same-tick compose
   await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
 });
 
-// --- R2/R4: a follow-up delivers + watches via sendMessages, not the peekSettled reconnect ---
+// --- a follow-up delivers + watches via sendMessages, not the peekSettled reconnect ---
 
 test("follow-up send: streams via sendMessages (append + subscribe-with-wait), not the peekSettled reconnect", async () => {
   sendMessageMock.mockResolvedValue({ ok: true });
@@ -427,7 +427,7 @@ test("arrival (AC-11): turn 1 is delivered through the public send path - sendMe
   );
 });
 
-// 024 testing audit (item 3): the transport's `startSession` option (the lazy createStartSessionAction)
+// The transport's `startSession` option (the lazy createStartSessionAction)
 // runs INSIDE `sendMessages` on the first send for an uncached chatId - it is not a separately awaited
 // call ChatClient can catch. When it fails (network drop / a 500 from the action), the AI SDK's own
 // request loop (ai's `makeRequest`) catches the transport error internally, sets `useChat`'s `error`
@@ -466,8 +466,8 @@ test("arrival failure: a lazy startSession failure on turn 1 (network/500) surfa
   ).toHaveLength(1);
 });
 
-// 024 testing audit (item 5): deliverArrival's own effect only fires `if (pendingQuestion && !resume)` -
-// the `!resume` guard is what keeps a mid-arrival reload safe (020's session-persistence: the transport's
+// deliverArrival's own effect only fires `if (pendingQuestion && !resume)` -
+// the `!resume` guard is what keeps a mid-arrival reload safe (session-persistence: the transport's
 // onSessionChange writes `isStreaming: true` the moment turn 1's stream starts, so a reload before it
 // settles restores `resume=true`). Prove the guard actually wins even in the race where `?q=` has not
 // yet been stripped from the URL by the time of reload (pendingQuestion still present): the persisted

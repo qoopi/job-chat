@@ -239,7 +239,7 @@ describe("MessageList", () => {
 
   // A SYNTHESIZED failed turn (the errored turn had no response message) persists content "", so the row
   // hydrates no text part at all - belt and suspenders with the render-layer suppression. (A tool-failure
-  // that DID narrate persists the prose verbatim under F8; the render layer suppresses it - covered above.)
+  // that DID narrate persists the prose verbatim; the render layer suppresses it - covered above.)
   test("AC-25 resume: a synthesized error turn (empty content) hydrates with no prose part", () => {
     const stored: StoredMessage[] = [{ id: "a2", role: "assistant", content: "", parts: { kind: "system" } }];
     const messages = storeToUiMessages(stored);

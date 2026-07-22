@@ -66,7 +66,7 @@ describe("eval harness (offline smoke)", () => {
   });
 });
 
-// 027: the JOBCHAT_EVAL_IDS subset filter (fixes the dead env 022's testing flagged). A real id-subset
+// The JOBCHAT_EVAL_IDS subset filter (fixes the dead env earlier testing flagged). A real id-subset
 // filter so the spot-check the env name always promised actually works: match on case ids, report the
 // skipped count (no silent caps), unset = the full exam. Pure function, so covered offline.
 describe("selectEvalCases (JOBCHAT_EVAL_IDS subset filter)", () => {
