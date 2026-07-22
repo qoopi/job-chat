@@ -24,13 +24,8 @@ import {
   type RefusalPart,
 } from "./parts";
 
-// The agent's tool catalog: one tool per question shape, each a thin wrapper over analytics.runQuery
-// (the ONLY path to ClickHouse). On call a tool emits the loading skeleton, runs the parameterized
-// query, emits the filled data-insight part (same id -> the UI reconciles in place), and hands the
-// model a compact view. A failure is caught and taxonomized as a `system` error part rather
-// than thrown, so the agent keeps control. There is NO scope escape-hatch tool: report_unanswerable
-// is retired - the agent answers anything in plain prose then steers back
-// to jobs (prompt behavior), so the red error card is reserved for genuine SYSTEM failures.
+// The agent's tool catalog: one tool per question shape over analytics.runQuery (the ONLY path to
+// ClickHouse). A failure is caught and taxonomized as a `system` error part, never thrown.
 
 export const CATALOG_TOOL_NAMES = [
   "salary_distribution",
@@ -57,16 +52,13 @@ const DESCRIPTIONS: Record<TemplateName, string> = {
 };
 
 export type InsightPart = { type: "data-insight"; id: string; data: unknown };
-/** The postings card wire part (the search_postings emitter): `data-postings` + the strict payload. */
 export type PostingsEmitPart = { type: "data-postings"; id: string; data: unknown };
-/** The fit-intent invite wire parts (the request_profile emitter): the server picks which by identity. */
+/** The fit-intent invite wire parts: the server picks which by identity. */
 export type InviteEmitPart = {
   type: "data-auth-invite" | "data-profile-invite";
   id: string;
   data: unknown;
 };
-// Every part the agent writes to the chat stream: the tools emit insight/error/postings/invite; the
-// run-level guard backstop emits refusal (below).
 export type EmitPart = InsightPart | ErrorPart | RefusalPart | PostingsEmitPart | InviteEmitPart;
 export type { ErrorPart, RefusalPart };
 export type Emit = (part: EmitPart) => void;
@@ -74,25 +66,15 @@ export type Emit = (part: EmitPart) => void;
 export interface CatalogDeps {
   analytics: Analytics;
   emit: Emit;
-  /**
-   * The conversation identity kind (request_profile picks auth-invite for a guest, profile-invite for a
-   * signed-in account). Resolved per turn from the owner's `auth_user_id` (guard.ts's rule); optional so
-   * the six-tool tests need not pass it. Unset => the guest (sign-in) card - the fail-safe.
-   */
+  /** Identity kind (request_profile picks the card); unset => the guest sign-in card - the fail-safe. */
   callerKind?: CallerKind;
-  /**
-   * The conversation owner's structured profile (search_postings merges the model's search terms against
-   * it server-side). Resolved per turn; null/absent = no profile on file, so search_postings degrades to
-   * a "call request_profile" signal rather than searching. The profile object stays in this layer - it
-   * never reaches the ClickHouse path (AC-13); only DERIVED filter VALUES do.
-   */
+  /** The owner's structured profile (search_postings merges terms against it server-side); null = no profile.
+   *  SECURITY: the profile object stays in this layer, never reaching the ClickHouse path - only derived VALUES do. */
   profile?: Profile | null;
 }
 
 function catalogTool(name: TemplateName, deps: CatalogDeps) {
-  // Cast the indexed schema to one concrete Zod type: indexing by the TemplateName union otherwise
-  // collapses tool()'s input inference to `never`. Runtime is unaffected - analytics.runQuery
-  // re-validates params against the same schema.
+  // Cast to one concrete Zod type: indexing the union collapses tool()'s inference to `never`. Runtime re-validates.
   const inputSchema = TEMPLATE_PARAM_SCHEMAS[name] as z.ZodType<Record<string, unknown>>;
   return tool({
     description: DESCRIPTIONS[name],
@@ -102,9 +84,7 @@ function catalogTool(name: TemplateName, deps: CatalogDeps) {
       deps.emit({ type: "data-insight", id, data: buildSkeleton(id, name) });
       try {
         const result = await deps.analytics.runQuery(name, params);
-        // Empty result = plain mode (spec: one data-insight part per answer). Clear the skeleton with an
-        // empty marker so no dangling "No data" card is left - even across an internal retry - and hand
-        // the model a plain-prose signal instead of an empty insight card.
+        // Empty result = plain mode: clear the skeleton with an empty marker (no dangling card) + a plain-prose signal.
         if (result.rows.length === 0) {
           deps.emit(emptyPart(id));
           return emptyModelOutput(name);
@@ -113,9 +93,7 @@ function catalogTool(name: TemplateName, deps: CatalogDeps) {
         deps.emit({ type: "data-insight", id, data: insight });
         return toModelOutput(insight);
       } catch (err) {
-        // Never leak the raw error to the model or the user - tag it `system` and move on.
-        // But DO log it server-side (Trigger.dev captures console.error) so a prod failure is not
-        // invisible when the user only ever sees the taxonomized card.
+        // Never leak the raw error - tag it `system`; but log server-side so a prod failure isn't invisible.
         console.error(`[catalog:${name}] query failed`, err);
         deps.emit(errorPart(id, "system"));
         return { error: "The query failed - tell the user something went wrong and to try again." };
@@ -124,9 +102,7 @@ function catalogTool(name: TemplateName, deps: CatalogDeps) {
   });
 }
 
-// The seventh tool: query_postings composes a whitelisted aggregate (buildComposedSql) for any
-// question the six fixed templates do not fit, and lets the agent pick the chart type behind the
-// deterministic chartTypeForShape fallback. Its own parallel parts path - it is NOT a TemplateName.
+// The seventh tool: query_postings composes a whitelisted aggregate for questions the six templates don't fit.
 const COMPOSED_DESCRIPTION =
   "Compose a custom aggregate over the postings when none of the six fixed tools fit. Pick 1-2 measures " +
   "(count, median_salary, p25_salary, p75_salary), group by up to two dimensions (company, city, region, " +
@@ -135,14 +111,12 @@ const COMPOSED_DESCRIPTION =
   "employment_type, location_kind, days, min_salary, max_salary), and choose a chartType. Use for questions like 'top companies in the US', " +
   "'median salary by experience level in Berlin', or 'which roles are hiring most'.";
 
-// The composed tool input: the shared strict composed schema plus the agent's chartType pick.
 const ComposedToolInput = ComposedQueryParams.extend({
   chartType: ChartTypeSchema.or(z.literal("table")),
 });
 
 function composedTool(deps: CatalogDeps) {
-  // Cast to one concrete Zod type so tool()'s input inference does not collapse (as with the templates);
-  // runComposedQuery re-validates, and the tool re-parses below, so runtime safety is unaffected.
+  // Cast to one concrete Zod type so tool()'s inference doesn't collapse; re-validated below.
   const inputSchema = ComposedToolInput as unknown as z.ZodType<Record<string, unknown>>;
   return tool({
     description: COMPOSED_DESCRIPTION,
@@ -152,13 +126,10 @@ function composedTool(deps: CatalogDeps) {
       const { chartType: rawPick, ...queryParams } = input as {
         chartType: ChartType | "table";
       } & Record<string, unknown>;
-      // Skeleton from the agent's RAW pick (known at call time); the filled insight reconciles it in
-      // place under the same id once the served (shape-fit) type is known from the actual rows.
+      // Skeleton from the agent's RAW pick; the filled insight reconciles it under the same id once the served type is known.
       deps.emit({ type: "data-insight", id, data: buildComposedSkeleton(id, rawPick) });
       try {
-        // Re-validate + apply the schema defaults (dimensions/limit), then run the composed path (the
-        // ONLY route to ClickHouse for query_postings). The composed schema is strict, so chartType was
-        // stripped above; runComposedQuery re-parses too (idempotent).
+        // Re-validate + apply defaults, then run the composed path (the ONLY route to ClickHouse for query_postings).
         const params = ComposedQueryParams.parse(queryParams);
         const result = await deps.analytics.runComposedQuery(params);
         if (result.rows.length === 0) {
@@ -172,8 +143,7 @@ function composedTool(deps: CatalogDeps) {
         });
         const insight = buildComposedInsight({ id, params, chartType: served, result });
         deps.emit({ type: "data-insight", id, data: insight });
-        // Record the RAW chartType pick on the tool result: the eval harness scores the pick BEFORE any
-        // fallback (it reads it here); the served chart may differ where the fallback corrected an unfit pick.
+        // Record the RAW chartType pick: the eval scores the pick before any fallback; the served chart may differ.
         return { ...toModelOutput(insight), rawChartType: rawPick };
       } catch (err) {
         console.error(`[catalog:query_postings] query failed`, err);
@@ -184,16 +154,11 @@ function composedTool(deps: CatalogDeps) {
   });
 }
 
-// ---- Profile-driven fit tools (search_postings + request_profile) -------------------------------
-// The two fit-intent tools. request_profile invites a profile-less user to create one (the SERVER
-// picks the card from identity, so the model can never emit the wrong one). search_postings runs the
-// deterministic scorer and emits the postings card; the server MERGES the model's search terms against
-// the stored profile - experience + salary floor are always the profile's (the model cannot inject a
-// field the note did not give it), while title terms / city / remote refinements are honored.
+// The two fit-intent tools. request_profile: the SERVER picks the card from identity (the model can't emit
+// the wrong one). search_postings: the server MERGES terms with the profile - experience/salary floor are always the profile's.
 
-/** The model-facing search_postings input: the SEARCH INTENT + optional follow-up refinements. The
- *  authoritative filters (experience band, salary floor) are NOT here - the server takes them from the
- *  profile so the model cannot leak or invent them. Strict, so an unknown key is rejected. */
+/** Model-facing search_postings input: search intent + refinements only. The authoritative filters
+ *  (experience, salary floor) are NOT here - the server takes them from the profile (the model can't invent them). */
 const SearchPostingsToolInput = z
   .object({
     titleTerms: z.array(z.string().min(1)).max(10).optional(),
@@ -203,10 +168,8 @@ const SearchPostingsToolInput = z
   .strict();
 type SearchToolInput = z.infer<typeof SearchPostingsToolInput>;
 
-/** Merge the model's search terms with the stored profile into the scorer's params. SERVER-authoritative
- *  from the profile: `experience` (the seniority band) and `salaryMin` - the model cannot set these.
- *  Model-refinable (a follow-up narrows, else the profile's own value is used): `titleTerms`, `cities`,
- *  `remoteOk`. Pure, so the merge policy is unit-testable. `limit` is the emitter's hard cap (50). */
+/** Merge the model's terms with the profile. SERVER-authoritative (model cannot set): `experience`, `salaryMin`.
+ *  Model-refinable (else the profile's value): `titleTerms`, `cities`, `remoteOk`. `limit` is the hard cap (50). */
 export function mergeSearchParams(input: SearchToolInput, profile: Profile) {
   return {
     titleTerms: input.titleTerms && input.titleTerms.length > 0 ? input.titleTerms : profile.titles,
@@ -231,8 +194,7 @@ function searchPostingsTool(deps: CatalogDeps) {
     inputSchema: SearchPostingsToolInput,
     execute: async (rawInput, { toolCallId }) => {
       const id = toolCallId;
-      // No profile on file: the model should have routed to request_profile. Degrade safely - emit no
-      // card, signal the model to re-route (never a fabricated shortlist).
+      // No profile on file: degrade safely - emit no card, signal the model to re-route (never a fabricated shortlist).
       if (!deps.profile) {
         return { error: "No profile on file - call request_profile so the user can create one." };
       }

@@ -4,21 +4,12 @@ import type { Store } from "@shared/store";
 import type { GithubSignals } from "./github-profile";
 import { profileCardMessageId } from "./profile-card-id";
 
-// The profile extraction pipeline, pure over injected seams (store, github fetch, model `generate`) so
-// the whole thing is unit-testable without Trigger or Bedrock - the same split as createChatRun. It
-// reads the pending profiles row, enriches from GitHub (resume-only on failure), makes ONE model call
-// with the resume as a document block (PDF) or text plus the GitHub signals, then upserts the structured
-// profile and appends the deterministic-id profile card. The Trigger task (extract-profile.ts) wires the
-// real seams.
-
-/** A user message part: text, or a file (the resume PDF as a document block for the model to read). */
+/** A message part: text, or a file (the resume PDF as a document block). */
 type TextPart = { type: "text"; text: string };
 type FilePart = { type: "file"; mediaType: string; data: Uint8Array; filename?: string };
 export type ExtractionMessage = { role: "user"; content: (TextPart | FilePart)[] };
 
-/** The model seam: given the system + built messages, return the schema-valid profile (real: a Bedrock
- *  generateObject over ProfileSchema). Injected so tests assert the built prompt (the document block)
- *  and drive the retry without a live model. */
+/** The model seam: system + messages -> schema-valid profile (real: Bedrock generateObject). Injected for tests. */
 export type GenerateProfile = (args: {
   system: string;
   messages: ExtractionMessage[];
@@ -54,11 +45,7 @@ function githubBlock(g: GithubSignals): string {
   return lines.filter(Boolean).join("\n");
 }
 
-/**
- * Build the extraction prompt. A PDF resume is attached as a `file` part (the model parses the document
- * itself - the same ProfileSchema output as the paste path); pasted text goes inline. GitHub signals, when
- * present, are appended as a text block. The trailing instruction pins the output to the sources.
- */
+/** Build the extraction prompt: a PDF resume as a `file` part (model parses it), pasted text inline, GitHub as a text block. */
 export function buildExtractionPrompt(input: {
   resumeText?: string;
   resumePdf?: Uint8Array;
@@ -80,11 +67,8 @@ export function buildExtractionPrompt(input: {
   return { system: SYSTEM, messages: [{ role: "user", content }] };
 }
 
-/** Build the prompt and call the model, retrying ONCE only on a SCHEMA-INVALID generation (the model
- *  occasionally returns an object that fails ProfileSchema; a single re-ask recovers it). A transport /
- *  throttle error is re-thrown so the task's OWN retry policy (schemaTask maxAttempts, with backoff) owns
- *  it - the inner retry must not compound with generateObject.maxRetries + maxAttempts into a large
- *  model-call fan-out (S2). */
+/** Build the prompt + call the model, retrying ONCE only on a SCHEMA-INVALID generation (a single re-ask
+ *  recovers it). A transport/throttle error is re-thrown so the task's own retry policy owns it (bounded fan-out). */
 export async function extractProfileFields(
   generate: GenerateProfile,
   input: { resumeText?: string; resumePdf?: Uint8Array; githubSignals?: GithubSignals },
@@ -105,12 +89,8 @@ export interface ExtractionDeps {
   githubToken: string | undefined;
 }
 
-/**
- * Run the extraction for one save: read the pending row, enrich from GitHub (resume-only if the fetch
- * throws - AC-5), extract, upsert the structured profile, append the deterministic-id profile card, then
- * clear the transient PDF. Returns the profile, or `null` if the row was gone - deleted before the task
- * ran, or deleted mid-extraction (the profile write matched no row: skip the card so none is orphaned, S3).
- */
+/** Run the extraction for one save: read the row, enrich from GitHub (resume-only if the fetch throws),
+ *  extract, upsert, append the card, clear the PDF. Returns `null` if the row was gone (skip the orphan card). */
 export async function runProfileExtraction(
   deps: ExtractionDeps,
   payload: { userId: string; conversationId: string },
@@ -134,8 +114,7 @@ export async function runProfileExtraction(
     githubSignals,
   });
 
-  // The profile write is UPDATE ... WHERE user_id; if the profile was deleted mid-extraction it matches no
-  // row. Skip the card (and the PDF clear) so a deleted profile never gets an orphan card message (S3).
+  // The profile write matches no row if deleted mid-extraction: skip the card + PDF clear (no orphan card).
   const updated = await deps.store.saveExtractedProfile(payload.userId, profile);
   if (!updated) return null;
 
@@ -143,19 +122,14 @@ export async function runProfileExtraction(
     kind: "profile-card",
     profile,
   });
-  // Clear the transient PDF ONLY after the card append succeeds (S1). If anything above throws (a transient
-  // blip), schemaTask retries the whole run and the PDF is still present, so a PDF-only resume re-extracts
-  // instead of degrading to the no-resume branch. A PERMANENT failure clears it via the onFailure hook.
+  // Clear the transient PDF ONLY after the card append succeeds: a transient failure retries the whole run
+  // with the PDF still present (a PDF-only resume re-extracts); a permanent failure clears it via onFailure.
   await deps.store.clearResumePdf(payload.userId);
   return profile;
 }
 
-/**
- * Terminal-failure handler wired to the task's onFailure hook, which fires once ALL retries are exhausted
- * (a PERMANENT failure). Clears the transient resume PDF (it must never linger as long-term PII) and stamps
- * the failure marker `getMyProfile` surfaces, so the saving panel can stop polling. Pure over the injected
- * store - the task (extract-profile.ts) wires the real store seam.
- */
+/** Terminal-failure handler (onFailure, all retries exhausted): clears the transient resume PDF (never
+ *  long-term PII) and stamps the failure marker the poll surfaces, so the saving panel stops polling. */
 export async function markProfileExtractionFailed(store: Store, userId: string): Promise<void> {
   console.error(`[extract-profile] extraction permanently failed for ${userId} - clearing the transient PDF and stamping the failure marker`);
   await store.markExtractionFailed(userId);

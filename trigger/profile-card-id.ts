@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
 
-// The profile card's message id is DETERMINISTIC per conversation - a name-based (v5) UUID over the
-// conversation id. That is what makes the out-of-band card append safe: a re-save UPDATES the one card
-// (appendProfileCard's ON CONFLICT DO UPDATE keys on this id) and a double-save cannot duplicate it.
-// v5 (SHA-1, RFC 4122) rather than a random id so the value is reproducible from the conversation id
-// alone, and it lands in the canonical 8-4-4-4-12 shape the messages.id UUID column requires.
+// The profile card's message id is DETERMINISTIC per conversation (a v5 UUID over the conversation id): that makes the out-of-band append safe - a re-save UPDATES the one card, a double-save can't duplicate it.
 
 function uuidToBytes(uuid: string): Uint8Array {
   const hex = uuid.replace(/-/g, "");
@@ -18,8 +14,7 @@ function bytesToUuid(bytes: Uint8Array): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** RFC 4122 v5 UUID: `SHA1(namespaceBytes + nameBytes)`, first 16 bytes stamped with the version (5)
- *  and variant bits. `namespace` must be a UUID string. */
+/** RFC 4122 v5 UUID: SHA1(namespace + name), stamped with version 5 + variant; namespace must be a UUID. */
 export function uuidv5(name: string, namespace: string): string {
   const ns = uuidToBytes(namespace);
   const nameBytes = new TextEncoder().encode(name);
@@ -34,7 +29,6 @@ export function uuidv5(name: string, namespace: string): string {
   return bytesToUuid(out);
 }
 
-/** The one card per conversation: `uuidv5("profile-card", conversationId)`. */
 export function profileCardMessageId(conversationId: string): string {
   return uuidv5("profile-card", conversationId);
 }
