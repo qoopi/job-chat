@@ -13,9 +13,7 @@ import { InsightChart } from "./charts/InsightChart";
 import { DataTable } from "./charts/DataTable";
 import { CodeBlock } from "./CodeBlock";
 
-// The hero component: verdict with the number in <b>, Chart|Table tabs, one visual, follow-up chips,
-// and a source line whose "Show query" reveals the executed SQL. Fed a DataInsight (shared/insight.ts)
-// so the data source can swap without touching this component.
+// The hero component: verdict (number in <b>), Chart|Table tabs, one visual, chips, and a "Show query" source line.
 type Tab = "chart" | "table";
 
 function Verdict({ text }: { text: string }) {
@@ -43,48 +41,35 @@ export function InsightCard({
   insight: DataInsight;
   usedFollowups?: string[];
   onFollowup?: (text: string) => void;
-  /** Open this card's full table in the LCP, keyed by its STABLE message + part id. The
-   *  caller passes the ids, not a fresh closure per render, so the chart-subtree memo stays stable
-   *  without a ref hack. Fired from the over-threshold preview affordance and the capped bars "+ N more". */
+  /** Open this card's full table in the LCP by its STABLE message + part id (stable ids keep the chart-subtree memo stable). */
   onOpenLcp?: (messageId: string, partId: string) => void;
   messageId?: string;
   partId?: string;
-  /** A turn is in flight: follow-up chips are disabled while it streams, consistent with the composer's
-   *  streaming-disabled state, so a chip cannot fire a concurrent send that races the live turn. */
+  /** A turn is in flight: chips are disabled so one can't fire a concurrent send racing the live turn. */
   pending?: boolean;
 }) {
   const isChart = insight.kind === "chart";
-  // A single-scalar answer renders as the verdict sentence alone - no one-cell table body, no
-  // Chart|Table tabs. Chips and Show query stay (handled in the foot / body below).
+  // A single-scalar answer renders as the verdict alone - no table body, no tabs (chips + Show query stay).
   const scalar = isSingleScalar(insight);
   const [tab, setTab] = useState<Tab>(isChart ? "chart" : "table");
   const [sqlOpen, setSqlOpen] = useState(false);
 
   const rows = isChart ? insight.series : insight.rows;
-  // Any table VIEW over the row threshold renders as a 5-row preview + an "Open full
-  // table" affordance that opens the full body in the LCP - a table insight AND a chart card's Table tab
-  // (one rule for every table view). A chart's Chart tab is unaffected (it renders the chart, not rows).
+  // Any table VIEW over the threshold renders as a preview + "Open full table" (one rule for every table view).
   const previewTable = tab === "table" && tablePlacement(rows) === "lcp";
-  // Suppress the whole source line on an empty (sampleN 0) result: no "0 postings", no epoch freshness.
-  // A real answer always has sampleN > 0; this is defensive - an empty result now renders no card at all.
+  // Suppress the source line on an empty (sampleN 0) result (no "0 postings", no epoch freshness); defensive.
   const showSource = insight.meta.sampleN > 0;
   const rel = freshnessLabel(insight.meta.updatedAt);
-  // When the chart caps its bars at the top N, the source line discloses
-  // "showing top N" so the visible slice never poses as the whole market (the real total, sampleN, is
-  // still shown alongside). Only on the chart view - the Table tab shows every row (preview -> LCP).
+  // When the chart caps its bars, the source line discloses "showing top N" so the slice never poses as the whole market.
   const topN = barsChartCapsAt(insight);
   const showTopN = isChart && tab === "chart" && topN !== null;
 
-  // The caller passes stable ids, so `openTable` is stable on `[onOpenLcp, messageId, partId]` (all
-  // ref-stable across a turn) - the chartEl memo below can depend on it without recomputing the Recharts
-  // subtree at each turn boundary, and no ref indirection is needed. Fires only from user events.
+  // Stable ids keep `openTable` stable, so the chartEl memo can depend on it without recomputing the Recharts subtree.
   const openTable = useCallback(() => {
     if (onOpenLcp && messageId !== undefined && partId !== undefined) onOpenLcp(messageId, partId);
   }, [onOpenLcp, messageId, partId]);
 
-  // A stable element reference (keyed on the insight identity, not on tab/sqlOpen/onOpenTable) so React
-  // bails out of re-rendering the Recharts subtree when only the Show-query reveal or `pending` toggles.
-  // `openTable` is the capped bars chart's "+ N more" target (open the full series in the LCP).
+  // A stable element ref (keyed on insight identity) so React bails on re-rendering the Recharts subtree when only Show-query/pending toggles.
   const chartEl = useMemo(
     () =>
       insight.kind === "chart" ? (
@@ -98,8 +83,7 @@ export function InsightCard({
     [insight, openTable],
   );
 
-  // The tabs are an ARIA tablist so a screen reader announces the selected view. A table-only insight
-  // keeps the Chart|Table pair per the mock, with Chart disabled (there is no chart to switch to).
+  // ARIA tablist so a screen reader announces the selected view; a table-only insight keeps the pair with Chart disabled.
   const panelId = `${insight.id}-panel`;
   const chartTabId = `${insight.id}-tab-chart`;
   const tableTabId = `${insight.id}-tab-table`;
@@ -143,8 +127,7 @@ export function InsightCard({
         role={scalar ? undefined : "tabpanel"}
         aria-labelledby={scalar ? undefined : tab === "chart" ? chartTabId : tableTabId}
       >
-        {/* A single scalar is fully stated by the verdict - render no table/chart body, only the optional
-            Show-query reveal. */}
+        {/* A single scalar is fully stated by the verdict - no body, only the optional Show-query. */}
         {scalar ? null : isChart && tab === "chart" ? (
           chartEl
         ) : previewTable ? (
@@ -188,15 +171,13 @@ export function InsightCard({
           <span className="src">
             {insight.meta.sampleN.toLocaleString()}{" "}
             {insight.meta.openSet ? "open postings" : "postings"}
-            {/* Salary aggregates are filtered to one currency; disclose the base so a mixed-currency
-               corpus never reads as if the median spanned everything. */}
+            {/* Salary aggregates are one currency; disclose the base so a mixed corpus never reads as if the median spanned all. */}
             {insight.meta.currency
               ? ` · salaries in ${insight.meta.currency}`
               : ""}
-            {/* the chart is a top-N slice - say so beside the real total. */}
+            {/* the chart is a top-N slice - disclosed beside the real total. */}
             {showTopN ? ` · showing top ${topN}` : ""}
-            {/* freshness is Date.now()-relative, so a server/client render straddling a minute boundary
-               would mismatch on hydration - suppress the (benign) warning on just this text. */}
+            {/* freshness is Date.now()-relative; a render straddling a minute boundary mismatches on hydration - suppress the benign warning. */}
             <span suppressHydrationWarning>
               {rel ? ` — updated ${rel}` : ""}
             </span>{" "}

@@ -1,9 +1,5 @@
-// The client-safe twin of `trigger/profile-card-id.ts`: it MUST derive the IDENTICAL v5 UUID so the
-// card injected into the live thread after a save replaces (never duplicates) the one the extraction
-// task persisted under the same deterministic id (reconcileMessagesById folds them by id). The trigger
-// copy uses node:crypto (server); this one uses Web Crypto (`crypto.subtle`, async) so it runs in the
-// browser bundle. Both compute `SHA1(conversationIdBytes + "profile-card")` stamped v5 - proven equal by
-// a shared fixed vector in the tests.
+// Client-safe twin of `trigger/profile-card-id.ts`: it MUST derive the IDENTICAL v5 UUID, so the card injected
+// into the live thread after a save REPLACES (never duplicates) the one the task persisted. Web Crypto (async) here.
 
 function uuidToBytes(uuid: string): Uint8Array {
   const hex = uuid.replace(/-/g, "");
@@ -17,7 +13,6 @@ function bytesToUuid(bytes: Uint8Array): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** The one card per conversation: RFC-4122 v5 over `SHA1(conversationIdBytes + "profile-card")`. */
 export async function profileCardMessageId(conversationId: string): Promise<string> {
   const ns = uuidToBytes(conversationId);
   const name = new TextEncoder().encode("profile-card");

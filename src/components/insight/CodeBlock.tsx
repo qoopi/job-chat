@@ -2,13 +2,8 @@
 
 import { Fragment, useState, type ReactNode } from "react";
 
-// The Show-query reveal: the exact executed ClickHouse SQL in a theme-native code block (light grey
-// + dark tokens on light, dark grey + light tokens on dark) with a Copy action
-// ("Copied" for 1.5s). Read-only. Syntax tint (kw/fn/str/num) via a small tokenizer - React nodes only,
-// no dangerouslySetInnerHTML.
-// Pure keywords only: function names (count, round, max, now, toString, ...) are classified by the
-// `.fn` paren-check below (which runs first), so a bare identifier like a `count` column reads as an
-// identifier, not a keyword. Keeping those function-words here would be dead.
+// The Show-query reveal: the exact executed ClickHouse SQL, syntax-tinted via a small tokenizer (React nodes,
+// no dangerouslySetInnerHTML). Keywords only - function names are classified by the `.fn` paren-check below.
 const KEYWORDS = new Set([
   "SELECT",
   "FROM",
@@ -53,9 +48,7 @@ function highlight(sql: string): ReactNode[] {
           {tok}
         </span>
       );
-    // A function name is an identifier immediately followed by "(" (count, quantile, toString, ...).
-    // Checked before the keyword test so aggregate calls tint as functions, and so a called name is
-    // distinct from a bare column/table identifier (which stays plain -> --text).
+    // A function name = an identifier followed by "(". Checked before the keyword test so a called `count` tints as fn, a bare column stays plain.
     if (/^\w+$/.test(tok) && /^\s*\(/.test(tokens[i + 1] ?? ""))
       return (
         <span key={i} className="fn">

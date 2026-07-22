@@ -9,23 +9,16 @@ import {
 import type { Store, MessageRole } from "@shared/store";
 import { MAX_INPUT_CHARS } from "./guard";
 
-// The chat store's persistence seam: turning a completed turn's response message into the durable
-// assistant row and persisting the newly-arrived user turn(s) before the guard counts them. Split out
-// of trigger/parts.ts (the part vocabulary) so persistence has one home, separate from the mappings and
-// the history rebuild. Pure over an injected Store - unit-testable without Trigger or Bedrock.
-
 type MessagePartLike = { type: string; text?: string; id?: string; data?: unknown };
 type MessageLike = { id?: string; parts?: MessagePartLike[] };
 
-// A persisted card payload is a strict-valid insight, an error marker, or a refusal marker - anything
-// else (notably a loading skeleton, whose `status:"loading"` fails every branch) is dropped so a
-// failed/refused turn never resumes as a stuck spinner.
+// A persistable payload is a strict-valid insight/error/refusal marker; a loading skeleton is dropped so a failed/refused turn never resumes as a stuck spinner.
 function isPersistablePayload(data: unknown): boolean {
   if (DataInsightSchema.safeParse(data).success) return true;
-  if (ProfileCardSchema.safeParse(data).success) return true; // the out-of-band profile card
-  if (PostingsSchema.safeParse(data).success) return true; // the postings card (search_postings)
-  if (AuthInviteSchema.safeParse(data).success) return true; // the guest fit-intent invite
-  if (ProfileInviteSchema.safeParse(data).success) return true; // the signed-in fit-intent invite
+  if (ProfileCardSchema.safeParse(data).success) return true; // out-of-band profile card
+  if (PostingsSchema.safeParse(data).success) return true;
+  if (AuthInviteSchema.safeParse(data).success) return true;
+  if (ProfileInviteSchema.safeParse(data).success) return true;
   if (typeof data !== "object" || data === null) return false;
   const d = data as Record<string, unknown>;
   if (d.kind === "system" || d.kind === "unanswerable") return true; // error marker
@@ -33,24 +26,14 @@ function isPersistablePayload(data: unknown): boolean {
   return false;
 }
 
-/**
- * Extract the persisted assistant content + card payload from a completed turn's response message.
- * Text parts are joined; the card parts (`data-insight`, `data-error`, `data-refusal`) are de-duped
- * by id - last write wins, so a skeleton is superseded by its filled insight (success) or by the
- * error/refusal emitted under the same id (failure). Loading skeletons that were never superseded are
- * then dropped (they fail `isPersistablePayload`), so a failed or refused turn resumes as its error /
- * refusal card, never a stuck skeleton. Payload: a single object for the usual one-card answer, an
- * array if several, `null` for a plain text-only answer. The resume source.
- */
+/** Extract content + card payload from a turn's response. Card parts de-duped by id (last write wins), so a
+ *  skeleton is superseded or dropped; a failed turn resumes as its error/refusal card, never a spinner. */
 export function extractAssistantPersistence(message: MessageLike): {
   content: string;
   parts: unknown;
 } {
   const parts = message.parts ?? [];
-  // Persist the model's prose VERBATIM - what the assistant actually said.
-  // The card is the single answer surface at RENDER (MessageList suppresses the prose when a card renders)
-  // and the code-derived verdict is what the MODEL sees (buildModelHistory substitutes it for a card turn),
-  // so neither concern rewrites the stored content - Postgres stays a faithful record of the turn.
+  // Persist the model's prose VERBATIM; render suppression + the model-facing verdict happen elsewhere, so Postgres stays faithful.
   const content = parts
     .filter((p) => p.type === "text" && typeof p.text === "string")
     .map((p) => p.text)
@@ -77,22 +60,11 @@ export function extractAssistantPersistence(message: MessageLike): {
   return { content, parts: payload };
 }
 
-/** The card synthesized for a turn that errored with no (or no card-bearing) response message, so a
- *  failed turn always persists as a turn and resumes with its Retry affordance. */
+/** Card synthesized for an errored turn with no card, so a failed turn persists and resumes with Retry. */
 const SYSTEM_ERROR_CARD = { kind: "system" } as const;
 
-/**
- * Persist the assistant turn (content + card payload) via the store. Called from the agent's
- * `onTurnComplete` on normal, stopped, AND errored completion. Errors are turns: the SDK fires
- * onTurnComplete for an errored turn with `error` set and the response message UNDEFINED-or-partial, so
- * persistence branches on `error` rather than bailing on a missing response - a failed turn persists its
- * error card (synthesized when the response carried none) so a reload renders the card with Retry.
- *
- * The row is keyed by `responseMessage.id` (a uuid minted once for the turn) when a response is present,
- * so a replayed or re-persisted completion upserts into the same row instead of duplicating; a synthesized
- * error card has no response id, so it takes a fresh uuid. A completion with neither a response nor an
- * error (a manual pipe) persists nothing.
- */
+/** Persist the assistant turn (normal, stopped, OR errored). Errors are turns (the SDK fires with `error` set);
+ *  keyed by responseMessage.id (idempotent upsert), a synthesized error card takes a fresh uuid. */
 export async function persistAssistantTurn(
   store: Store,
   args: { conversationId: string; responseMessage?: MessageLike; error?: unknown },
@@ -107,9 +79,7 @@ export async function persistAssistantTurn(
   }
 
   const { content, parts } = extractAssistantPersistence(responseMessage);
-  // A partial errored turn whose response carried no persistable card still persists the error card, so
-  // it resumes with Retry rather than a bare unanswered question; a genuine answer card produced before
-  // the error is kept as-is.
+  // A partial errored turn with no card still persists the error card (resume with Retry); a real answer card is kept.
   const payload = failed && parts === null ? SYSTEM_ERROR_CARD : parts;
   await store.appendMessage(conversationId, "assistant", content, payload, responseMessage.id);
 }
@@ -127,28 +97,11 @@ function userMessageText(content: unknown): string {
     .join("");
 }
 
-/** A run's reconstructed history is model messages - only the role + user text matter for persistence. */
 export type RunMessage = { role: string; content?: unknown };
 
-/**
- * Persist the newly-arrived user turn(s) present in the run's reconstructed `messages` but not yet in
- * the store, BEFORE the guard backstop counts them. A follow-up is delivered by the
- * client transport's `sendMessages` (append to `.in` + subscribe-with-wait - the only SDK 4.5.4 path
- * that streams a freshly-triggered turn live; `reconnectToStream` forces peekSettled), so the user turn
- * is no longer persisted by the server action - the agent's `run()` is the single persist site.
- *
- * Count-based (persist the tail of user messages beyond what the store already holds), so it is a no-op
- * on turn-1 arrival (`startConversation` already persisted message #1 before triggering) and on
- * regenerate (no new user turn) - it never double-persists. Idempotent across a run retry for the same
- * reason: once persisted, the stored count catches up and the tail is empty.
- *
- * Input-size backstop (both-layers, mirrors the cap/budget guard): the client transport appends a
- * follow-up to `.in` with only a write-scoped token, bypassing the action's `TextSchema` gate. So an
- * over-length NEW turn is refused HERE - returning "too_long" and persisting NOTHING - before the
- * oversized payload can reach Postgres or Bedrock. The bound is the SAME `MAX_INPUT_CHARS` the action
- * enforces (imported from ./guard, no duplicate literal), applied to the trimmed text like `TextSchema`,
- * so the two layers cannot drift. `null` means the turn(s) were within bound and persisted (or a no-op).
- */
+/** Persist newly-arrived user turn(s) BEFORE the guard counts them - run() is the single persist site (the SDK
+ *  4.5.4 sendMessages path streams the new turn live). Count-based: no-op on turn-1/regenerate, idempotent on retry.
+ *  Over-length backstop: a too-long new turn is refused HERE ("too_long", persists NOTHING) via the same MAX_INPUT_CHARS. */
 export async function persistIncomingUserTurns(
   store: Store,
   chatId: string,
@@ -166,17 +119,8 @@ export async function persistIncomingUserTurns(
   return null;
 }
 
-/**
- * Build the authoritative history the SDK's `hydrateMessages` seam returns. Registering the seam
- * switches the SDK's snapshot machinery OFF - Postgres becomes the sole chat-history store - so this
- * return REPLACES the built-in snapshot+replay accumulator. It is deliberately RAW: the persisted rows as
- * UIMessages (row id preserved, content verbatim - NO coalescing, NO verdict substitution) followed by
- * any incoming wire turn not already stored (the hydrate branch merges by id but never auto-appends a new
- * one - the docs' canonical hook returns it itself). `createChatRun` still owns the MODEL-input rebuild
- * (`buildModelHistory` over the store), so the only consumers of this raw return are the SDK accumulator
- * and the user COUNT `persistIncomingUserTurns` reads - keeping it raw makes that count identical to the
- * pre-seam accumulator: an error-turn-between-users coalesce, which would drift the count, cannot arise.
- */
+/** History the SDK's hydrateMessages seam returns (snapshot machinery OFF, Postgres sole store). Deliberately
+ *  RAW - id preserved, content verbatim, NO coalescing - so the user COUNT stays identical (no coalesce drift). */
 export function hydrateHistory(
   persisted: readonly { id: string; role: MessageRole; content: string }[],
   incoming: readonly UIMessage[],

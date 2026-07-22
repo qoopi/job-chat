@@ -1,13 +1,7 @@
 import type { ChatSessionPersistedState } from "@trigger.dev/sdk/chat";
 
-// The browser-durable home for the Trigger chat transport's per-conversation session state. The
-// transport keeps that state - the scoped token, the `.out` cursor (`lastEventId`), and whether a turn
-// is streaming - in memory only, so a reload wipes it: `reconnectToStream` then has nothing to resume
-// from and a follow-up subscribes cursor-less, replaying the prior turn into the new answer. Persisting
-// it here, keyed per conversation, lets the transport hydrate on the next mount - a settled turn no-ops,
-// a live one resumes from the cursor. sessionStorage (per-tab, not localStorage) matches a session's
-// lifetime. Every accessor is SSR-guarded: this module is imported into client components that also
-// render on the server, where `window` is undefined.
+// Browser-durable home for the transport's per-conversation session state (token, `.out` cursor, streaming flag):
+// the transport keeps it in memory, so a reload would wipe it and replay the prior turn. sessionStorage (per-tab); every accessor SSR-guarded.
 
 const KEY_PREFIX = "jobchat_session:";
 
@@ -15,7 +9,6 @@ function keyFor(chatId: string): string {
   return `${KEY_PREFIX}${chatId}`;
 }
 
-/** The persisted session for a conversation, or undefined when none is stored (or on the server). */
 export function readPersistedSession(
   chatId: string,
 ): ChatSessionPersistedState | undefined {
@@ -23,9 +16,7 @@ export function readPersistedSession(
   try {
     const raw = window.sessionStorage.getItem(keyFor(chatId));
     if (!raw) return undefined;
-    // Same-origin, self-written state (our own onSessionChange), so no schema - but confirm the one
-    // load-bearing field before trusting the shape: a malformed entry reads as no persisted session
-    // rather than a bad cast that could hand a garbage token to the transport.
+    // Self-written state, so no schema - but confirm the load-bearing field so a malformed entry reads as no session, not a garbage token.
     const parsed: unknown = JSON.parse(raw);
     return parsed &&
       typeof parsed === "object" &&
@@ -37,11 +28,6 @@ export function readPersistedSession(
   }
 }
 
-/**
- * Persist (or, on null, clear) a conversation's session state. Wired to the transport's
- * `onSessionChange`, so it fires on token refresh, every `.out` cursor advance, and stream start/stop -
- * keeping the stored state fresh for a mid-stream reload. A null clears the key when the session closes.
- */
 export function writePersistedSession(
   chatId: string,
   session: ChatSessionPersistedState | null,
@@ -55,7 +41,6 @@ export function writePersistedSession(
   }
 }
 
-/** True when a persisted session is mid-stream, so the mount should resume it (drives useChat `resume`). */
 export function persistedSessionIsStreaming(chatId: string): boolean {
   return readPersistedSession(chatId)?.isStreaming === true;
 }

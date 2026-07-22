@@ -1,5 +1,4 @@
-// The streaming state: verdict shimmers and the chart block draws as data arrives - never a
-// spinner-only state. Same structure as the filled card so it reconciles in place.
+// The streaming skeleton: same structure as the filled card so it reconciles in place (never spinner-only).
 export function InsightCardSkeleton() {
   return (
     <div className="insight">

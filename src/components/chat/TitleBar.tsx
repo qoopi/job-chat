@@ -1,9 +1,6 @@
 import { AccountMenu } from "./AccountMenu";
 
-// The canvas title bar (48px). Left: the conversation title; "New chat" muted when empty.
-// Right: a guest sees an obvious "Sign in" button; a
-// signed-in user sees the account chip + menu (profile, dark mode, sign out). The title keeps the
-// `title-bar` test id so its text is asserted independently of the new right slot.
+// The canvas title bar: the conversation title left ("New chat" when empty), Sign in / account menu right.
 export function TitleBar({
   title,
   signedIn = false,

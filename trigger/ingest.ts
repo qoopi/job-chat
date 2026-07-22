@@ -3,7 +3,7 @@ import { createWriterClient } from "@shared/clickhouse";
 import { ingestPostings, type RowSink } from "@shared/ingest";
 import { createSearchnapplyClient, searchnapplyConfigFromEnv } from "@shared/searchnapply";
 
-// Scheduled ingest: searchnapply postings -> ClickHouse `postings`, every 6h.
+// Scheduled ingest: searchnapply postings -> ClickHouse `postings`.
 // Idempotent by table key (ReplacingMergeTree); the run's timestamp is the version.
 export const ingestPostingsTask = schedules.task({
   id: "ingest-postings",

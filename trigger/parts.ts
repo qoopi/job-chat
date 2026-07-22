@@ -10,12 +10,6 @@ import {
 import type { QueryResult, TemplateName } from "@shared/analytics";
 import type { MessageRole } from "@shared/store";
 
-// The agent's part vocabulary: turning an analytics QueryResult into the ONE `data-insight` part per
-// answer (built via the strict shared insight schema), the loading skeleton written before the tool
-// returns, the compact model-facing view, the taxonomized error/refusal parts, and the model-input
-// history rebuild. Pure - no Trigger/Bedrock imports - so every mapping is unit-testable.
-
-/** The designated visual per catalog tool (brief case table; Q5/Q6 pinned to donut). */
 const CHART_TYPE: Record<TemplateName, ChartType | "table"> = {
   salary_distribution: "histogram",
   salary_compare: "bars",
@@ -29,32 +23,25 @@ export function chartTypeFor(tool: TemplateName): ChartType | "table" {
   return CHART_TYPE[tool];
 }
 
-/** How many slices a donut stays readable at; a donut pick beyond this is corrected to bars. */
 const DONUT_MAX_SLICES = 6;
 
-/** A trend needs at least this many points to read as a line; fewer routes to a table. */
 export const MIN_TREND_POINTS = 3;
 
-/** Signal-quality thresholds. One exported home so the gate is tunable in one place. */
 export const FRAGMENTATION = {
-  // A ranked COUNT grouping is noise (no dominant group) when its leader holds LESS than this share of
-  // the sample - many near-equal tiny groups, e.g. 3,023 distinct titles over 3,257 postings (~1 each).
-  // Below the floor the verdict says "no single <dimension> dominates" instead of crowning the noise.
+  // A ranked COUNT grouping is noise when its leader holds LESS than this share of the sample (many
+  // near-equal tiny groups); below the floor the verdict says "no single X dominates" instead of crowning it.
   minLeaderShare: 0.1,
 } as const;
 
-/** Sum the `count` measure across the shown rows (the donut wholeness + fragmentation checks). */
 export function sumCount(rows: Record<string, unknown>[]): number {
   return rows.reduce((sum, r) => sum + num(r.count), 0);
 }
 
-/** A donut is honest only for a TRUE whole: a readable slice count whose slices sum to the sample (so
- *  the ring accounts for every posting, not a truncated top-N). Else the visual falls back to bars. */
+/** A donut is honest only for a TRUE whole (readable slice count summing to the sample); else fall back to bars. */
 function donutIsWhole(rowCount: number, sliceSum: number, sampleN: number): boolean {
   return rowCount <= DONUT_MAX_SLICES && sliceSum === sampleN;
 }
 
-/** The subset of the composed params (@shared/analytics ComposedQuery) the parts path reads. */
 export interface ComposedShape {
   measures: readonly string[];
   dimensions?: readonly string[];
@@ -71,29 +58,19 @@ export interface ComposedShape {
   days?: number;
   min_salary?: number;
   max_salary?: number;
-  // Carried so this shape matches the tool's parsed params: a custom `sort` is WHY rows[0] is not always
-  // the max (the agent can ask for `dir:"asc"`). The verdict verifies the extreme from the ROWS
-  // themselves (sort-agnostic), so it never trusts this field to decide the leader.
+  // A custom `sort` is WHY rows[0] is not always the max (the agent can ask dir:"asc"); the verdict verifies
+  // the extreme from the ROWS themselves, never trusting this field.
   sort?: { by: string; dir: "asc" | "desc" };
 }
 
-/**
- * The deterministic server-side chart fallback for query_postings. The agent proposes a
- * chartType (the RAW pick, recorded by the tool BEFORE this runs); this returns the SERVED type: the
- * pick when it fits the data shape, else the shape's fit type. Shapes: a time bucket is a trend; a
- * single categorical dimension is a comparison (bars), or a share-of-whole donut when the agent asked
- * for one AND it is a COUNT measure (a donut is a share of a whole, meaningful only for a
- * count; median/p25/p75 are never a donut) AND it stays readable (<= DONUT_MAX_SLICES slices); two
- * grouping keys (2 dims, or a dim + a bucket) or a bare aggregate are an entity-ish table. No histogram
- * branch - the value-bucket histogram shape is unreachable in the composed param space (v1
- * salary_distribution owns it).
- */
+/** Deterministic server-side chart fallback for query_postings: returns the SERVED type - the agent's raw
+ *  pick when it fits the data shape, else the shape's fit type (bucket->trend, one dim->bars or a true-whole
+ *  COUNT donut, two keys/bare aggregate->table). */
 export function chartTypeForShape(
   shape: { dimensions?: readonly string[]; bucket?: string; measures?: readonly string[] },
   rawPick: ChartType | "table",
   rowCount: number,
   // When provided, a donut additionally requires its slices to sum to the sample (a true whole).
-  // Absent (older callers / tests) leaves the wholeness invariant unchecked.
   wholeness?: { sliceSum: number; sampleN: number },
 ): ChartType | "table" {
   const dims = shape.dimensions?.length ?? 0;
@@ -101,12 +78,8 @@ export function chartTypeForShape(
   if (keys >= 2) return "table"; // a cross-tab / entity-ish result
   if (shape.bucket) return rowCount >= MIN_TREND_POINTS ? "trend" : "table"; // a trend needs >=3 points
   if (dims === 1) {
-    // Two measures on one categorical axis share no scale (a count next to a salary) - a table, never
-    // shared-axis bars.
+    // Two measures on one axis share no scale (a count next to a salary) - a table, not shared-axis bars.
     if ((shape.measures?.length ?? 1) >= 2) return "table";
-    // A donut only for a single COUNT measure that is a TRUE whole (slices sum to
-    // the sample) and stays readable (<= slice cap); any salary measure or a truncated/oversized share
-    // falls back to bars.
     const countShare = shape.measures?.length === 1 && shape.measures[0] === "count";
     const whole = !wholeness || donutIsWhole(rowCount, wholeness.sliceSum, wholeness.sampleN);
     return rawPick === "donut" && countShare && rowCount <= DONUT_MAX_SLICES && whole ? "donut" : "bars";
@@ -127,14 +100,12 @@ function num(value: unknown): number {
   return Math.round(Number(value));
 }
 
-/** The label copy for a group value used in verdicts/series - null or the empty string (searchnapply
- *  defaults absent city/level to null/"") reads as "unspecified", never a bare "null" leading a claim. */
+/** Label copy for a group value; a null/empty (searchnapply defaults absent city/level to null/"") reads as "unspecified". */
 export const LABEL_FALLBACK = "unspecified";
 function labelText(value: unknown): string {
   return value === null || value === undefined || value === "" ? LABEL_FALLBACK : String(value);
 }
 
-/** The code-derived verdict sentence - always carries the real headline number (honesty). */
 function verdictFor(tool: TemplateName, rows: Record<string, unknown>[], params: unknown, sampleN: number): string {
   if (rows.length === 0) {
     return tool === "latest_postings" ? "No matching roles found." : "No data matches that query yet.";
@@ -144,8 +115,7 @@ function verdictFor(tool: TemplateName, rows: Record<string, unknown>[], params:
     case "salary_distribution":
       return `The median salary is ${num(top.median)} across ${sampleN} postings.`;
     case "salary_compare": {
-      // With a single city row (the other city had no salaried postings) there is no comparison to
-      // report, so state the one median plainly rather than claiming it "pays more" than an absent one.
+      // Single city row (the other had no salaried postings): state the one median, don't claim it "pays more".
       if (rows.length < 2) return `The median salary in ${String(top.city)} is ${num(top.median)}.`;
       const second = rows[1];
       // Equal medians is a tie, not a win - "about the same" instead of a false "pays more".
@@ -155,8 +125,7 @@ function verdictFor(tool: TemplateName, rows: Record<string, unknown>[], params:
       return `${String(top.city)} pays more, with a median of ${num(top.median)}.`;
     }
     case "postings_trend": {
-      // sampleN (count over the same window) is the ONE denominator - never rows.reduce, which a LIMIT
-      // could truncate below the true total. It equals the source line's number by construction.
+      // sampleN is the ONE denominator - never rows.reduce, which a LIMIT could truncate below the true total.
       const days = (params as { days?: number })?.days;
       return days
         ? `${sampleN} new postings in the last ${days} days.`
@@ -165,8 +134,6 @@ function verdictFor(tool: TemplateName, rows: Record<string, unknown>[], params:
     case "top_companies":
       return `${String(top.company)} is hiring the most, with ${num(top.count)} openings.`;
     case "share_split":
-      // The share base is sampleN (the whole), not the sum of the shown slices (a LIMIT could truncate
-      // them) - so the verdict's "of N" always matches the source line.
       return `${String(top.label)} is the largest group at ${num(top.count)} of ${sampleN}.`;
     case "latest_postings":
       return `${rows.length} matching roles; the latest is ${String(top.title)}.`;
@@ -177,9 +144,6 @@ function verdictFor(tool: TemplateName, rows: Record<string, unknown>[], params:
   }
 }
 
-// ---- query_postings composed parts (a parallel path; NOT keyed by TemplateName) -------------------
-
-/** Human labels for the composed measures - used in the generic verdict. */
 const COMPOSED_MEASURE_LABEL: Record<string, string> = {
   count: "postings",
   median_salary: "median salary",
@@ -187,42 +151,29 @@ const COMPOSED_MEASURE_LABEL: Record<string, string> = {
   p75_salary: "75th-percentile salary",
 };
 
-/**
- * The generic composed verdict - leads with the key number (honesty), like the per-template verdicts.
- * Count is summable into a headline total; salary quantiles are not. For a single-dimension, non-bucketed
- * result (a ranking), the verdict names ONLY the extreme it can VERIFY from the rows: rows[0] as the
- * leader / highest when it genuinely holds the max, or as the fewest / lowest when it holds the min - the
- * agent can sort ASCENDING (the natural pick for "which city pays the LEAST"), so rows[0] is never assumed
- * to lead. When rows[0] is neither extreme (sorted by some other key), or for a trend / cross-tab / bare
- * aggregate, the verdict leads with the total (count) or the observed range (salary) - so no false
- * superlative is ever claimed.
- */
+/** The generic composed verdict (leads with the key number). For a single-dim ranking it names ONLY the
+ *  extreme it can VERIFY from the rows (the agent can sort ASC, so rows[0] is never assumed to lead); when
+ *  rows[0] is neither extreme it leads with the total/range - no false superlative is ever claimed. */
 function verdictForComposed(params: ComposedShape, rows: Record<string, unknown>[], sampleN: number): string {
   const measure = params.measures[0];
   const top = rows[0];
   const dimKey = params.dimensions?.[0];
-  // A ranking only when there is EXACTLY one dimension and no bucket. A 2-dim cross-tab's top row is one
-  // cell, NOT the group leader (its group's other rows can sum higher); a bucketed result is a trend.
-  // Neither is a ranking, so both aggregate instead of naming a leader.
+  // A ranking only for EXACTLY one dimension and no bucket: a 2-dim cross-tab's top row is one cell (not the
+  // group leader), a bucketed result is a trend - both aggregate instead of naming a leader.
   const ranked = params.dimensions?.length === 1 && !params.bucket;
 
   if (measure === "count") {
-    // sampleN (the whole) is the ONLY denominator - never rows.reduce, which the top-N LIMIT truncates
-    // (e.g. 20 shown titles of 3,257 postings), so "of N" would disagree with the source line.
+    // sampleN (the whole) is the ONLY denominator - never rows.reduce, which the top-N LIMIT truncates.
     if (ranked) {
       const counts = rows.map((r) => num(r.count));
       const topCount = num(top.count);
       // Verify from the rows which extreme rows[0] holds - a custom `sort:{dir:"asc"}` makes it the min.
       if (counts.every((c) => c <= topCount)) {
-        // rows[0] holds the max - about to name a leader. If it commands too small a share, the grouping
-        // is noise (many near-equal tiny groups, e.g. 3,023 distinct titles) - refuse to crown it.
         if (sampleN > 0 && topCount / sampleN < FRAGMENTATION.minLeaderShare) {
           const dimName = DIM_LABEL[dimKey!] ?? dimKey!;
           return `No single ${dimName} dominates - the largest, ${labelText(top[dimKey!])}, has ${topCount} of ${sampleN} postings.`;
         }
-        // A top-two tie (both above the floor) is not a leader - say "level", never a false "leads with"
-        // superlative. Rows are count-DESC,
-        // so rows[1] equal to the top means the lead is shared.
+        // A top-two tie (rows count-DESC, rows[1] == top) is shared, not a leader - say "level", not "leads with".
         const runnerUp = rows[1];
         if (runnerUp !== undefined && num(runnerUp.count) === topCount) {
           return `${labelText(top[dimKey!])} and ${labelText(runnerUp[dimKey!])} are level, each ${topCount} of ${sampleN} postings.`;
@@ -246,8 +197,7 @@ function verdictForComposed(params: ComposedShape, rows: Record<string, unknown>
   return `The ${label} ranges from ${Math.min(...values)} to ${Math.max(...values)} across the ${rows.length} shown.`;
 }
 
-// The "widen" chip drops the most-selective active filter. Precedence: role > company > city >
-// region > country > experience_level > employment_type > location_kind > days.
+// The "widen" chip drops the most-selective active filter (by this precedence).
 const WIDEN_PRECEDENCE = [
   "role", "company", "city", "cities", "region", "country",
   "experience_level", "employment_type", "location_kind", "days",
@@ -265,8 +215,7 @@ const WIDEN_PHRASE: Record<string, string> = {
   days: "over all time",
 };
 
-// The "pivot" chip swaps to an unused dimension - the first by this preference that is neither already
-// a dimension nor pinned to a single value by an equality filter.
+// The "pivot" chip swaps to an unused dimension (first by this preference not already used or filter-pinned).
 const PIVOT_PREFERENCE = [
   "company", "experience_level", "location_kind", "country", "city", "region", "employment_type", "title",
 ] as const;
@@ -301,11 +250,7 @@ function pivotChip(params: ComposedShape): string | null {
   return null;
 }
 
-/**
- * Two deterministic follow-up chips for a composed answer (no LLM): widen (drop the most-selective
- * filter) and pivot (swap to an unused dimension). Generic time / exploration chips backfill so a slice
- * with nothing to widen or no free dimension still yields exactly two distinct chips.
- */
+/** Two deterministic follow-up chips (no LLM): widen + pivot, with generic backfill to always yield two distinct chips. */
 export function composedFollowups(params: ComposedShape): string[] {
   const candidates = [
     widenChip(params),
@@ -329,16 +274,8 @@ export interface BuildInsightArgs {
   result: QueryResult;
 }
 
-/**
- * Build the single `data-insight` part for an answer: the code-derived verdict + designated visual +
- * the rows + follow-up chips + meta. Returned value is validated against the STRICT shared schema, so
- * an invalid shape fails loudly here (a test) rather than at persist/render time.
- */
-/**
- * Assemble + strict-validate a data-insight from its already-chosen visual, verdict, and follow-ups.
- * Shared by the template path (buildInsight) and the composed path (buildComposedInsight) so the meta
- * threading (incl. the openSet flag) and the chart/table discrimination have ONE home.
- */
+/** Assemble + strict-validate a data-insight from its visual/verdict/follow-ups (shared by the template and
+ *  composed paths). An invalid shape fails loudly HERE (a test), not at persist/render time. */
 function assembleInsight(
   id: string,
   visual: ChartType | "table",
@@ -346,9 +283,8 @@ function assembleInsight(
   followups: string[],
   result: QueryResult,
 ): DataInsight {
-  // openSet threads through only when the predicate applied; absent = full history, never injected.
-  // currency threads through only for a salary aggregate, so the source line + table can
-  // disclose the base and format the real currency instead of a hardcoded "$".
+  // openSet threads only when the predicate applied (absent = full history); currency only for a salary
+  // aggregate (so the source line/table disclose the real base). Neither is injected.
   const meta = {
     sql: result.sql,
     sampleN: result.meta.sampleN,
@@ -356,8 +292,7 @@ function assembleInsight(
     ...(result.meta.openSet ? { openSet: true } : {}),
     ...(result.meta.currency ? { currency: result.meta.currency } : {}),
   };
-  // A chart's group labels are coalesced (a null/empty city or level reads as "unspecified", never a
-  // bare null in the axis); a table keeps its cells verbatim (DataTable renders a null cell as "-").
+  // Chart labels are coalesced (null/empty -> "unspecified"); a table keeps cells verbatim (DataTable shows "-").
   const data = (visual === "table" ? result.rows : coalesceSeriesLabels(result.rows)) as DataPoint[];
   const candidate =
     visual === "table"
@@ -366,9 +301,7 @@ function assembleInsight(
   return DataInsightSchema.parse(candidate);
 }
 
-/** Replace null/empty values in a chart's LABEL columns (any column that holds a string somewhere) with
- *  "unspecified", so a missing group label never renders as a blank/null axis tick. Numeric measure
- *  columns are never touched. */
+/** Coalesce null/empty LABEL-column values to "unspecified" so no group label renders blank; measures untouched. */
 function coalesceSeriesLabels(rows: Record<string, unknown>[]): Record<string, unknown>[] {
   if (rows.length === 0) return rows;
   const labelKeys = Object.keys(rows[0]).filter((k) => rows.some((r) => typeof r[k] === "string"));
@@ -383,8 +316,7 @@ function coalesceSeriesLabels(rows: Record<string, unknown>[]): Record<string, u
 export function buildInsight({ id, tool, params, result }: BuildInsightArgs): DataInsight {
   const rows = result.rows;
   const sampleN = result.meta.sampleN;
-  // The pinned template visual, corrected for signal quality: a trend with too few points
-  // becomes a table; a pinned donut (share_split) that is not a readable true whole becomes bars.
+  // The pinned template visual, signal-corrected: too-few-point trend -> table; non-whole donut -> bars.
   let visual = chartTypeFor(tool);
   if (visual === "trend" && rows.length < MIN_TREND_POINTS) visual = "table";
   if (visual === "donut" && !donutIsWhole(rows.length, sumCount(rows), sampleN)) visual = "bars";
@@ -394,16 +326,11 @@ export function buildInsight({ id, tool, params, result }: BuildInsightArgs): Da
 export interface BuildComposedInsightArgs {
   id: string;
   params: ComposedShape;
-  /** The SERVED chart type (already shape-corrected via chartTypeForShape). */
   chartType: ChartType | "table";
   result: QueryResult;
 }
 
-/**
- * Build the single data-insight for a query_postings answer: the generic composed verdict + the served
- * chart type + the rows + deterministic follow-ups + meta. The parallel of buildInsight for the seventh
- * tool - it does NOT go through the TemplateName-keyed maps, so no faked template entry is required.
- */
+/** Build the data-insight for a query_postings answer (parallel to buildInsight; not TemplateName-keyed). */
 export function buildComposedInsight({
   id,
   params,
@@ -419,7 +346,6 @@ export function buildComposedInsight({
   );
 }
 
-/** The loading part written first (same id as the filled insight, so the UI reconciles in place). */
 export interface SkeletonPart {
   id: string;
   kind: "chart" | "table";
@@ -437,18 +363,12 @@ export function buildSkeleton(id: string, tool: TemplateName): SkeletonPart {
   return skeletonFor(id, chartTypeFor(tool));
 }
 
-/** The composed tool's loading skeleton, built from the agent's chartType pick (known at call time). */
 export function buildComposedSkeleton(id: string, chartType: ChartType | "table"): SkeletonPart {
   return skeletonFor(id, chartType);
 }
 
-/**
- * The marker a tool writes when its query matched NO rows. An empty result renders NO card - the answer
- * is plain prose (mode selection: empty result = plain mode). Written under the tool's part id so it
- * SUPERSEDES the loading skeleton in place (data parts reconcile last-write-wins by id), leaving no
- * dangling card. `status:"empty"` classifies as neither a valid insight nor an error/refusal, so the UI
- * renders nothing and `isPersistablePayload` drops it - the empty turn resumes as its plain prose alone.
- */
+/** The marker a tool writes for a 0-row result: renders NO card (plain-prose answer). Same id as the skeleton
+ *  so it supersedes it; classified as neither insight nor error, so it renders nothing and isn't persisted. */
 export interface EmptyPart {
   type: "data-insight";
   id: string;
@@ -459,10 +379,7 @@ export function emptyPart(id: string): EmptyPart {
   return { type: "data-insight", id, data: { status: "empty" } };
 }
 
-/**
- * The compact model-facing signal for an empty (0-row) tool result: no postings matched, so the model
- * must answer in plain prose (no chart, no invented numbers) rather than narrate a retry or emit a card.
- */
+/** Model-facing signal for a 0-row result: answer in plain prose, no chart, no invented numbers. */
 export function emptyModelOutput(tool: string): { empty: true; tool: string; note: string } {
   return {
     empty: true,
@@ -471,23 +388,18 @@ export function emptyModelOutput(tool: string): { empty: true; tool: string; not
   };
 }
 
-/** The entity labels of a result: the first string column's values (companies/cities/titles/levels),
- *  capped so the model view stays lean. Grounds the model's tool-loop reasoning (chips, follow-ups) in
- *  the entities it actually got back - the prompt forbids naming any entity absent from this list. */
+/** Entity labels (first string column, capped) that ground the model's reasoning in what it got back -
+ *  the prompt forbids naming any entity absent from this list. */
 const MODEL_LABEL_CAP = 12;
 function rowLabels(rows: DataPoint[]): string[] {
   const first = rows[0];
   if (!first) return [];
-  // The label column decision has one home (principles 8): the same helper the chart reading uses, so
-  // the model's labels and the chart's label column can never diverge on a null-in-row-0 label.
+  // One home for the label-column decision (shared with the chart reading), so labels never diverge.
   const key = labelKeyOf(rows);
-  // No non-numeric label column (all measures): no entities to ground the model on.
-  if (typeof first[key] === "number") return [];
+  if (typeof first[key] === "number") return []; // no non-numeric label column: no entities to ground on
   return rows.slice(0, MODEL_LABEL_CAP).map((r) => labelText(r[key]));
 }
 
-/** A compact view for the model - the verdict + counts + row LABELS (never the full rows), so its
- *  tool-loop reasoning is grounded in the real entities without bloating context. */
 export function toModelOutput(insight: DataInsight): {
   verdict: string;
   visual: ChartType | "table";
@@ -511,11 +423,7 @@ export interface ErrorPart {
   data: { kind: ErrorKind };
 }
 
-/**
- * The error part. `system` = a tool/infra failure ("something went wrong on my side");
- * `unanswerable` = a question the data cannot answer. The user-facing copy lives in the UI;
- * the agent only tags the kind so retry/copy can branch. `ErrorKind` is defined in `@shared/insight`.
- */
+/** The error part: `system` = tool/infra failure, `unanswerable` = the data cannot answer; UI owns the copy. */
 export function errorPart(id: string, kind: ErrorKind): ErrorPart {
   return { type: "data-error", id, data: { kind } };
 }
@@ -526,23 +434,15 @@ export interface RefusalPart {
   data: { reason: RefusalReason };
 }
 
-/**
- * The refusal part (cap / daily budget, plus `too_long` for an over-length turn), streamed
- * by the agent-side backstop when a turn is refused before the model. A DISTINCT taxonomy from
- * `data-error`: not a failure, but a polite limit - the client renders it like the server action's
- * typed refusal, not the error card. `RefusalReason` is defined in `@shared/insight`.
- */
+/** The refusal part (cap/budget/too_long), streamed before the model. Distinct from data-error: a polite limit, not a failure. */
 export function refusalPart(id: string, reason: RefusalReason): RefusalPart {
   return { type: "data-refusal", id, data: { reason } };
 }
 
-/** A model-input message: role + text content - the alternating history the model replays each turn. */
 export type ModelMessage = { role: MessageRole; content: string };
 
-/** The text the MODEL sees for a persisted turn: for an assistant CARD
- *  turn the code-derived VERDICT read off the persisted card (the honest headline, never the model's own
- *  possibly-fabricated prose), or "" when the card carries no verdict (an error/refusal card - the card
- *  itself is the surface); a user turn or a card-less assistant turn keeps its stored content verbatim. */
+/** The text the MODEL sees per turn: an assistant CARD turn contributes the code-derived VERDICT (never the
+ *  model's own prose), "" for an error/refusal card; user / card-less turns keep their content verbatim. */
 function modelFacingContent(m: { role: MessageRole; content: string; parts?: unknown }): string {
   if (m.role !== "assistant" || m.parts == null) return m.content;
   const payloads = Array.isArray(m.parts) ? m.parts : [m.parts];
@@ -555,28 +455,12 @@ function modelFacingContent(m: { role: MessageRole; content: string; parts?: unk
   return verdicts.length > 0 ? verdicts.join(" ") : "";
 }
 
-/**
- * Rebuild the model-input history for a turn from the store's persisted conversation - the SOURCE OF
- * TRUTH. The SDK reconstructs its cross-turn model input from the durable session
- * replay, which across a continuation boot carries the prior USER messages but NOT their ASSISTANT
- * answers; the model then sees a pile of unanswered questions and re-answers every one. Postgres holds
- * the full, correct history (persisted by `startConversation`, `persistIncomingUserTurns`, and
- * `persistAssistantTurn`), so the durable run rebuilds the model input from it instead of trusting the
- * SDK replay - turn N gets the full alternating user+assistant history with the newest user message as
- * the sole trailing turn.
- *
- * The model-facing content is derived per turn (`modelFacingContent`) - a card turn contributes its
- * code-derived VERDICT (the card payload is a UI artifact; the honest headline is what the model should
- * see, never the model's own prose), an error/refusal card contributes "", and a plain turn its verbatim
- * text. Empty-derived rows are then dropped so an errored/refused turn never emits an invalid empty model
- * message.
- *
- * Dropping an empty error/refusal row can leave two SAME-ROLE rows adjacent - e.g. an errored turn
- * between two user questions rebuilds as user,user - which Bedrock's strict role-alternation rejects.
- * So after the empty-drop, consecutive same-role rows are COALESCED into one (their
- * text joined). This heals only the rebuilt model input; persistence is untouched, so no schema/migration
- * change - and a normally-alternating history is unaffected.
- */
+/** Rebuild the model-input history from the store (the SOURCE OF TRUTH): the SDK's cross-turn replay carries
+ *  prior USER messages but NOT their ASSISTANT answers, so the model would re-answer every question. Per turn:
+ *  modelFacingContent (a card turn -> its verdict, error/refusal -> "", plain -> verbatim); empty rows dropped.
+ *  Dropping an empty error/refusal row can leave two SAME-ROLE rows adjacent (user,user), which Bedrock's strict
+ *  role-alternation REJECTS - so consecutive same-role rows are COALESCED (text joined). Heals only the model
+ *  input; persistence is untouched. */
 export function buildModelHistory(
   messages: { role: MessageRole; content: string; parts?: unknown }[],
 ): ModelMessage[] {

@@ -1,20 +1,11 @@
 import type { DataInsight, DataPoint, ErrorKind, RefusalReason } from "@shared/insight";
 import { labelKeyOf } from "@shared/insight";
 
-// The error / refusal taxonomy lives in `@shared/insight` (its one home); re-exported here so the UI copy
-// helpers and their callers keep importing the kinds from the insight-format layer.
 export type { ErrorKind, RefusalReason };
 
-// The label-column decision has one home in `@shared/insight` (principles finding 8) - re-exported so the
-// chart components keep reading it from this layer while trigger/parts.ts reads the same helper.
 export { labelKeyOf };
 
-// Pure presentation helpers for the insight surfaces. Kept free of React/"use client" so the copy
-// contracts and the chart series-reading conventions are unit-testable in isolation.
-
-// A single-measure ("vertical") bar chart of many long, near-unique titles used to smear
-// its category labels into an unreadable stack. The fix caps the visible bars at this count; more than
-// this renders the top N plus a "+ N more" affordance into the LCP table.
+// Cap visible bars: many long near-unique titles smear into an unreadable stack; beyond this, top N + a "+ N more" LCP affordance.
 export const BARS_CAP = 8;
 
 /** Truncate a long category label for the chart axis (the full label rides in the data + tooltip). */
@@ -22,12 +13,7 @@ export function truncateLabel(label: string, max = 26): string {
   return label.length > max ? `${label.slice(0, max)}…` : label;
 }
 
-/**
- * A single-scalar answer - a one-row, one-cell table whose only content is the number the
- * verdict already states (a no-dimension single-measure query: `{ count: N }`, `{ median_salary: N }`).
- * Rendered as the verdict sentence alone: a one-cell table card is degenerate. Charts and multi-cell
- * tables are never scalars.
- */
+/** A single-scalar answer (one-row, one-cell table): rendered as the verdict sentence alone (a one-cell card is degenerate). */
 export function isSingleScalar(insight: DataInsight): boolean {
   return (
     insight.kind === "table" &&
@@ -36,12 +22,7 @@ export function isSingleScalar(insight: DataInsight): boolean {
   );
 }
 
-/**
- * When a bars insight renders as a capped top-N vertical chart, the number of bars shown (BARS_CAP);
- * null otherwise (grouped/multi-measure bars, a non-bars chart, or a series at/under BARS_CAP). Lets the
- * source line disclose "showing top N" in agreement with the chart, never letting the visible slice pose
- * as the whole market.
- */
+/** Bars shown when a bars chart is capped top-N (BARS_CAP), else null - so the source line can disclose "showing top N". */
 export function barsChartCapsAt(insight: DataInsight): number | null {
   if (insight.kind !== "chart" || insight.chartType !== "bars") return null;
   const labelKey = labelKeyOf(insight.series);
@@ -49,15 +30,12 @@ export function barsChartCapsAt(insight: DataInsight): number | null {
   return insight.series.length > BARS_CAP ? BARS_CAP : null;
 }
 
-/** Distinct copy for a system failure vs an unanswerable question. Never a raw error. */
 export function errorCopy(kind: ErrorKind): string {
   return kind === "system"
     ? "Something went wrong on my side - try again"
     : "I could not answer that - try rephrasing";
 }
 
-/** A polite limit notice (not an error). `too_long` is the agent-run input-size backstop (a payload
- *  past MAX_INPUT_CHARS reaching `.in` directly). */
 export function refusalCopy(reason: RefusalReason): string {
   if (reason === "guest_cap")
     return "You have reached the guest message limit. Sign in to keep going.";
@@ -66,8 +44,7 @@ export function refusalCopy(reason: RefusalReason): string {
   return "The service has reached today's message limit. Try again tomorrow.";
 }
 
-// Symbols for the currencies the corpus is likely to carry; anything else prefixes its ISO code
-// ("CHF 180k"), so the amount is never mislabeled with a "$" it is not in.
+// Currency symbols; anything else prefixes its ISO code ("CHF 180k") so an amount is never mislabeled with a "$".
 const CURRENCY_SYMBOL: Record<string, string> = {
   USD: "$",
   EUR: "€",
@@ -76,8 +53,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   AUD: "$",
 };
 
-/** Money for tables and axes: whole thousands read as <sym>Nk, smaller values in full. Defaults to USD
- *  so existing callers are unchanged; a salary insight passes the real currency it was filtered to. */
+/** Money: whole thousands as <sym>Nk, smaller in full. Defaults to USD; a salary insight passes its real currency. */
 export function formatMoney(value: number, currency = "USD"): string {
   const n = Math.round(value);
   const prefix = CURRENCY_SYMBOL[currency] ?? `${currency} `;
@@ -85,18 +61,12 @@ export function formatMoney(value: number, currency = "USD"): string {
   return `${prefix}${n}`;
 }
 
-/** The USD-pinned money formatter (the salary histogram is inherently one currency). */
 export function formatUsd(value: number): string {
   return formatMoney(value, "USD");
 }
 
-/**
- * Data-freshness label ("just now" / "5m ago" / "3h ago" / "2d ago") from a ClickHouse timestamp.
- * Returns "" when the timestamp is unparseable OR clearly a placeholder (pre-2000): `max(ingested_at)`
- * over an EMPTY result set comes back as the 1970 epoch, which must never render as "20654d ago". The
- * source line is also suppressed entirely when sampleN is 0 (see InsightCard) - this is the second line
- * of defense so any pre-2000 timestamp is dropped even where a count is shown.
- */
+/** Data-freshness label from a ClickHouse timestamp; "" when unparseable or pre-2000, because max(ingested_at)
+ *  over an EMPTY result set is the 1970 epoch (must never render as "20654d ago"). */
 export function freshnessLabel(chTs: string): string {
   const parsed = Date.parse(
     chTs.includes("T") ? chTs : `${chTs.replace(" ", "T")}Z`,
@@ -115,12 +85,9 @@ function isNumeric(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
-// `n` is a SAMPLE-SIZE context column (salary_compare returns {city, median, n}), never a series to
-// plot - a count of ~3 beside a median of ~180000 would be an invisible, misleading second bar. Excluded
-// from the plottable measures so BarsChart never renders it as a grouped series.
+// `n` is a SAMPLE-SIZE context column, never a series to plot (a count beside a median would be a misleading second bar).
 const CONTEXT_KEYS = new Set(["n"]);
 
-/** Every numeric measure column, in row order, excluding the label and sample-size context (`n`). */
 export function valueKeysOf(rows: DataPoint[], labelKey: string): string[] {
   const first = rows[0] ?? {};
   return Object.keys(first).filter(
@@ -128,22 +95,18 @@ export function valueKeysOf(rows: DataPoint[], labelKey: string): string[] {
   );
 }
 
-// When a row carries several measures (e.g. {median, n}) the headline one wins; a bare {label, count}
-// falls through to its single measure. (`n` is excluded from the plottable set above.)
+// When a row carries several measures the headline one wins; a bare {label, count} falls through to its single measure.
 const MEASURE_PRIORITY = ["median", "value", "amount", "total", "count"];
 
-/** The single measure a one-series chart plots: the highest-priority numeric column present. */
 export function valueKeyOf(rows: DataPoint[], labelKey: string): string {
   const keys = valueKeysOf(rows, labelKey);
   const preferred = MEASURE_PRIORITY.find((p) => keys.includes(p));
   return preferred ?? keys[0] ?? "value";
 }
 
-// The headline number token: money ($182k), percent (46%), or grouped count (1,204). The verdict card
-// wraps this in <b> (weight 700, 1.14em) so the number is the hero, wherever it sits in the sentence.
+// The headline number token (money/percent/count); the verdict card wraps it in <b> so the number is the hero.
 const NUMBER_RE = /\$?\d[\d,]*(?:\.\d+)?%?k?/;
 
-/** Split a verdict into [before, number, after] around its first number token, or null if none. */
 export function splitFirstNumber(
   text: string,
 ): [string, string, string] | null {

@@ -4,16 +4,14 @@ import { useMemo, useState } from "react";
 import type { DataPoint } from "@shared/insight";
 import { formatMoney } from "@/lib/insight-format";
 
-// The fifth primitive: a sortable data table (kind:"table", and the Table tab of any chart insight).
-// Header click cycles none -> desc -> asc (element-states board). No apply/save link cells.
+// A sortable data table (kind:"table" + the Table tab of any chart). Header click cycles none -> desc -> asc.
 type Dir = "none" | "desc" | "asc";
 
 function humanize(key: string): string {
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// `bucket` is the salary-histogram bucket floor (a numeric currency amount) - format it as money too.
-// A composed time bucket is a date STRING, so it never reaches the numeric money branch.
+// `bucket` is a numeric salary floor - format as money; a composed time bucket is a date STRING (never hits the money branch).
 function isMoneyKey(key: string): boolean {
   return /salary|median|pay|target|bucket/i.test(key);
 }
@@ -57,9 +55,7 @@ export function DataTable({ rows, currency = "USD" }: { rows: DataPoint[]; curre
             {columns.map((key) => {
               const active = sortKey === key && dir !== "none";
               const numeric = typeof rows[0]?.[key] === "number";
-              // aria-sort exposes the sort state to assistive tech; the <button> makes the control
-              // keyboard-operable (WCAG 2.1.1 / 4.1.2). The label+glyph stay inside the button so the
-              // columnheader's accessible name still reads "Published At ▾" etc.
+              // aria-sort exposes sort state to assistive tech; the <button> makes it keyboard-operable (WCAG). Label+glyph stay inside for the accessible name.
               const ariaSort = active ? (dir === "desc" ? "descending" : "ascending") : "none";
               return (
                 <th

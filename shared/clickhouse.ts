@@ -4,20 +4,14 @@ import { fileURLToPath } from "node:url";
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
 import { z } from "zod";
 
-// The ingestion path validates only its own ClickHouse slice, not the whole env:
-// the full getEnv() also requires AWS_* keys that local dev provides via AWS_PROFILE,
-// and ingestion touches neither AWS nor Bedrock (ISP - don't couple to what it can't use).
-// Exported so shared/env.ts composes the full env schema from the per-domain slices instead of
-// re-declaring the same keys. Additive - the ingestion path
-// still parses it the same way below.
+// Validates only the ClickHouse slice (ISP) - ingestion needs no AWS/Bedrock creds; env.ts composes it in.
 export const ClickhouseEnvSchema = z.object({
   CLICKHOUSE_URL: z.string().min(1),
   CLICKHOUSE_USER: z.string().min(1),
   CLICKHOUSE_PASSWORD: z.string().min(1),
 });
 
-// ClickHouse Cloud idles the service and its wake exceeds the client's 30s request_timeout default,
-// so the first query after idle must survive the wake - both clients allow 60s per request.
+// ClickHouse Cloud idles the service; its wake exceeds the client's 30s default, so allow 60s per request.
 export const CLICKHOUSE_REQUEST_TIMEOUT_MS = 60_000;
 
 // The ingestion writer path uses the default ClickHouse user.
@@ -33,8 +27,7 @@ export function createWriterClient(
   });
 }
 
-// The analytics read path uses the dedicated read-only user `jobchat_ro` (SELECT on postings only).
-// Validates only its own slice (ISP) - CLICKHOUSE_URL + the RO credentials.
+// Analytics read path: the dedicated read-only user (SELECT on postings only); validates only its slice (ISP).
 export const ClickhouseRoEnvSchema = z.object({
   CLICKHOUSE_URL: z.string().min(1),
   CLICKHOUSE_RO_USER: z.string().min(1),
@@ -60,10 +53,8 @@ const MIGRATIONS_DIR = join(
   "clickhouse",
 );
 
-// Apply every migrations/clickhouse/*.sql in filename order. Statements are
-// idempotent (CREATE TABLE IF NOT EXISTS), so this is safe to re-run.
-// Each file MUST hold exactly ONE statement: the ClickHouse HTTP interface rejects
-// multi-statement queries, and each file is sent as a single client.command({ query }).
+// Apply migrations/clickhouse/*.sql in filename order; idempotent (IF NOT EXISTS), safe to re-run. Each
+// file MUST hold exactly ONE statement - the ClickHouse HTTP interface rejects multi-statement queries.
 export async function applyClickhouseMigrations(
   client: ClickHouseClient,
 ): Promise<string[]> {

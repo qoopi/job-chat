@@ -2,17 +2,8 @@ import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
 import type { GuardRefusal } from "@shared/insight";
 
-// The message guards (per-user cap + global daily budget), counted via the store so the same
-// backstop holds on BOTH paths: the "use server" actions (early typed refusal, UX) and the durable
-// agent run (the hard backstop on the write-token's real path to Bedrock). One home for the count
-// logic so the two layers can never drift. The refusal taxonomy (`GuardRefusal`) lives in
-// `@shared/insight`, the single home the UI copy layer reads too.
+// Guards (per-user cap + daily budget) counted via the store: the SAME backstop on both the actions and the agent run (one home, can't drift).
 
-/**
- * Which per-user cap applies: a signed-in account gets the higher `signedInCap`, a guest the lower
- * `guestCap`. The action layer knows the kind from the resolved Identity; the run() backstop
- * derives it from the owner's auth_user_id nullity (see `checkConversationGuards`).
- */
 export type CallerKind = "guest" | "account";
 
 function capFor(kind: CallerKind, guards: GuardConfig): number {
@@ -20,10 +11,7 @@ function capFor(kind: CallerKind, guards: GuardConfig): number {
   return kind === "account" ? (guards.signedInCap ?? guards.guestCap) : guards.guestCap;
 }
 
-// The input-size bound at the trust boundary, enforced on BOTH layers (like the cap/budget count):
-// the "use server" actions (TextSchema, early UX refusal) and the agent run's ingress backstop
-// (persistIncomingUserTurns, the write-token's real path). One home so the two can never drift - a
-// hostile oversized payload must never reach Bedrock (token cost) or the message store (DB bloat).
+// Input-size bound at the trust boundary, enforced on BOTH layers (one home): a hostile payload must never reach Bedrock or the store.
 export const MAX_INPUT_CHARS = 2000;
 
 export interface GuardDeps {
@@ -36,13 +24,7 @@ function utcMidnight(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
-/**
- * The global daily budget (the spend kill switch) is checked first, then the per-user cap
- * selected by caller `kind` (defaults to the guest cap - the fail-safe when a legacy
- * caller passes none). The two counts run in ONE round trip (Promise.all); the scoped count is
- * computed even when the budget is already blown - the rare case - so the common allow path is a
- * single trip.
- */
+/** Daily budget (kill switch) first, then the per-user cap by kind (default guest); both counts in ONE round trip. */
 export async function checkMessageGuards(
   deps: GuardDeps,
   userId: string,
@@ -58,12 +40,7 @@ export async function checkMessageGuards(
   return null;
 }
 
-/**
- * The agent-side backstop: the durable chat run holds only the conversation id, so resolve the owner
- * (one indexed lookup) then apply the same guards. The cap is picked from the OWNER's auth_user_id
- * nullity (null = guest cap, set = signed-in cap) - the run() layer has no caller context. An unknown
- * conversation returns null (nothing to guard - the real path always has an owner).
- */
+/** Agent-side backstop: resolve the owner, cap picked from the OWNER's auth_user_id nullity; unknown conversation returns null. */
 export async function checkConversationGuards(
   deps: GuardDeps,
   conversationId: string,

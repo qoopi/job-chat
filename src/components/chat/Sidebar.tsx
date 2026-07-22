@@ -6,16 +6,12 @@ import type { Conversation } from "@shared/store";
 import { PlusIcon, ChevronLeftIcon } from "@/components/icons";
 import { freshnessLabel } from "@/lib/insight-format";
 
-// A history row's data: the stored fields plus a first-message preview - optional so a
-// caller that has not fetched it (or a guest) simply renders no preview line.
+// A history row: the stored fields + an optional first-message preview.
 type HistoryItem = Pick<Conversation, "id" | "title" | "created_at"> & {
   preview?: string;
 };
 
-// The shell sidebar (interaction-spec s5). Guest: the teaser + Sign in (opens the lazy auth dialog).
-// Signed-in: the history list (newest first, title + first-message preview + relative date, active
-// highlight, New chat on top, empty state). Identity/auth live in the title bar (AccountMenu), not
-// here. Pure presentation - sign-in state + the history list are resolved by the caller.
+// The shell sidebar: guest teaser + Sign in, or the signed-in history list. Identity lives in the title bar, not here.
 function BrandCredit() {
   return (
     <div
@@ -48,8 +44,7 @@ function BrandCredit() {
   );
 }
 
-/** A relative "2h ago" / "just now" label from a conversation's created_at (reuses the freshness helper;
- *  no new dependency). */
+/** A relative "2h ago" label from created_at (reuses the freshness helper). */
 function relativeDate(createdAt: Date): string {
   return freshnessLabel(new Date(createdAt).toISOString()) || "just now";
 }
@@ -64,8 +59,6 @@ export function Sidebar({
   onDeleteConversation,
 }: {
   signedIn?: boolean;
-  // Identity moved to the TitleBar (AccountMenu); the sidebar no longer renders a name
-  // or avatar.
   conversations?: HistoryItem[];
   activeId?: string;
   activeTitle?: string;
@@ -75,7 +68,7 @@ export function Sidebar({
   onDeleteConversation?: (conversationId: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  // Which row is showing its inline "Delete this chat?" confirm (never a modal). Local UI state.
+  // Which row shows its inline "Delete this chat?" confirm (never a modal).
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   if (collapsed) {
@@ -203,8 +196,7 @@ export function Sidebar({
                   <button
                     type="button"
                     className="sb-del"
-                    // Two conversations can share a title, which makes a title-only accessible name (and
-                    // a getByRole lookup) ambiguous. A short id suffix keeps each delete label unique.
+                    // Two conversations can share a title, so a short id suffix keeps each delete label's accessible name unique.
                     aria-label={`Delete ${c.title} (${c.id.slice(0, 8)})`}
                     onClick={() => setConfirmingId(c.id)}
                   >

@@ -1,6 +1,4 @@
-// Tiny inline SVG icons lifted verbatim from the design mocks (send arrow, stop square, plus,
-// info, chevron). Kept as exact paths rather than a lucide dependency so the glyphs
-// match the handoff pixel-for-pixel. currentColor inherits the button/text color.
+// Inline SVG icons (verbatim from the mocks, no lucide dependency); currentColor inherits the button/text color.
 
 export function SendIcon({ size = 15 }: { size?: number }) {
   return (
@@ -58,8 +56,7 @@ export function InfoIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-// The Google "G" mark, lifted verbatim from the auth-dialog mock (fixed brand fills, NOT currentColor -
-// Google sign-in brand guidelines). Sits in the "Continue with Google" outline button.
+// The Google "G" mark: fixed brand fills, NOT currentColor (Google sign-in brand guidelines).
 export function GoogleIcon({ size = 15 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>

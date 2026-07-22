@@ -12,13 +12,8 @@ import {
 import { isE2E } from "@/lib/e2e";
 import { e2eFixtureThread } from "@/lib/e2e-fixtures";
 
-// The chat shell (mock 2a). Server-renders the conversation from the store (resume: cards intact,
-// no analytics re-query) and hands it to the live client (ChatClient) which attaches the stream. The
-// route id is Zod-validated at the trust boundary: a malformed (non-UUID) :id is a bad route, not a
-// blank new-chat shell, so it 404s. Past that gate the id is a
-// valid UUID (the store also returns null on a malformed id - the guard lives in both layers).
-// Ownership is confirmed against the resolved Viewer (guest cookie OR the signed-in account's chat-user
-// row) so a signed-in account resumes its OWN conversation on any device, and no one else's.
+// The chat shell: server-renders the conversation from the store (resume, no analytics re-query). The route
+// id is Zod-validated at the trust boundary (a non-UUID :id 404s); ownership is confirmed against the Viewer.
 const ConversationIdSchema = z.string().uuid();
 
 export default async function ChatPage({
@@ -33,9 +28,7 @@ export default async function ChatPage({
   }>;
 }) {
   const { id } = await params;
-  // `/chat/new`: a fresh chat shell, NOT a stored conversation - the landing-initiated
-  // sign-in's destination. It bypasses the UUID gate (nothing to resume), still seeds the signed-in
-  // account's history, and arms ChatClient to start a new conversation on the first send.
+  // `/chat/new`: a fresh shell (not a stored conversation) - bypasses the UUID gate, still seeds history, arms a new conversation.
   const isNewChat = id === "new";
   if (!isNewChat && !ConversationIdSchema.safeParse(id).success) notFound();
   const { q, profile, fromAuth } = await searchParams;
@@ -50,11 +43,7 @@ export default async function ChatPage({
   let accountEmail: string | undefined;
 
   if (e2e) {
-    // No Postgres in the automated suite: resume from the fixture, or carry the landing question in. A
-    // fresh shell resumes nothing (no fixture lookup for "new"). `e2eFixtureThread` imports the production
-    // STUB (src/lib/e2e-fixtures.ts, zero test data); only the E2E build (JOBCHAT_E2E=1) swaps in the real
-    // tests/ fixtures via next.config `turbopack.resolveAlias`, so a production build's module graph never
-    // pulls in test code - and prod never calls this at all (isE2E() is always false there).
+    // No Postgres in the suite: resume from the fixture. `e2eFixtureThread` is the production STUB (prod never calls this).
     const fixture = isNewChat ? undefined : e2eFixtureThread(id);
     if (fixture) {
       title = fixture.title;
@@ -64,18 +53,15 @@ export default async function ChatPage({
     }
   } else {
     const viewer = await resolveViewer();
-    // A fresh shell has no thread to load - only the account context (sign-in state + history).
     if (!isNewChat) {
       const loaded = await loadConversation(id);
-      // Hydrate only when the caller owns the conversation (guest cookie or signed-in account) - defense
-      // in depth beyond the token's ownership check; fail-closed for a non-owner (empty thread).
+      // Hydrate only when the caller owns the conversation (defense in depth); fail-closed for a non-owner (empty thread).
       if (loaded && viewer.ownerIds.includes(loaded.conversation.user_id)) {
         title = loaded.conversation.title;
         initialMessages = storeToUiMessages(loaded.messages);
       }
     }
-    // Arrival: turn 1's question rides `?q=`. ChatClient delivers it on mount via the public send
-    // path, reusing message #1's id (from the loaded thread) so the streamed turn renders once.
+    // Arrival: turn 1's `?q=` is delivered on mount via the public send path, reusing message #1's id (renders once).
     if (q) pendingQuestion = q;
     signedIn = viewer.signedIn;
     accountName = viewer.accountName ?? undefined;

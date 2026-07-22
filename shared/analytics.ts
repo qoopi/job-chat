@@ -1,25 +1,17 @@
 import { z } from "zod";
 import type { ClickHouseClient } from "@clickhouse/client";
-// Type-only import (erased at build): the scored row is the searchPostings return shape's one home.
-// This is NOT the profile type/fields - AC-13 forbids the profile object in the CH path, never the
-// scored OUTPUT row, and a `import type` pulls no runtime profile code into this module.
+// Type-only import (erased at build): the scored OUTPUT row, NOT the profile type. The profile object
+// never enters the CH path; the output row is fine, and `import type` pulls no runtime profile code in.
 import type { ScoredPostingRow } from "@shared/insight";
 
-// The analytics catalog: the ONLY path from the agent to ClickHouse. Six parameterized SQL templates
-// (one per launch-question shape), each validated with Zod, read dedup-correct via FINAL, and bounded
-// by a row LIMIT + max_execution_time. runQuery returns { sql, rows, meta } where `sql` is the exact
-// statement executed - "Show query" reveals it verbatim.
-//
-// SQL-injection note: the usual rule is query_params, never string interpolation. Here the product
-// requirement is the opposite - the reveal must show the REAL interpolated SQL, so meta.sql IS what
-// executed. Safety is kept by (a) Zod validating every param (numbers/enums are typed; the enum
-// dimension maps to a fixed column name, never an interpolated string), (b) chStr() escaping every
-// free-text value as a ClickHouse string literal, and (c) the read-only jobchat_ro user + row/time
-// caps bounding the blast radius.
+// The analytics catalog: the only path from agent to ClickHouse; meta.sql is the EXACT executed SQL
+// ("Show query" reveals it verbatim). SQL-INJECTION safety despite interpolation (the reveal needs the
+// REAL SQL): Zod validates every param (enums -> fixed column names), chStr() escapes free-text as a CH
+// string literal, and the read-only jobchat_ro user + row/time caps bound the blast radius.
 
 const BUCKET_WIDTH = 20000; // salary histogram bucket width (currency units)
 
-// Per-template row cap (the LIMIT). latest_postings uses its own `limit` param instead.
+// Per-template row cap (the LIMIT); latest_postings uses its own `limit` param instead.
 const LIMITS = {
   salary_distribution: 500,
   salary_compare: 10,
@@ -31,16 +23,11 @@ const LIMITS = {
 const QUERY_SETTINGS = {
   max_execution_time: 5,
   max_result_rows: "10000",
-  // Return count()/UInt64 as JSON numbers (our counts are tiny; no precision risk) so callers get
-  // numbers, not strings.
+  // Return UInt64 as JSON numbers, not strings (our counts are tiny; no precision risk).
   output_format_json_quote_64bit_integers: 0,
-  // Make `x IN (...)` return 0 (never NULL) for a NULL left-hand value. ClickHouse's DEFAULT
-  // (transform_null_in = 0) evaluates `NULL IN ('a')` to NULL, NOT 0 (verified on the live server, v26.2).
-  // The searchPostings scorer's cityMatch term `(city IN (...))` sits INSIDE the score arithmetic, so a
-  // NULL there makes the whole `score` NULL and `WHERE score > 0` silently DROPS an otherwise-strong match
-  // that merely lists no city. transform_null_in = 1 yields the intended "no city point" (0) instead. Safe
-  // for every WHERE-clause IN too (NULL and 0 both exclude the row there), and the concrete city / currency
-  // sets never contain NULL, so the NULL==NULL equality this setting also enables never fires.
+  // transform_null_in=1: CH's default (0) evaluates NULL IN (...) to NULL, not 0. The searchPostings city
+  // score term sits inside the score arithmetic, so a NULL city would make score NULL and WHERE score > 0
+  // silently DROP a strong match that just lists no city; =1 yields the intended 0 (live-proven).
   transform_null_in: 1,
 } as const;
 
@@ -49,12 +36,8 @@ function chStr(value: string): string {
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
-/**
- * Escape LIKE/ILIKE metacharacters (`%`, `_`) in a free-text search value so they match literally
- * instead of acting as wildcards (`a_b` must not match "axb", `50%` must not match anything after
- * "50"). Applied BEFORE the `%...%` substring wrapping - the outer `%` stay wildcards. ClickHouse's
- * LIKE escape char is backslash; chStr then doubles it for the string-literal layer.
- */
+/** Escape LIKE/ILIKE metacharacters (`%`, `_`) so a free-text value matches literally, not as wildcards.
+ *  Applied BEFORE the `%...%` wrapping (the outer `%` stay wildcards); chStr then doubles the backslash. */
 function likeEscape(value: string): string {
   return value.replace(/[%_]/g, "\\$&");
 }
@@ -75,13 +58,8 @@ function trendWindow(table: string, days: number): string {
   return `published_at > (SELECT max(published_at) FROM ${table} FINAL) - INTERVAL ${days} DAY`;
 }
 
-/**
- * The open-set predicate: keep only rows from the latest ingest snapshot. Sound because every
- * row of an ingest run is stamped with one shared `ingested_at` (shared/ingest.ts), so the max is that
- * run's timestamp and equality selects exactly the current-state postings. No FINAL in the subquery:
- * max(ingested_at) is dedup-invariant (a superseded row always has an OLDER version), so FINAL would
- * only add cost. Applied to current-state reads; a days-windowed read keeps full history instead.
- */
+/** Open-set predicate: keep only the latest ingest snapshot. Sound because one ingest run shares one
+ *  `ingested_at`, so max() is that run's stamp. No FINAL: max(ingested_at) is dedup-invariant. */
 function openSetFilter(table: string): string {
   return `ingested_at = (SELECT max(ingested_at) FROM ${table})`;
 }
@@ -114,7 +92,7 @@ const LatestPostingsParams = z
   })
   .strict();
 
-// Exported so the agent's tool input schemas wire from the one home (DRY).
+// Exported so the tool input schemas wire from this one home.
 export const TEMPLATE_PARAM_SCHEMAS = {
   salary_distribution: SalaryDistributionParams,
   salary_compare: SalaryCompareParams,
@@ -130,31 +108,21 @@ export interface BuiltQuery {
   sql: string; // the main rows query (revealed by Show query)
   where: string; // the shared WHERE clause, reused for the sampleN/freshestAt meta query
   openSet: boolean; // whether the open-set predicate was applied (current-state read) - carried to meta
-  // A chronological trend selects the NEWEST slice via `ORDER BY <time> DESC LIMIT n` so a window
-  // wider than the LIMIT keeps today and drops the oldest (never the reverse). The rows come back
-  // newest-first; executeBuilt reverses them so the display axis stays oldest -> newest. Absent = the
-  // query's own order is the display order.
+  // Newest-first + LIMIT keeps today and drops the oldest when the window exceeds the LIMIT; executeBuilt
+  // reverses the rows for chronological display. Absent = the query's own order is the display order.
   reverse?: boolean;
-  // A salary aggregate: it is filtered to the dominant salary_currency (never averaging mixed
-  // currencies), so the meta query resolves that currency for the source line / money formatter.
+  // Salary aggregate: filtered to the dominant salary_currency (never mixed), so meta resolves that currency.
   salary?: boolean;
 }
 
-/**
- * The dominant-currency predicate: keep only rows whose salary_currency is the most
- * common one among the salaried rows matching the SAME base filters, so a median/percentile is never
- * computed across mixed currencies. An `IN (... LIMIT 1)` (not `=`) so an empty salaried set yields no
- * rows gracefully rather than throwing on an empty scalar subquery.
- */
+/** Dominant-currency predicate: keep only the most common salary_currency among the matching salaried
+ *  rows, so a median is never mixed-currency. `IN (... LIMIT 1)` not `=` so an empty set yields no rows. */
 function dominantCurrencyFilter(table: string, baseFilters: string[]): string {
   const inner = whereClause([...baseFilters, "salary_currency IS NOT NULL"]);
   return `salary_currency IN (SELECT salary_currency FROM ${table} FINAL ${inner} GROUP BY salary_currency ORDER BY count() DESC, salary_currency ASC LIMIT 1)`;
 }
 
-/**
- * Validate params (throws on invalid) and build the exact interpolated SQL for a template.
- * Pure - no I/O - so the SQL and the param validation are unit-testable without a ClickHouse client.
- */
+/** Validate params (throws) and build the exact interpolated SQL for a template. Pure - unit-testable without a client. */
 export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: string): BuiltQuery {
   switch (name) {
     case "salary_distribution": {
@@ -219,8 +187,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         `FROM ${table} FINAL`,
         where,
         "GROUP BY day",
-        // Newest-first + LIMIT so a window wider than the cap keeps the recent days and drops the
-        // oldest (ORDER BY day ASC LIMIT would drop TODAY); executeBuilt reverses for chronological display.
+        // Newest-first + LIMIT keeps recent days (ASC LIMIT would drop TODAY); executeBuilt reverses for display.
         "ORDER BY day DESC",
         `LIMIT ${LIMITS.postings_trend}`,
       ]);
@@ -255,8 +222,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       if (p.role) filters.push(roleFilter(p.role));
       filters.push(openSetFilter(table));
       const where = whereClause(filters);
-      // toString() so location_kind (an Enum8) sorts and serializes as its name, not its int - the
-      // tie order stays alphabetical and predictable across both dimensions.
+      // toString() so location_kind (Enum8) serializes/sorts by NAME, not its int.
       const sql = assemble([
         "SELECT",
         `  toString(${dimColumn}) AS label,`,
@@ -301,10 +267,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
   }
 }
 
-// ---- Composable query builder (the everything-else path beside the six templates) ---------------
-// query_postings' data layer: a whitelisted aggregate over the postings schema. Same
-// safety contract as the templates - Zod validates every param, enums map to fixed column names, and
-// chStr/likeEscape escape every free-text value; nothing here is a raw interpolated identifier.
+// query_postings' data layer: a whitelisted aggregate; same SQL-injection safety contract as the templates.
 
 const COMPOSED_MEASURES = ["count", "median_salary", "p25_salary", "p75_salary"] as const;
 const COMPOSED_DIMENSIONS = [
@@ -325,11 +288,8 @@ type TimeBucket = (typeof TIME_BUCKETS)[number];
 
 const isUnique = (values: readonly string[]): boolean => new Set(values).size === values.length;
 
-/**
- * The query_postings input schema, exported like TEMPLATE_PARAM_SCHEMAS so the tool input wires
- * from the one home (DRY). Structural validation only (kept a strict ZodObject); the cross-field sort
- * check lives in buildComposedSql (still before any query runs).
- */
+/** query_postings input schema (exported so the tool wires from one home). Structural validation only -
+ *  the cross-field sort check lives in buildComposedSql. */
 export const ComposedQueryParams = z
   .object({
     measures: z
@@ -346,11 +306,8 @@ export const ComposedQueryParams = z
     role: z.string().min(1).optional(),
     company: z.string().min(1).optional(),
     city: z.string().min(1).optional(),
-    // A multi-city filter for "openings in LA or NYC" (one number over both). Each value is
-    // chStr-escaped into an IN-list; kept alongside single `city` for compat. Bounded so
-    // the interpolated list stays small. SEMANTICS when both are set: `cities` WINS and the single `city`
-    // is ignored (the FOLLOW-UP INHERITANCE rule replaces a filter, never AND-s it into a possibly-empty
-    // intersection - see buildComposedSql).
+    // Multi-city IN-list. When both `cities` and `city` are set, `cities` WINS (the follow-up inheritance
+    // rule replaces a filter, never AND-s it into a possibly-empty intersection - see buildComposedSql).
     cities: z.array(z.string().min(1)).min(1).max(20).optional(),
     region: z.string().min(1).optional(),
     country: z.string().min(1).optional(),
@@ -358,11 +315,10 @@ export const ComposedQueryParams = z
     employment_type: z.string().min(1).optional(),
     location_kind: z.enum(["onsite", "remote", "hybrid"]).optional(),
     days: z.number().int().positive().max(3650).optional(),
-    // Capped like days/limit (bounded-number discipline); the ceiling also keeps the interpolated
-    // integer well below the >= 1e21 scientific-notation edge. 1e9 is far above any real salary.
+    // Capped (bounded-number discipline); the ceiling stays well below the 1e21 scientific-notation edge.
     min_salary: z.number().int().positive().max(1_000_000_000).optional(),
     max_salary: z.number().int().positive().max(1_000_000_000).optional(),
-    // `.strict()` on the inner object too: an unknown key inside `sort` must be rejected, not stripped.
+    // `.strict()` on the inner sort object too: reject an unknown key, don't strip it.
     sort: z.object({ by: z.string().min(1), dir: z.enum(["asc", "desc"]) }).strict().optional(),
     limit: z.number().int().positive().max(50).default(20),
   })
@@ -395,9 +351,8 @@ interface DimensionSpec {
 }
 
 function dimensionSpec(d: ComposedDimension): DimensionSpec {
-  // location_kind is an Enum8: toString so it serializes and orders by its NAME, not its int (same as
-  // share_split). GROUP/ORDER by the raw expression, not the `location_kind` alias, so the alias can
-  // never shadow the column of the same name.
+  // location_kind (Enum8): toString to serialize/order by NAME. GROUP/ORDER by the raw expression, not
+  // the alias, so the alias never shadows the same-named column.
   if (d === "location_kind") {
     return {
       alias: "location_kind",
@@ -414,20 +369,15 @@ function bucketSpec(b: TimeBucket): DimensionSpec {
   return { alias: "bucket", select: `${expr} AS bucket`, group: expr };
 }
 
-/**
- * Validate composed params (throws on invalid) and build the exact interpolated SQL. Pure, like
- * buildTemplateSql - the SQL and the validation are unit-testable without a client. Deterministic
- * ORDER BY (the sort spec, then the remaining dimensions ASC) so results are stable, mirroring the
- * templates. Applies the open-set predicate unless a `days` window makes it a historical read.
- */
+/** Validate composed params (throws) and build the exact interpolated SQL. Pure, like buildTemplateSql.
+ *  Deterministic ORDER BY (sort spec, then remaining dimensions ASC); open-set unless a `days` window. */
 export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery {
   const p = ComposedQueryParams.parse(rawParams);
 
   const dims: DimensionSpec[] = p.dimensions.map(dimensionSpec);
   if (p.bucket) dims.push(bucketSpec(p.bucket));
 
-  // sort: default to chronological when time-bucketed (like postings_trend), else the first measure
-  // descending (like top_companies). The key must name a selected measure or dimension.
+  // Default sort: chronological when bucketed, else the first measure DESC. Key must be a selected measure/dim.
   const sortable = new Set<string>([...p.measures, ...dims.map((d) => d.alias)]);
   const sort = p.sort ?? { by: p.bucket ? "bucket" : p.measures[0], dir: p.bucket ? "asc" : "desc" };
   if (!sortable.has(sort.by)) {
@@ -441,10 +391,7 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   }
   if (p.role) filters.push(roleFilter(p.role));
   if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
-  // `cities` (the multi-city IN-list) WINS over a coexisting single `city`: the FOLLOW-UP INHERITANCE rule
-  // REPLACES a filter rather than AND-ing it, so a coexisting pair is a refinement to the list, not an
-  // intersection (which could be empty). Smallest correct semantics: prefer cities, drop the single city
-  // (documented on ComposedQueryParams.cities).
+  // `cities` WINS over a coexisting single `city` (follow-up inheritance replaces, never intersects).
   if (p.cities) filters.push(`city IN (${p.cities.map((c) => chStr(c)).join(", ")})`);
   else if (p.city) filters.push(`city = ${chStr(p.city)}`);
   if (p.region) filters.push(`region = ${chStr(p.region)}`);
@@ -457,18 +404,15 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   const openSet = p.days === undefined;
   if (openSet) filters.push(openSetFilter(table));
   else filters.push(trendWindow(table, p.days!));
-  // Salary measures aggregate within the dominant currency only - never a mixed-currency median (added
-  // last so its subquery scopes over the salaried + user + open-set/window filters).
+  // Salary measures use the dominant currency only; added last so its subquery scopes over all prior filters.
   if (isSalary) filters.push(dominantCurrencyFilter(table, filters));
   const where = whereClause(filters);
 
   const sortExpr = p.measures.includes(sort.by as ComposedMeasure)
     ? sort.by
     : dims.find((d) => d.alias === sort.by)!.group;
-  // A pure chronological trend (a time bucket, no other dimension, default bucket-ASC sort) must keep
-  // the NEWEST buckets when the series is longer than the LIMIT: order bucket DESC + LIMIT here, then
-  // reverse the rows for display (executeBuilt). A bucketed cross-tab (a dimension alongside the bucket)
-  // is a table, not a trend, so it keeps its existing order.
+  // A pure chronological trend (bucket only, default bucket-ASC) keeps the NEWEST buckets past the LIMIT:
+  // order DESC + LIMIT, then reverse for display. A bucketed cross-tab is a table, keeps its order.
   const chronologicalTrend =
     p.bucket !== undefined && p.dimensions.length === 0 && sort.by === "bucket" && sort.dir === "asc";
   const primaryDir = chronologicalTrend ? "DESC" : sort.dir.toUpperCase();
@@ -491,25 +435,15 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   return { sql, where, openSet, reverse: chronologicalTrend, salary: isSalary };
 }
 
-// ---- Profile-driven selection scorer (searchPostings) -------------------------------------------
-// The deterministic postings scorer behind the search_postings tool: a whitelisted, interpolated,
-// scored query over the open set. Same safety contract as the templates (Zod-validated params, every
-// free-text value chStr/likeEscape-escaped, enum/numeric params typed). The score is a FIXED formula;
-// the seniority mapping is case-insensitive over the live experience_level values. No profile TYPE or
-// FIELD reaches here (AC-13) - only DERIVED filter VALUES (title terms, cities, a band string) do.
+// The deterministic searchPostings scorer: whitelisted, interpolated, scored SQL over the open set (same
+// SQL-injection safety as the templates). SECURITY: no profile type/field reaches here - only DERIVED
+// filter VALUES (title terms, cities, a band string).
 
-/** The four profile seniority bands the free-text experience levels map to. */
 export const SENIORITY_BANDS = ["junior", "mid", "senior", "lead"] as const;
 export type SeniorityBand = (typeof SENIORITY_BANDS)[number];
 
-/**
- * The keyword rules mapping a free-text experience_level to a band; FIRST match wins, unmatched -> "".
- * Derived from the live DISTINCT experience_level values (open set, recorded 2026-07-22):
- * "Senior" x1855, "Staff" x1086, "Mid" x417, "senior" x61, "" x28, "executive" x16, "mid-level" x12,
- * "internship" x7, "principal" x6. Keyword substrings (not an exact set) so the mapping is robust to
- * BOTH the case variants seen live AND unseen future values. ONE home: `seniorityBand` (the requested-
- * band normalization) and `seniorityBandSql` (the posting-side SQL) both derive from this.
- */
+/** Free-text experience_level -> band; FIRST match wins, unmatched -> "". Keyword substrings (not an exact
+ *  set) so it is robust to case variants and unseen values. One home: seniorityBand + seniorityBandSql. */
 const BAND_KEYWORDS: { band: SeniorityBand; keywords: string[] }[] = [
   { band: "junior", keywords: ["junior", "intern", "entry", "graduate", "trainee"] },
   { band: "senior", keywords: ["senior"] },
@@ -517,8 +451,7 @@ const BAND_KEYWORDS: { band: SeniorityBand; keywords: string[] }[] = [
   { band: "mid", keywords: ["mid", "intermediate"] },
 ];
 
-/** The band a free-text experience level maps to (case-insensitive), or "" when none matches (no
- *  experience points). The requested experience is normalized through this before it is compared. */
+/** The band a free-text experience level maps to (case-insensitive), or "" when none matches. */
 export function seniorityBand(text: string): SeniorityBand | "" {
   const t = text.toLowerCase();
   for (const { band, keywords } of BAND_KEYWORDS)
@@ -526,25 +459,18 @@ export function seniorityBand(text: string): SeniorityBand | "" {
   return "";
 }
 
-/** The SQL band expression over a column: a multiIf mirroring `seniorityBand`, using ILIKE so it is
- *  case-insensitive across the live case variants. Unmatched -> '' (never equals a requested band). */
+/** SQL band expression: a multiIf mirroring seniorityBand (ILIKE, case-insensitive); unmatched -> "". */
 function seniorityBandSql(column: string): string {
   const clauses = BAND_KEYWORDS.map(({ band, keywords }) => {
-    // likeEscape each keyword (as roleFilter does) so a future keyword carrying `_`/`%` matches
-    // literally, never as a wildcard - defense-in-depth; today's BAND_KEYWORDS are metacharacter-free.
+    // likeEscape each keyword (defense-in-depth) so a future `_`/`%` matches literally, not as a wildcard.
     const cond = keywords.map((k) => `${column} ILIKE ${chStr(`%${likeEscape(k)}%`)}`).join(" OR ");
     return `${cond}, ${chStr(band)}`;
   });
   return `multiIf(${clauses.join(", ")}, '')`;
 }
 
-/**
- * The searchPostings params: DERIVED filter VALUES only (the server builds these from the stored
- * profile; the profile object never crosses this boundary). `experience` is a band string; `limit`
- * defaults to the interface's 10 and is hard-capped at 50 (the emitter raises it to 50 to carry all
- * matches up to that cap). Strict, so an unknown key is rejected, not stripped. Analytics-internal (the
- * search_postings TOOL input is a separate, narrower schema in trigger/tools.ts) - not exported.
- */
+/** searchPostings params: DERIVED filter VALUES only - the profile object never crosses this boundary.
+ *  Strict (unknown key rejected). Analytics-internal; the search_postings TOOL input is a narrower schema. */
 const SearchPostingsParams = z
   .object({
     titleTerms: z.array(z.string().min(1)).max(10).default([]),
@@ -557,12 +483,9 @@ const SearchPostingsParams = z
   .strict();
 type SearchPostingsQuery = z.infer<typeof SearchPostingsParams>;
 
-/**
- * The FIXED score formula (implemented verbatim per the epic):
- *   3*min(titleTermHits,2) + 2*experienceMatch + 2*cityMatch + 1*(remoteOk AND remote) + 1*salaryFloorMet
- * A term whose param is absent contributes the literal `0`, so the formula stays whole. `salaryFloorMet`
- * = the posting's ceiling reaches the requested floor (a NULL salary is never a match).
- */
+/** The FIXED score formula:
+ *    3*min(titleTermHits,2) + 2*experienceMatch + 2*cityMatch + 1*(remoteOk AND remote) + 1*salaryFloorMet
+ *  An absent term contributes literal `0` so the formula stays whole; a NULL salary is never a match. */
 function scoreExpr(p: SearchPostingsQuery): string {
   const titleHits =
     p.titleTerms.length > 0
@@ -580,13 +503,8 @@ function scoreExpr(p: SearchPostingsQuery): string {
   return `3 * ${titleHits} + 2 * ${expMatch} + 2 * ${cityMatch} + 1 * ${remoteMatch} + 1 * ${salaryMatch}`;
 }
 
-/**
- * Build the rows + meta SQL for searchPostings (pure, like buildTemplateSql/buildComposedSql - the SQL
- * and the param validation are unit-testable without a client). The score is computed once in an inner
- * subquery so the outer can filter (score > 0, matches only) and order by the alias cleanly. Meta is
- * the per-company match counts (reduced in TS to total + dominant company + freshestAt). Open set only
- * (current-state selection).
- */
+/** Build the rows + meta SQL for searchPostings (pure, unit-testable). Score computed once in an inner
+ *  subquery so the outer filters (score > 0) and orders by the alias. Open set only. */
 export function buildSearchPostingsSql(
   rawParams: unknown,
   table: string,
@@ -644,8 +562,7 @@ export function buildSearchPostingsSql(
   return { rowsSql, metaSql };
 }
 
-/** The searchPostings result: the scored rows (matches only, ordered), the pre-limit total for the
- *  "8 of 23" framing, and the dominance/freshness meta over the matched set. */
+/** searchPostings result: scored rows (matches only), the pre-limit `total`, and dominance/freshness meta. */
 export interface SearchPostingsResult {
   rows: ScoredPostingRow[];
   total: number;
@@ -655,16 +572,12 @@ export interface SearchPostingsResult {
 export interface QueryResult {
   sql: string;
   rows: Record<string, unknown>[];
-  // `openSet` is present (true) only on a current-state read; absent = full history. `currency`
-  // is present only on a salary aggregate (the dominant currency it was filtered to). Both optional so
-  // every persisted payload stays valid and neither is default-injected.
+  // `openSet` present only on a current-state read; `currency` only on a salary aggregate. Both optional,
+  // never default-injected (every persisted payload stays valid).
   meta: { sampleN: number; freshestAt: string; openSet?: boolean; currency?: string };
 }
 
-/**
- * The corpus shape: what the product is actually answering from, so the agent can be
- * honest about scope. Computed over the current open set (one snapshot). Shares (0..1) are fractions.
- */
+/** The corpus shape (current open set) so the agent can be honest about scope; shares are 0..1 fractions. */
 export interface CoverageProfile {
   total: number; // open postings
   distinctCompanies: number;
@@ -676,48 +589,30 @@ export interface CoverageProfile {
 
 export interface Analytics {
   runQuery(name: TemplateName, params: unknown): Promise<QueryResult>;
-  // The execution seam for query_postings (the query_postings tool calls this). Tools receive Analytics, never a raw
-  // client, so the composed path must live on the interface too.
+  // Execution seam for query_postings; tools receive Analytics, never a raw client.
   runComposedQuery(params: unknown): Promise<QueryResult>;
-  /**
-   * The profile-driven selection: deterministic scored SQL over the open postings. Returns the matched
-   * rows (score > 0) ordered by the FIXED formula, the pre-limit total, and the dominance/freshness
-   * meta. Params are DERIVED filter VALUES only (never the profile object - AC-13). The search_postings
-   * tool is the sole caller (like runComposedQuery is for query_postings).
-   */
+  /** Profile-driven scored selection; params are DERIVED filter VALUES only (never the profile object). */
   searchPostings(params: unknown): Promise<SearchPostingsResult>;
-  /**
-   * The corpus shape for the DATA SCOPE prompt note. ONE cheap query, memoized on the
-   * analytics instance - which is a per-process singleton (trigger/chat.ts), so it runs once per PROCESS
-   * (isolate lifetime), never per turn. Only a fulfilled result is cached; a transient failure is retried
-   * on the next call.
-   */
+  /** Corpus shape for the DATA SCOPE note. Memoized on the per-process analytics singleton (once per isolate,
+   *  not per turn); only a fulfilled result is cached, a transient failure is retried. */
   coverageProfile(): Promise<CoverageProfile>;
 }
 
-/**
- * Build the analytics catalog over a ClickHouse client. In production the client is the read-only
- * `jobchat_ro` user (createReadOnlyClient) reading `postings`; tests inject a writer client and a
- * `postings_test` table so expected numbers are stable regardless of live ingest.
- */
+/** Build the analytics catalog over a client. Production injects the read-only `jobchat_ro` user reading
+ *  `postings`; tests inject a writer client + `postings_test` so expected numbers are stable. */
 export function createAnalytics(config: { client: ClickHouseClient; table?: string }): Analytics {
   const table = config.table ?? "postings";
   const { client } = config;
 
-  // Run a BuiltQuery: the rows query AND the sampleN/freshestAt meta query over the SAME `where` (so
-  // the count matches the set the rows came from). Shared by both the template and composed paths.
+  // Rows query + meta query over the SAME `where`, so sampleN matches the set the rows came from.
   async function executeBuilt(built: BuiltQuery): Promise<QueryResult> {
-    // A salary aggregate additionally resolves the dominant currency it was filtered to (any() over the
-    // now single-currency set), so the source line / money formatter can disclose the real base.
+    // A salary aggregate also resolves its dominant currency (any() over the single-currency set).
     const metaSelect = ["  count() AS sampleN", "  max(ingested_at) AS freshestAt"];
     if (built.salary) metaSelect.push("  any(salary_currency) AS currency");
     const metaSql = assemble(["SELECT", metaSelect.join(",\n"), `FROM ${table} FINAL`, built.where]);
 
-    // The rows and meta reads are independent (neither consumes the other's result), so fire them
-    // concurrently - on the per-turn ClickHouse Cloud hot path this is max- not sum-latency.
-    // Promise.all attaches a rejection handler to BOTH promises up front, so if one query fails the
-    // sibling's rejection is still handled (no unhandled rejection) and the error surface matches the
-    // old sequential path: the whole call rejects with whichever query failed first.
+    // Fire rows + meta concurrently (max- not sum-latency). Promise.all handles BOTH rejections up front, so
+    // one query failing never leaves the sibling as an unhandled rejection.
     const [fetched, metaRow] = await Promise.all([
       client
         .query({ query: built.sql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })
@@ -728,8 +623,7 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
         .then((metaRows) => metaRows[0]),
     ]);
 
-    // A newest-first trend slice is reversed back to chronological order for the display axis (the
-    // fetched array is freshly built by json(), so the in-place reverse is safe).
+    // Reverse a newest-first trend slice to chronological order (fetched is fresh from json(), in-place is safe).
     const rows = built.reverse ? fetched.reverse() : fetched;
 
     return {
@@ -744,14 +638,8 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     };
   }
 
-  // Memoized on the instance: the first call runs the query, later callers reuse the same promise. The
-  // analytics instance is a module-level singleton (trigger/chat.ts), so this cache lives for the PROCESS
-  // (the warm Trigger isolate serves many conversations), NOT a single run - it is computed once per
-  // isolate lifetime, never per turn. Accepted staleness: after a re-ingest a warm isolate
-  // serves the prior corpus's DATA SCOPE note until it recycles; harmless for the static demo corpus, and
-  // the note is advisory (it only shapes scope-qualification prose, never a query). A REJECTED promise is
-  // NOT cached (see coverageProfile below): one transient ClickHouse error must not poison the memo for the
-  // whole isolate life and silently drop the scope note on every later turn.
+  // Memoized for the PROCESS (the analytics singleton lives across conversations), computed once per isolate,
+  // not per turn. A REJECTED promise is NOT cached - a transient CH error must not poison the memo.
   let coverageCache: Promise<CoverageProfile> | undefined;
   async function computeCoverage(): Promise<CoverageProfile> {
     const openSet = openSetFilter(table);
@@ -786,10 +674,8 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     };
   }
 
-  // The scored selection: run the rows query and the per-company match-count meta concurrently (max-
-  // not sum-latency), then map the raw rows to ScoredPostingRow and reduce the meta groups to the
-  // total + dominant company + freshestAt. A NULL/empty city maps to null ("not listed"), the remote
-  // UInt8 to a boolean. A 0-match query returns rows=[] and total=0 (the card's honest no-match state).
+  // Rows + per-company match-count meta concurrently, then map rows / reduce meta. NULL/empty city -> null,
+  // remote UInt8 -> boolean; a 0-match query returns rows=[] and total=0 (the honest no-match state).
   async function searchPostings(rawParams: unknown): Promise<SearchPostingsResult> {
     const { rowsSql, metaSql } = buildSearchPostingsSql(rawParams, table);
     const [rawRows, metaRows] = await Promise.all([
@@ -832,8 +718,7 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     runQuery: (name, params) => executeBuilt(buildTemplateSql(name, params, table)),
     runComposedQuery: (params) => executeBuilt(buildComposedSql(params, table)),
     searchPostings,
-    // Cache only a FULFILLED result: on rejection, clear the memo so the next call retries (never a
-    // permanently-poisoned rejected promise).
+    // Cache only a FULFILLED result; on rejection clear the memo so the next call retries.
     coverageProfile: () =>
       (coverageCache ??= computeCoverage().catch((err) => {
         coverageCache = undefined;

@@ -15,9 +15,8 @@ import {
   POSTINGS_INCHAT_CAP,
 } from "@/lib/postings-format";
 
-// The job-postings card - an InsightCard child. Rows are score-ordered: ORDER IS THE RANK (no
-// percentages, no fit badges). Two surfaces: the in-chat card (capped at 8 + the corpus-honesty
-// caption + a no-matches variant) and the LCP full list (PostingsPanel, uncapped + local filter chips).
+// The job-postings card (an InsightCard child). Rows are score-ordered: ORDER IS THE RANK (no percentages/badges).
+// Two surfaces: the in-chat card (capped, honesty caption, no-matches variant) and the LCP full list (PostingsPanel).
 
 /** The verdict with its first number (the total) bolded, matching the InsightCard verdict treatment. */
 function Verdict({ text }: { text: string }) {
@@ -97,8 +96,7 @@ export function PostingsCard({
   onEdit?: () => void;
   pending?: boolean;
 }) {
-  // No-matches variant: a numeric near-miss verdict + way-out chips. The payload carries no dedicated
-  // near-miss field, so the rows present ARE the near-misses and rows[0] is the closest.
+  // No-matches variant: the rows present ARE the near-misses (rows[0] is the closest); no dedicated near-miss field.
   if (total === 0) {
     const near = rows.length;
     const closest = rows[0];

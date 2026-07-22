@@ -13,15 +13,11 @@ import type { DataPoint } from "@shared/insight";
 import { formatMoney } from "@/lib/insight-format";
 import { CHART_HEIGHT, TOOLTIP_STYLE, axisTickStyle } from "./chart-style";
 
-// Salary histogram (salary_distribution: {bucket, count, median}). Bars are the bucket counts; the
-// amber dashed vertical marker sits at the nearest bucket to the median and carries the money label.
-// The money labels use the insight's REAL currency (meta.currency, threaded from InsightChart) so a
-// non-USD salary set never mislabels its axis/median with a "$" it is not in; it
-// defaults to USD so any caller without a currency is unchanged.
+// Salary histogram: bucket-count bars + an amber dashed marker at the nearest bucket to the median. Money
+// labels use the insight's REAL currency (meta.currency) so a non-USD set never mislabels its axis with a "$".
 export function HistogramChart({ series, currency = "USD" }: { series: DataPoint[]; currency?: string }) {
   const median = Number(series[0]?.median);
-  // Categorical x-axis of bucket floors; place the marker on the bucket closest to the median so the
-  // amber line reads correctly against the discrete bars.
+  // Place the marker on the bucket closest to the median so the amber line reads against the discrete bars.
   const markerBucket =
     Number.isFinite(median) && series.length
       ? series.reduce((best, r) =>

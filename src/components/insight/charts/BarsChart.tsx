@@ -25,12 +25,8 @@ import {
   axisTickStyle,
 } from "./chart-style";
 
-// Bars, two shapes driven by the data (interaction-spec / specimen board):
-//  - one measure  -> sorted horizontal bars (top_companies, salary_compare): the leader accent-filled,
-//    the rest neutral, value labels at the bar end.
-//  - many measures -> grouped vertical bars: one group per row, one accent/amber bar per measure.
-// Single-measure branch: cap the visible bars at BARS_CAP, truncate long category labels
-// so they never smear, keep the FULL label in the tooltip, and offer "+ N more" into the LCP table.
+// Bars, two shapes: one measure -> sorted horizontal bars (leader accent-filled); many -> grouped vertical bars.
+// Single-measure: cap at BARS_CAP, truncate long labels (full label in the tooltip), "+ N more" into the LCP.
 export function BarsChart({
   series,
   onShowAll,

@@ -1,10 +1,5 @@
-// System prompt v2 for the Job.Chat adviser agent (the shipped prompt; the frozen v1 baseline was retired):
-// same two answer modes, city aliases, honesty, and empty-result plain mode - PLUS composition guidance
-// for the seventh tool (query_postings), chart-choice rules mirroring chartTypeForShape, and a tightened
-// clarify-path tone. A versioned, designed artifact - bump the
-// version and add a new file rather than editing a shipped prompt in place. The cutover is code-only
-// (trigger/chat.ts imports this); a Trigger deploy ships it, and only a NEW chat exercises it (runs pin
-// their prompt version).
+// System prompt v2 for the adviser agent. A versioned, designed artifact: bump the version and add a NEW
+// file rather than editing a shipped prompt in place; only a NEW chat exercises it (runs pin their version).
 
 export const ADVISER_V2_VERSION = "adviser-v2";
 

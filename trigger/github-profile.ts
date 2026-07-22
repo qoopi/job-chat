@@ -1,9 +1,5 @@
-// The GitHub deep fetch: public-data enrichment for the profile extraction, run INSIDE the extract
-// task (never the browser - the PAT stays server-side). With the operator's read-only PAT it gathers the
-// deep signals (languages, topics, top READMEs, the merged-PR "problems solved" count, recent activity)
-// in a BOUNDED handful of calls; without a PAT it degrades to a capped public fetch (repos + languages +
-// topics only) and NEVER fails the save (AC-12). `fetch` is injected so the whole thing is unit-testable
-// against mocked REST with no network.
+// GitHub public-data enrichment, run INSIDE the extract task (never the browser - the PAT stays server-side).
+// With a PAT it gathers deep signals in a BOUNDED handful of calls; without one it degrades to a capped fetch and NEVER fails the save.
 
 const API = "https://api.github.com";
 const README_EXCERPT_CHARS = 2000;
@@ -12,8 +8,7 @@ const MAX_REPO_SUMMARIES = 20;
 
 export type FetchFn = typeof fetch;
 
-/** The public-data signals the extraction call reads. `capped` marks the degraded (no-PAT) fetch, where
- *  the deep signals (readmes / mergedPrCount / recentEventTypes) are empty by design, not by failure. */
+/** The signals the extraction reads. `capped` marks the degraded no-PAT fetch (deep signals empty by design, not failure). */
 export interface GithubSignals {
   username: string;
   name: string | null;
@@ -56,20 +51,15 @@ async function ghGet<T>(
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetchFn(url, { headers });
   if (!res.ok) {
-    // A tolerated sub-call (readme / PR search / events) degrades that ONE signal; the core user/repos
-    // calls are not tolerated, so a bad username or a down API surfaces and the pipeline goes resume-only.
+    // A tolerated sub-call degrades ONE signal; the core user/repos calls throw, so a bad username goes resume-only.
     if (opts.tolerate) return null;
     throw new Error(`GitHub ${url} -> ${res.status}`);
   }
   return (await res.json()) as T;
 }
 
-/**
- * Fetch the public GitHub signals for `username`. With a `token` (the PAT) it runs the DEEP path (user +
- * non-fork repos + top-3 READMEs + one merged-PR search + recent events); without one it runs the CAPPED
- * path (user + repos -> languages/topics only). Throws only on a hard core failure (unknown user / API
- * down) - the caller catches and saves a resume-only profile. `fetch` is injected (defaults to global).
- */
+/** Fetch the public GitHub signals. A token runs the DEEP path (user + repos + READMEs + PR search + events);
+ *  without one, the CAPPED path. Throws only on a hard core failure - the caller then saves a resume-only profile. */
 export async function fetchGithubProfile(
   username: string,
   token: string | undefined,
@@ -106,11 +96,10 @@ export async function fetchGithubProfile(
     capped: token === undefined,
   };
 
-  // No PAT: stop at the capped signals (never a failure - the profile still saves, AC-12).
+  // No PAT: stop at the capped signals (never a failure - the profile still saves).
   if (token === undefined) return base;
 
-  // Deep signals: top-3 repos' READMEs (already sorted by pushed_at), the merged-PR problems-solved
-  // count, and recent public activity. Each is tolerated so one 404 degrades only that signal.
+  // Deep signals: top-3 READMEs, the merged-PR count, recent activity. Each tolerated so one 404 degrades only that signal.
   const readmes: GithubSignals["readmes"] = [];
   for (const repo of nonFork.slice(0, TOP_REPOS_FOR_README)) {
     const readme = await ghGet<{ content?: string; encoding?: string }>(

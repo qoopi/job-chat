@@ -1,9 +1,4 @@
-// The pending-answer indicator (instant send feedback). An animated typing-dots
-// bubble that appears the instant a turn is sent and holds through the run-wake gap (~6s) until the
-// first real content streams (charts
-// mount only when their data-insight part is complete). Shaped from the existing ai bubble tokens
-// (.bubble.ai) so it reads as the adviser about to speak; the dots animate via the `answering-bounce`
-// keyframe in globals.css (no new deps). `role="status"` announces the wait to assistive tech.
+// The pending-answer indicator: a typing-dots bubble through the run-wake gap; role="status" announces the wait to assistive tech.
 export function AnsweringIndicator() {
   return (
     <div className="msg ai">

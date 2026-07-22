@@ -3,9 +3,7 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { SendIcon, StopIcon } from "@/components/icons";
 
-// The message composer, all five design states (interaction-spec section 4): controlled value,
-// Enter-to-send (Shift+Enter newline), and the streaming send->stop swap. With no handlers passed it
-// stays inert, so the focus ring / disabled dimming / stop glyph remain pure CSS.
+// The message composer (five states): controlled value, Enter-to-send (Shift+Enter newline), streaming send->stop swap.
 export type ComposerState =
   "default" | "focused" | "streaming" | "disabled" | "capped";
 
@@ -14,8 +12,7 @@ const PLACEHOLDER: Record<ComposerState, string> = {
   focused: "I am looking for...",
   streaming: "Answering...",
   disabled: "Sign in to continue",
-  // At the guest cap the composer stays ENABLED - a send opens the register dialog with
-  // the draft queued - so its placeholder invites the account instead of blocking.
+  // At the guest cap the composer stays ENABLED (a send opens the register dialog), so its placeholder invites the account.
   capped: "Create an account to keep asking…",
 };
 
@@ -32,8 +29,7 @@ export function Composer({
   onChange?: (value: string) => void;
   onSend?: () => void;
   onStop?: () => void;
-  /** New chat focuses the composer in place. Bumping this counter (from the parent) moves focus
-   *  to the textarea; the first render never steals focus (a resumed thread must not grab it on mount). */
+  /** New chat focuses the composer: bumping this counter moves focus; the first render never steals it (a resumed thread mustn't grab it). */
   focusSignal?: number;
 }) {
   const barClass =
@@ -55,8 +51,7 @@ export function Composer({
     ref.current?.focus();
   }, [focusSignal]);
 
-  // Enter sends, Shift+Enter inserts a newline (interaction-spec section 4). The default textarea
-  // newline on plain Enter is suppressed so a send never leaves a stray line break behind.
+  // Enter sends, Shift+Enter newline; the plain-Enter default is suppressed so a send leaves no stray line break.
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();

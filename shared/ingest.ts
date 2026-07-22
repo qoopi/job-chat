@@ -1,8 +1,7 @@
 import { mapPostingToRow, type PostingRow } from "./postings";
 import type { SearchnapplyClient } from "./searchnapply";
 
-// The insert target. Structurally satisfied by @clickhouse/client's `insert`,
-// so the trigger task passes the real client and tests pass a collecting fake.
+// The insert seam: structurally satisfied by @clickhouse/client's insert (real client in prod, fake in tests).
 export interface RowSink {
   insert(params: {
     table: string;
@@ -25,12 +24,8 @@ export interface IngestResult {
   totalCount: number;
 }
 
-/**
- * Page the jobs-api and insert one JSONEachRow batch per page into `table`.
- * Idempotent by design: ReplacingMergeTree keyed (source, external_id) collapses
- * re-pulls. A mid-run page/insert failure propagates (the Trigger.dev run fails
- * and retries), leaving already-inserted batches intact.
- */
+/** Page the jobs-api, insert one JSONEachRow batch per page. Idempotent: ReplacingMergeTree keyed
+ *  (source, external_id) collapses re-pulls; a mid-run failure propagates (Trigger retries), batches intact. */
 export async function ingestPostings(deps: IngestDeps): Promise<IngestResult> {
   const table = deps.table ?? "postings";
   const pageSize = deps.pageSize ?? 100;

@@ -6,9 +6,7 @@ import { BarsChart } from "./BarsChart";
 import { HistogramChart } from "./HistogramChart";
 import { DonutChart } from "./DonutChart";
 
-// Dispatch a chart insight's series to its designated primitive (parts.ts chartTypeFor pins this). The
-// insight's currency (meta.currency) is threaded to the histogram so its money labels match the source
-// line and Table tab; the other primitives carry no money axis.
+// Dispatch a chart insight to its primitive; currency (meta.currency) threads to the histogram so its money labels match the source line.
 export function InsightChart({
   chartType,
   series,
