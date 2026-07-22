@@ -573,51 +573,58 @@ a:hover {
   transform: translateX(14px);
 }
 
-/* ---------- Left Chat Part: profile empty state ---------- */
-.profile-empty {
+/* ---------- Left Chat Part: profile form (five states, mock 04) ---------- */
+.profile-form {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
   max-width: 480px;
 }
-.profile-empty h3 {
+.profile-form h3 {
   margin: 0;
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   font-weight: 600;
 }
-.profile-empty p {
+.profile-form-sub {
   margin: 0;
   font-size: var(--fs-sm);
   color: var(--text-2);
-}
-.profile-fields {
-  display: flex;
-  gap: 10px;
-}
-.profile-fields .field {
-  flex: 1;
 }
 .profile-note {
   font-size: var(--fs-2xs);
   color: var(--text-3);
 }
-/* The resume dropzone - a dashed box (ported verbatim from the mirror _shared/components.css). */
+.profile-textarea {
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  outline: 0;
+  background: var(--surface);
+  color: var(--text);
+  resize: vertical;
+}
+.profile-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+/* The resume dropzone - a dashed box, now a real file picker (a <button> styled as the zone). */
 .dropzone {
+  display: block;
+  width: 100%;
   border: 1.5px dashed var(--border-strong);
   border-radius: var(--r-md);
   padding: var(--sp-5);
   text-align: center;
   color: var(--text-2);
+  font: inherit;
   font-size: var(--fs-sm);
   background: var(--surface-2);
   cursor: pointer;
 }
-/* the dropzone is a quiet "coming soon" affordance for now - the resume-parse backend is deferred. */
-.dropzone.disabled {
-  cursor: default;
-}
-.dropzone.disabled:hover {
-  border-color: var(--border-strong);
+.dropzone:hover {
+  border-color: var(--accent);
 }
 
 /* The history row's second line - a muted, single-line first-message preview that
@@ -747,6 +754,26 @@ a:hover {
   gap: 10px;
   justify-content: center;
 }
+/* the primary follow-up chip (accent-soft, accent-line) - "Find me a job that fits" / "Open all N in
+   panel". A resting accent look, distinct from the neutral chip's hover-only accent. */
+.chip-accent {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+/* An inline accent text-button (underlined) - "Add GitHub" / "Retry GitHub" / form links. */
+.link-accent {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
 
 /* editable tag (profile skills) */
 .tag {
@@ -827,6 +854,12 @@ a:hover {
 }
 
 /* ---------- insight card ---------- */
+/* Ported from the design mirror's components.css: scope card + table text to --text so a dark-canvas
+   surface never inherits a light-theme body color (fixes dark-scoped text). */
+.insight,
+.data-table {
+  color: var(--text);
+}
 .insight {
   width: 100%;
   max-width: 640px;
@@ -835,6 +868,30 @@ a:hover {
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+}
+
+/* ---------- profile card: skill provenance + section labels (029) ---------- */
+/* A resume-claimed skill (and the "Works on" domain pills): a neutral outline pill. github-proven skills
+   reuse the accent .tag + a small ✓. Promoted from the cards mocks' inline <style> to the one home. */
+.skill-claimed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-2);
+}
+/* small uppercase section label (Skills / Works on / Sources / Experience) */
+.micro {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
 }
 .insight-head {
   display: flex;

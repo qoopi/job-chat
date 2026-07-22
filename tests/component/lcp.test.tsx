@@ -27,6 +27,11 @@ vi.mock("@/lib/chat-transport", () => ({
 vi.mock("@/app/actions", () => ({
   sendMessage: vi.fn(),
   mintChatToken: vi.fn(),
+  // The profile form loads its state from getMyProfile on mount; null -> the empty form ("No profile yet").
+  getMyProfile: vi.fn(async () => null),
+  saveProfile: vi.fn(),
+  deleteProfile: vi.fn(async () => ({ ok: true })),
+  getProfileRunStatus: vi.fn(async () => ({ status: "pending" })),
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -185,7 +190,7 @@ describe("table LCP close paths (AC-9)", () => {
 // The account menu's "Your profile" opens the profile empty state in the LCP (docking the
 // chat), and it closes on the LCP close paths just like a table.
 describe("profile LCP (refresh #2 s7)", () => {
-  test("'Your profile' opens the profile empty state in the LCP; Esc closes it", () => {
+  test("'Your profile' opens the profile form (empty state) in the LCP; Esc closes it", async () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -201,9 +206,9 @@ describe("profile LCP (refresh #2 s7)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Account: Ada/ })); // open the account menu
     fireEvent.click(screen.getByRole("button", { name: "Your profile" }));
 
-    // the designed empty state is open and the canvas docks
-    expect(screen.getByText("No profile yet")).toBeTruthy();
-    expect(screen.getByText(/coming soon/i)).toBeTruthy(); // the dropzone accepts no upload yet (P2)
+    // the empty form (mock 04 state 1) is open and the canvas docks
+    expect(await screen.findByText("No profile yet")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Build my profile" })).toBeTruthy();
     expect(document.querySelector(".canvas.docked")).toBeTruthy();
 
     pressEsc();
@@ -211,7 +216,7 @@ describe("profile LCP (refresh #2 s7)", () => {
     expect(document.querySelector(".canvas.docked")).toBeNull();
   });
 
-  test("profileOnArrival opens the profile on mount (landing 'Your profile' -> /chat/new?profile=1, s10)", () => {
+  test("profileOnArrival opens the profile on mount (landing 'Your profile' -> /chat/new?profile=1, s10)", async () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -223,11 +228,11 @@ describe("profile LCP (refresh #2 s7)", () => {
         profileOnArrival
       />,
     );
-    expect(screen.getByText("No profile yet")).toBeTruthy();
+    expect(await screen.findByText("No profile yet")).toBeTruthy();
     expect(document.querySelector(".canvas.docked")).toBeTruthy();
   });
 
-  test("opening a table LCP replaces the open profile (one LCP at a time)", () => {
+  test("opening a table LCP replaces the open profile (one LCP at a time)", async () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -239,7 +244,7 @@ describe("profile LCP (refresh #2 s7)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /Account: Ada/ }));
     fireEvent.click(screen.getByRole("button", { name: "Your profile" }));
-    expect(screen.getByText("No profile yet")).toBeTruthy();
+    expect(await screen.findByText("No profile yet")).toBeTruthy();
 
     fireEvent.click(
       screen.getByRole("button", { name: "Open full table (9 rows)" }),

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import type { Conversation } from "@shared/store";
+import type { Profile } from "@shared/profile";
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
 import { Composer, type ComposerState } from "./Composer";
@@ -20,11 +21,13 @@ import {
   dataParts,
   isStreaming,
   reconcileMessagesById,
-  resolveInsightTarget,
+  resolveLcpContent,
   type LcpTarget,
 } from "@/lib/chat-ui";
 import { isAuthDialogOpen, isMenuOpen } from "@/lib/layers";
 import { queueDraft, takeQueuedDraft } from "@/lib/queued-draft";
+import { queuePendingProfileInvite, takePendingProfileInvite } from "@/lib/pending-invite";
+import { profileCardMessageId } from "@/lib/profile-card-id";
 import {
   closeAuthDialog,
   openAuthDialog,
@@ -169,6 +172,51 @@ export function ChatClient({
     setProfileOpen(true);
   }, []);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
+
+  // The profile card is out-of-band: after a save the extraction task persists it under a DETERMINISTIC
+  // id, and the form injects it into the LIVE thread here under that SAME id - so a re-save REPLACES the
+  // one card (reconcileMessagesById folds by id) and never stacks a second. On reload the persisted card
+  // hydrates under the same id, so live and resumed render one card.
+  const onProfileSaved = useCallback(
+    async (profile: Profile) => {
+      const id = await profileCardMessageId(conversationId);
+      const card = {
+        id,
+        role: "assistant",
+        parts: [{ type: "data-profile-card", id: `${id}-card`, data: { kind: "profile-card", profile } }],
+      } as UIMessage;
+      setMessages((prev) => (prev.some((m) => m.id === id) ? prev.map((m) => (m.id === id ? card : m)) : [...prev, card]));
+    },
+    [conversationId, setMessages],
+  );
+
+  // Delete removes the card from the live thread (the action also deletes the persisted card in this
+  // conversation - the card-on-delete rule).
+  const onProfileDeleted = useCallback(async () => {
+    const id = await profileCardMessageId(conversationId);
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+  }, [conversationId, setMessages]);
+
+  // The auth-invite button: signed-in already -> straight to the profile form; a guest -> stash the
+  // pending profile-invite (surfaced on the post-auth return) and open the auth dialog.
+  const onAuthInvite = useCallback(() => {
+    if (signedIn) {
+      openProfile();
+      return;
+    }
+    queuePendingProfileInvite(conversationId);
+    openAuthDialog();
+  }, [signedIn, conversationId, openProfile]);
+
+  // Surface a client-only profile-invite card in the thread (the auth-invite's pending action, replayed
+  // once on the post-auth return).
+  const injectProfileInvite = useCallback(() => {
+    const id = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      { id, role: "assistant", parts: [{ type: "data-profile-invite", id: `${id}-invite`, data: { kind: "profile-invite" } }] } as UIMessage,
+    ]);
+  }, [setMessages]);
 
   // New chat starts fresh IN PLACE (interaction-spec s5) - clear the thread, close the LCP, clear
   // and focus the composer, WITHOUT navigating to the landing. The signed-in user's current conversation
@@ -398,7 +446,11 @@ export function ChatClient({
       // stale) but only SEND when this is a post-auth arrival.
       else if (signedIn) {
         const queued = takeQueuedDraft(conversationId);
+        const pendingInvite = takePendingProfileInvite(conversationId);
+        // Both flags are read-once (cleared here) so a stale one never misfires on a later ordinary mount;
+        // only a genuine post-auth arrival (fromAuth) replays them.
         if (queued && fromAuth) void send(queued);
+        else if (pendingInvite && fromAuth) injectProfileInvite();
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -485,10 +537,10 @@ export function ChatClient({
   const targetMessage = lcpTarget
     ? (view.find((m) => m.id === lcpTarget.messageId) ?? null)
     : null;
-  const lcpInsight = useMemo(
+  const lcpContent = useMemo(
     () =>
       targetMessage && lcpTarget
-        ? resolveInsightTarget([targetMessage], lcpTarget)
+        ? resolveLcpContent([targetMessage], lcpTarget)
         : null,
     [targetMessage, lcpTarget],
   );
@@ -545,11 +597,17 @@ export function ChatClient({
         {/* The LCP takes the middle of the canvas (a table OR the profile) while the chat
             docks to the 360px right rail. */}
         {profileOpen ? (
-          <LcpProfile onClose={closeProfile} />
-        ) : lcpInsight ? (
-          <LcpPanel insight={lcpInsight} onClose={closeLcp} />
+          <LcpProfile
+            conversationId={conversationId}
+            e2e={e2e}
+            onClose={closeProfile}
+            onProfileSaved={onProfileSaved}
+            onProfileDeleted={onProfileDeleted}
+          />
+        ) : lcpContent ? (
+          <LcpPanel content={lcpContent} onClose={closeLcp} />
         ) : null}
-        <div className={profileOpen || lcpInsight ? "canvas docked" : "canvas"}>
+        <div className={profileOpen || lcpContent ? "canvas docked" : "canvas"}>
           <TitleBar
             title={titleState}
             signedIn={signedIn}
@@ -568,6 +626,8 @@ export function ChatClient({
               onRetry={onRetry}
               onOpenLcp={openLcp}
               onSignIn={signedIn ? undefined : openAuthDialog}
+              onEditProfile={openProfile}
+              onAuthInvite={onAuthInvite}
               liveError={liveError}
             />
           </div>

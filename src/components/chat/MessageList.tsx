@@ -6,7 +6,26 @@ import { Bubble } from "./Bubble";
 import { AnsweringIndicator } from "./AnsweringIndicator";
 import { InsightCard } from "@/components/insight/InsightCard";
 import { ErrorCard, RefusalNotice } from "@/components/insight/ErrorCard";
+import { InlinePromptCard } from "@/components/insight/InlinePromptCard";
+import { ProfileCard } from "@/components/insight/ProfileCard";
+import { PostingsCard } from "@/components/insight/PostingsCard";
 import { classifyCardData, dataParts, messageText, proseSpans } from "@/lib/chat-ui";
+
+// The two fit-intent invite copies (implement-cards.md #4): one line + one primary button each.
+const AUTH_INVITE_TEXT = "Sign in with Google to get matched — I’ll keep your profile and history.";
+const PROFILE_INVITE_TEXT = "Add your resume and GitHub — I’ll find roles that fit you.";
+
+// The card kinds that ARE the answer surface: when one is present the model's accompanying prose is
+// suppressed (single-surface rule), matching the persistence-layer drop so live + resumed render alike.
+const ANSWER_CARD_KINDS = new Set([
+  "insight",
+  "error",
+  "refusal",
+  "profile-card",
+  "postings",
+  "auth-invite",
+  "profile-invite",
+]);
 
 // Renders the live thread from `useChat` messages. Presentation only: given the message list +
 // streaming status + the one-shot chip set, it maps each message's parts to bubbles, insight cards,
@@ -27,6 +46,8 @@ const AssistantMessage = memo(function AssistantMessage({
   onRetry,
   onOpenLcp,
   onSignIn,
+  onEditProfile,
+  onAuthInvite,
   pending,
   retryable,
 }: {
@@ -36,6 +57,10 @@ const AssistantMessage = memo(function AssistantMessage({
   onRetry: () => void;
   onOpenLcp: (messageId: string, partId: string) => void;
   onSignIn?: () => void;
+  /** Open the LCP profile form (profile card "Edit profile" / "Add GitHub"; profile-invite button). */
+  onEditProfile?: () => void;
+  /** The auth-invite button: open the auth dialog with a pending profile-invite. Absent when signed in. */
+  onAuthInvite?: () => void;
   /** A turn is in flight - disables this card's follow-up chips (no concurrent send while it streams).
    *  `pending` only flips at turn boundaries (not per stream chunk), so settled cards still bail on the
    *  per-chunk re-map; the chart subtree stays memoized on the insight ref, so the flip is cheap. */
@@ -47,15 +72,11 @@ const AssistantMessage = memo(function AssistantMessage({
 }) {
   const text = messageText(message);
   const cards = dataParts(message);
-  // Single-surface rule: when this turn carries any
-  // rendered card - a data insight, an error, or a refusal - the CARD is the one answer surface, so the
-  // model's accompanying prose is suppressed (a card + a fabricated sentence is never shown together).
-  // A still-loading skeleton does NOT suppress (the card is not the answer yet). Mirrors the
-  // persistence-layer drop in trigger/parts.ts, so live and resumed turns render identically.
-  const hasCard = cards.some(({ data }) => {
-    const kind = classifyCardData(data).kind;
-    return kind === "insight" || kind === "error" || kind === "refusal";
-  });
+  // Single-surface rule: when this turn carries any rendered answer card the CARD is the one answer
+  // surface, so the model's accompanying prose is suppressed (a card + a fabricated sentence is never
+  // shown together). A still-loading skeleton does NOT suppress (the card is not the answer yet).
+  // Mirrors the persistence-layer drop in trigger/parts.ts, so live and resumed turns render identically.
+  const hasCard = cards.some(({ data }) => ANSWER_CARD_KINDS.has(classifyCardData(data).kind));
   const showText = Boolean(text) && !hasCard;
 
   return (
@@ -105,6 +126,47 @@ const AssistantMessage = memo(function AssistantMessage({
             </div>
           );
         }
+        if (cls.kind === "profile-card") {
+          return (
+            <div key={id} className="msg ai">
+              <ProfileCard
+                profile={cls.profile}
+                onFollowup={(text) => onFollowup(id, text)}
+                onEdit={onEditProfile}
+                onOpenPanel={() => onOpenLcp(message.id, id)}
+                pending={pending}
+              />
+            </div>
+          );
+        }
+        if (cls.kind === "postings") {
+          return (
+            <div key={id} className="msg ai">
+              <PostingsCard
+                rows={cls.rows}
+                total={cls.total}
+                onFollowup={(text) => onFollowup(id, text)}
+                onOpenPanel={() => onOpenLcp(message.id, id)}
+                onEdit={onEditProfile}
+                pending={pending}
+              />
+            </div>
+          );
+        }
+        if (cls.kind === "auth-invite") {
+          return (
+            <div key={id} className="msg ai">
+              <InlinePromptCard text={AUTH_INVITE_TEXT} buttonLabel="Sign in with Google" onAction={onAuthInvite} />
+            </div>
+          );
+        }
+        if (cls.kind === "profile-invite") {
+          return (
+            <div key={id} className="msg ai">
+              <InlinePromptCard text={PROFILE_INVITE_TEXT} buttonLabel="Add your profile" onAction={onEditProfile} />
+            </div>
+          );
+        }
         return null;
       })}
     </>
@@ -134,6 +196,8 @@ export function MessageList({
   onRetry,
   onOpenLcp,
   onSignIn,
+  onEditProfile,
+  onAuthInvite,
   liveError = false,
 }: {
   messages: UIMessage[];
@@ -142,10 +206,14 @@ export function MessageList({
   usedFollowups: Set<string>;
   onFollowup: (cardId: string, text: string) => void;
   onRetry: () => void;
-  /** Open a table card's full body in the LCP, keyed by its message + part id. */
+  /** Open a card's full body in the LCP (table / profile-card / postings), keyed by message + part id. */
   onOpenLcp: (messageId: string, partId: string) => void;
   /** Open the auth dialog from a guest cap notice. Absent (signed-in) hides the affordance. */
   onSignIn?: () => void;
+  /** Open the LCP profile form (profile-card edit, profile-invite). */
+  onEditProfile?: () => void;
+  /** The auth-invite button handler (open the dialog with a pending profile-invite). */
+  onAuthInvite?: () => void;
   /** Live: useChat is in its error state - a turn errored at the SDK level, which streams NO
    *  data-error part. Render the error card + Retry from this signal too, unless a data-error part
    *  already covers the tail (do not double-render). */
@@ -179,6 +247,8 @@ export function MessageList({
             onRetry={onRetry}
             onOpenLcp={onOpenLcp}
             onSignIn={onSignIn}
+            onEditProfile={onEditProfile}
+            onAuthInvite={onAuthInvite}
             pending={pending}
             // Retry only on the TAIL error card - regenerate re-answers the tail. `retryable` is false for
             // every non-error turn, so it never defeats the settled-card memo (it does not change when a
