@@ -140,6 +140,35 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     expect(count[0].c).toBe(0); // nothing created
   });
 
+  // 024 testing audit (item 4): the landing handoff (startConversation) is turn 1 for a BRAND NEW
+  // conversation - a guest who already exhausted their per-day guestCap in an EARLIER conversation must
+  // still be refused HERE, before any row for the new conversation is created (checkMessageGuards scopes
+  // the cap per userId across ALL of the guest's conversations, not per-conversation, so this is not the
+  // same case as the invalid_input/daily_budget pre-create tests above). Guest-cap refusal on landing
+  // must keep working per the epic's Technical details.
+  it("startConversation refuses with guest_cap BEFORE creating anything, when the guest already exhausted their cap in an earlier conversation", async () => {
+    const userId = freshGuestId();
+    await store.getOrCreateUser(userId);
+    const priorConv = await store.createConversation(userId, "earlier thread");
+    const cap = 3;
+    for (let i = 0; i < cap; i++) await store.appendMessage(priorConv.id, "user", `msg ${i}`, null);
+    const svc = createSessionService({
+      store,
+      guards: { guestCap: cap, dailyBudget: HUGE },
+      mintToken: okMintToken(),
+      now: () => new Date(),
+    });
+
+    const before = await sql`SELECT count(*)::int AS c FROM conversations WHERE user_id = ${userId}`;
+    expect(before[0].c).toBe(1); // just the earlier conversation
+
+    const res = await svc.startConversation(userId, "a brand new question");
+    expect(res).toEqual({ ok: false, reason: "guest_cap" });
+    // No NEW conversation row was created for the refused landing attempt.
+    const after = await sql`SELECT count(*)::int AS c FROM conversations WHERE user_id = ${userId}`;
+    expect(after[0].c).toBe(1); // still just the earlier one
+  });
+
   // AC-15: the (cap+1)-th user message is refused with a typed reason.
   it("sendMessage refuses with guest_cap once the guest hits the cap (AC-15)", async () => {
     const userId = freshGuestId();

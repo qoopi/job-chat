@@ -60,6 +60,7 @@ afterEach(() => {
   reconnectMock.mockClear();
   sendMessagesMock.mockClear();
   routerReplaceMock.mockClear();
+  window.sessionStorage.clear(); // the mid-arrival-reload test seeds a persisted session - never leak it
 });
 
 test("action-refusal: the sendMessage action's cap refusal renders the SAME register card as the agent-side refusal", async () => {
@@ -427,4 +428,83 @@ test("arrival (AC-11): turn 1 is delivered through the public send path - sendMe
   await waitFor(() =>
     expect(routerReplaceMock).toHaveBeenCalledWith(`/chat/${CONVERSATION_ID}`),
   );
+});
+
+// 024 testing audit (item 3): the transport's `startSession` option (the lazy createStartSessionAction)
+// runs INSIDE `sendMessages` on the first send for an uncached chatId - it is not a separately awaited
+// call ChatClient can catch. When it fails (network drop / a 500 from the action), the AI SDK's own
+// request loop (ai's `makeRequest`) catches the transport error internally, sets `useChat`'s `error`
+// state, and resolves (does not reject) the outer `sendMessage()` promise - so `deliverArrival`'s
+// try/catch never fires for this failure class. The user must still see it: through `liveError`, the
+// SAME ErrorCard + Retry the live agent-side error class renders (message-list-live-error.test.tsx),
+// never a silent no-op that leaves the composer looking like nothing happened.
+test("arrival failure: a lazy startSession failure on turn 1 (network/500) surfaces the live error card, not silently", async () => {
+  sendMessagesMock.mockRejectedValueOnce(new Error("network down"));
+  const initial: UIMessage[] = [
+    {
+      id: "msg-1-uuid",
+      role: "user",
+      parts: [{ type: "text", text: "Which companies are hiring the most?" }],
+    },
+  ];
+  const { container } = render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={initial}
+      pendingQuestion="Which companies are hiring the most?"
+      e2e={false}
+    />,
+  );
+
+  await waitFor(() => expect(sendMessagesMock).toHaveBeenCalled());
+  // The live error card (not a data-error part - none streamed) + Retry, from useChat's error state.
+  await waitFor(() => expect(container.querySelector(".err-card")).toBeTruthy());
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  // The SSR-persisted question bubble is untouched - it was never optimistic, so there is nothing to
+  // roll back; the failure is surfaced, not hidden by silently dropping the visible question.
+  expect(
+    screen.getAllByText("Which companies are hiring the most?", {
+      selector: ".bubble.user",
+    }),
+  ).toHaveLength(1);
+});
+
+// 024 testing audit (item 5): deliverArrival's own effect only fires `if (pendingQuestion && !resume)` -
+// the `!resume` guard is what keeps a mid-arrival reload safe (020's session-persistence: the transport's
+// onSessionChange writes `isStreaming: true` the moment turn 1's stream starts, so a reload before it
+// settles restores `resume=true`). Prove the guard actually wins even in the race where `?q=` has not
+// yet been stripped from the URL by the time of reload (pendingQuestion still present): the persisted
+// session must take precedence, resuming via `reconnectToStream` instead of re-delivering turn 1 via
+// `sendMessages` a second time (which would duplicate the question / retrigger the run).
+test("mid-arrival reload: a still-streaming persisted session resumes turn 1 instead of re-delivering it (020 session-persistence)", async () => {
+  window.sessionStorage.setItem(
+    `jobchat_session:${CONVERSATION_ID}`,
+    JSON.stringify({ publicAccessToken: "tok", isStreaming: true }),
+  );
+  const initial: UIMessage[] = [
+    {
+      id: "msg-1-uuid",
+      role: "user",
+      parts: [{ type: "text", text: "Which companies are hiring the most?" }],
+    },
+  ];
+  render(
+    <ChatClient
+      conversationId={CONVERSATION_ID}
+      initialMessages={initial}
+      // Simulates the reload racing ahead of the router.replace strip: ?q= is still on the URL.
+      pendingQuestion="Which companies are hiring the most?"
+      e2e={false}
+    />,
+  );
+
+  // Resumes via the persisted session's cursor - never re-delivers turn 1 through the send path.
+  await waitFor(() => expect(reconnectMock).toHaveBeenCalled());
+  expect(sendMessagesMock).not.toHaveBeenCalled();
+  // Exactly one bubble for the question - a re-delivery would have appended/replaced a second one.
+  expect(
+    screen.getAllByText("Which companies are hiring the most?", {
+      selector: ".bubble.user",
+    }),
+  ).toHaveLength(1);
 });
