@@ -512,6 +512,27 @@ describe("seniorityBand (case-insensitive mapping from the live experience_level
   });
 });
 
+// One-home contract: BAND_KEYWORDS (private to shared/analytics.ts) is the SOLE source both
+// `seniorityBand` (TS, the requested-band normalization) and the SQL `multiIf` (seniorityBandSql, over
+// the posting's experience_level) derive from. A joint assertion per band - the TS mapping AND the SQL
+// clause for the SAME keyword - so a future refactor that forks them into two separate lists (defeating
+// the one-home design) fails here, even though today's single shared array cannot itself diverge.
+describe("BAND_KEYWORDS one home (TS seniorityBand + SQL multiIf move together)", () => {
+  it.each([
+    ["junior", "graduate"],
+    ["senior", "senior"],
+    ["lead", "director"],
+    ["mid", "intermediate"],
+  ])("the %s-band keyword %j classifies identically in TS and in the SQL multiIf", (band, keyword) => {
+    expect(seniorityBand(keyword)).toBe(band);
+    const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["x"], experience: keyword }, "postings");
+    // The SQL requested-band comparison target (2 * (multiIf(...) = '<band>')) must match seniorityBand's
+    // own answer for this keyword, and the multiIf must carry an ILIKE clause built from it.
+    expect(rowsSql).toContain(`= '${band}')`);
+    expect(rowsSql).toContain(`experience_level ILIKE '%${keyword}%'`);
+  });
+});
+
 describe("Should_ScoreByFixedFormula_When_SearchPostingsBuilt (AC-7/AC-8)", () => {
   const params = {
     titleTerms: ["senior", "backend", "engineer"],

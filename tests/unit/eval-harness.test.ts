@@ -151,6 +151,43 @@ describe("runCase context-turn replay (offline, fake model - 018 review-fix R2)"
   });
 });
 
+// The eval identity seam (030): runCase threads EvalCase.identity/profile into the SAME createChatRun
+// (trigger/run.ts) production uses, so the PROFILE note is production's actual profileNote() output, not
+// a harness reimplementation that could silently drift from it. Literal expected strings (not recomputed
+// from run.ts) so a format change on either side breaks this test.
+describe("runCase PROFILE-note injection (the eval identity seam, 030)", () => {
+  it("a with-profile case's system prompt carries the exact production PROFILE note for that profile", async () => {
+    let capturedSystem = "";
+    const fakeModel: EvalStreamModel = ({ system }) => {
+      capturedSystem = system;
+      return { consumeStream: async () => {}, steps: Promise.resolve([]), text: Promise.resolve("") };
+    };
+    const withProfile = EVAL_SET.find((c) => c.id === "SRCH-1")!; // identity: { signedIn: true, profile: EVAL_PROFILE }
+    await runCase(fakeModel, "BASE SYSTEM", withProfile);
+
+    expect(capturedSystem).toContain(
+      "PROFILE: this signed-in user has a saved profile - route a personal fit-intent to search_postings, NEVER request_profile.",
+    );
+    expect(capturedSystem).toContain("Titles: Backend Engineer, Staff Engineer.");
+    expect(capturedSystem).toContain("Seniority: senior.");
+    expect(capturedSystem).toContain("Top skills: TypeScript, Go, ClickHouse.");
+    expect(capturedSystem).toContain("Locations: Berlin.");
+    expect(capturedSystem).toContain("Open to remote: yes.");
+    expect(capturedSystem).toContain("Salary floor: 120000.");
+  });
+
+  it("a guest/no-profile case's system prompt carries NO PROFILE note", async () => {
+    let capturedSystem = "";
+    const fakeModel: EvalStreamModel = ({ system }) => {
+      capturedSystem = system;
+      return { consumeStream: async () => {}, steps: Promise.resolve([]), text: Promise.resolve("") };
+    };
+    const guestCase = EVAL_SET.find((c) => c.id === "AUTH-1")!; // no identity => guest, no profile
+    await runCase(fakeModel, "BASE SYSTEM", guestCase);
+    expect(capturedSystem).not.toContain("PROFILE:");
+  });
+});
+
 // Adversarial probes: hand-built WRONG transcripts, checking scoreCase actually FAILS them - so the
 // reported gates mean something for tool identity + mode + raw chart pick. Pins the STRICT tool rule
 // (exact single-call match: the expected data tool called once, no other data tool - a double-call

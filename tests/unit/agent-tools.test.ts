@@ -234,6 +234,22 @@ describe("mergeSearchParams (server-authoritative profile merge)", () => {
     expect(refined.remoteOk).toBe(false);
     expect(refined.titleTerms).toEqual(["Backend Engineer"]); // no model terms -> the profile's titles
   });
+
+  // Mutation check: the tool schema's `.strict()` blocks an injected experience/salaryMin key BEFORE it
+  // reaches mergeSearchParams in production - but that is a schema-layer guarantee, not a merge-logic one.
+  // This forces a model-supplied value THROUGH the merge itself (a raw cast, as if a differently-shaped
+  // caller bypassed the schema), proving mergeSearchParams's OWN policy - not just the schema - discards
+  // it: the profile's values win regardless of what the input object carries.
+  it("a model-supplied experience/salaryMin that reaches the merge is IGNORED - the profile's value always wins", () => {
+    const hostileInput = {
+      titleTerms: ["staff engineer"],
+      experience: "junior", // forced through past the schema - tries to widen the seniority band down
+      salaryMin: 1, // tries to collapse the salary floor to nothing
+    } as unknown as Parameters<typeof mergeSearchParams>[0];
+    const merged = mergeSearchParams(hostileInput, PROFILE);
+    expect(merged.experience).toBe("senior"); // the profile's band, NOT the injected "junior"
+    expect(merged.salaryMin).toBe(120000); // the profile's floor, NOT the injected 1
+  });
 });
 
 describe("Should_EmitPostingsPart_When_SearchPostingsRuns (AC-7)", () => {
