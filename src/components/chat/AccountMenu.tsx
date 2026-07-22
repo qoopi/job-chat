@@ -5,14 +5,7 @@ import { MoonIcon, PersonIcon, SignOutIcon } from "@/components/icons";
 import { isAuthDialogOpen, setMenuOpen } from "@/lib/layers";
 import { useTheme } from "@/lib/theme";
 
-// The signed-in account affordance, VISIBLE in the title bar. A chip - avatar + first name + caret -
-// toggles a dropdown anchored top-right:
-//  1. header: email + muted "Personal account"
-//  2. "Your profile" -> opens the profile in the LCP
-//  3. "Dark mode" + a pill toggle (theme persisted via the cookie)
-//  4. "Sign out" (danger) -> ends the session and lands on the landing
-// The menu closes on outside click / Esc, and sits BELOW the auth dialog in layer priority (it yields
-// Esc while the dialog is open). Shared by the chat title bar and the landing header.
+// The signed-in account chip + dropdown (profile / dark mode / sign out). Sits BELOW the auth dialog in layer priority (yields Esc while it's open).
 export function AccountMenu({
   accountName,
   email,
@@ -32,15 +25,13 @@ export function AccountMenu({
   const initial = name[0]?.toUpperCase() ?? "A";
   const dark = theme === "Dark";
 
-  // Publish the menu's open state to the layer seam so the LCP's Esc handler yields while the
-  // menu is up (Esc order: dialog > menu > LCP). Reset on close/unmount so the flag never sticks true.
+  // Publish the menu's open state to the layer seam (Esc order: dialog > menu > LCP); reset on close so it never sticks.
   useEffect(() => {
     setMenuOpen(open);
     return () => setMenuOpen(false);
   }, [open]);
 
-  // Close on outside click / Esc while open. Below the dialog in layer priority: yield Esc while the
-  // auth dialog is up (the dialog's own handler also stops propagation, so this is order-independent).
+  // Close on outside click / Esc; yield Esc while the auth dialog is up (order-independent - the dialog also stops propagation).
   useEffect(() => {
     if (!open) return;
     function onClick(e: MouseEvent) {
@@ -76,8 +67,7 @@ export function AccountMenu({
         </span>
       </button>
       {open ? (
-        // A disclosure popover of buttons (not an ARIA menu widget - no roving-tabindex/arrow-key model
-        // to half-implement); the chip carries aria-expanded + aria-haspopup.
+        // A disclosure popover (not an ARIA menu widget); the chip carries aria-expanded + aria-haspopup.
         <div className="account-menu">
           <div className="account-menu-head">
             <div className="account-menu-email">{email ?? name}</div>

@@ -13,8 +13,7 @@ import type { DataPoint } from "@shared/insight";
 import { labelKeyOf, valueKeyOf } from "@/lib/insight-format";
 import { CHART_HEIGHT, TOOLTIP_STYLE, axisTickStyle } from "./chart-style";
 
-// Area trend (postings_trend: {day, count}) - a filled line rising to the latest point, which
-// carries an emphasized value label (the headline number). Colors from --chart-1.
+// Area trend: a filled line to the latest point, which carries an emphasized value label (the headline number).
 export function TrendChart({ series }: { series: DataPoint[] }) {
   const labelKey = labelKeyOf(series);
   const valueKey = valueKeyOf(series, labelKey);

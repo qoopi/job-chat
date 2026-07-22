@@ -7,9 +7,7 @@ import {
   type RefusalReason,
 } from "@/lib/insight-format";
 
-// The error card: compact message + Retry (re-runs the same question). Distinct copy for a system
-// failure vs an unanswerable question; never a stack trace. Retry is shown ONLY when an onRetry handler
-// is supplied - a mid-thread error card gets none (regenerate re-answers the tail, not this turn).
+// The error card: compact message + Retry (never a stack trace); Retry shows ONLY when onRetry is supplied (the tail card, not a mid-thread one).
 export function ErrorCard({
   kind,
   onRetry,
@@ -30,10 +28,7 @@ export function ErrorCard({
   );
 }
 
-// The GUEST cap is a warm register moment, NOT a red error:
-// an accent-soft in-thread card inviting a free account (which also saves the conversation), with a
-// primary "Create account" that opens the lazy dialog (`onSignIn`). Every other refusal - a signed-in
-// cap with no sign-in remedy, the daily budget, an over-length turn - stays the plain grey notice.
+// The GUEST cap is a warm register card (invites a free account); every other refusal stays the plain grey notice.
 export function RefusalNotice({
   reason,
   onSignIn,

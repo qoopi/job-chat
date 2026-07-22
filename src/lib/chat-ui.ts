@@ -11,13 +11,9 @@ import {
 } from "@shared/insight";
 import type { Profile } from "@shared/profile";
 
-// The client-side reading of a chat turn. `useChat` (via the Trigger transport) exposes messages as
-// `UIMessage[]` whose `parts` mix text with `data-*` parts; the store persists the same card payloads
-// as opaque JSON. Both funnel through here so the renderer (MessageList) treats a freshly streamed
-// card and a resumed one identically - one classifier, no drift. Pure (no React), so it is unit-tested
-// in isolation.
+// The client-side reading of a chat turn: a freshly streamed card and a resumed (persisted) one funnel
+// through one classifier here, so the renderer treats them identically (no drift). Pure (no React).
 
-/** A streaming skeleton part - the loading shape the agent writes before the tool returns. */
 export interface SkeletonCard {
   kind: "skeleton";
   chartType?: ChartType;
@@ -35,8 +31,7 @@ export type CardClass =
   | { kind: "profile-invite" }
   | { kind: "unknown" };
 
-/** The `data-<kind>` wire type each classified card persists/streams as. One home so `storeToUiMessages`
- *  (resume) and any live writer tag a part identically - the classifier reads them back the same way. */
+/** The `data-<kind>` wire type per card kind; one home so resume + live writer tag parts identically. */
 const PART_TYPE_BY_KIND: Record<string, string> = {
   insight: "data-insight",
   error: "data-error",
@@ -51,11 +46,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
-/**
- * The `data-*` parts of a message, each with a STABLE id: the part's own id, or `${message.id}-p${i}`.
- * MessageList keys its cards on this id and the LCP target references it, so both must derive it
- * the same way - one home here keeps them from drifting.
- */
+/** The `data-*` parts of a message, each with a STABLE id (own id or `${message.id}-p${i}`); one home so MessageList + the LCP target don't drift. */
 export function dataParts(message: UIMessage): { id: string; data: unknown }[] {
   return message.parts
     .filter((p) => typeof p.type === "string" && p.type.startsWith("data-"))
@@ -68,19 +59,12 @@ export interface LcpTarget {
   partId: string;
 }
 
-/** What a card-backed LCP shows: a full data table, the expanded profile, or the full postings list.
- *  (The profile FORM is a separate LCP state, opened from the menu / an invite, not a message part.) */
 export type LcpContent =
   | { kind: "table"; insight: DataInsight }
   | { kind: "profile-card"; profile: Profile }
   | { kind: "postings"; rows: ScoredPostingRow[]; total: number };
 
-/**
- * Resolve an LCP target back to its content from the current messages. The panel body is stored
- * by identity, not value, so it re-resolves from the immutable persisted payload - a resumed
- * conversation renders the same LCP. Null when the message/part is gone or is not an LCP-openable card
- * (a table insight, a profile card, or a postings card).
- */
+/** Resolve an LCP target to content: stored by identity, so it re-resolves from the persisted payload (resume renders the same LCP). */
 export function resolveLcpContent(messages: UIMessage[], target: LcpTarget): LcpContent | null {
   const message = messages.find((m) => m.id === target.messageId);
   if (!message) return null;
@@ -93,18 +77,13 @@ export function resolveLcpContent(messages: UIMessage[], target: LcpTarget): Lcp
   return null;
 }
 
-/** Back-compat table-only resolver (the LCP table path). Thin wrapper over `resolveLcpContent`. */
 export function resolveInsightTarget(messages: UIMessage[], target: LcpTarget): DataInsight | null {
   const c = resolveLcpContent(messages, target);
   return c?.kind === "table" ? c.insight : null;
 }
 
-/**
- * Classify a card payload (from a live `data-insight`/`data-error`/`data-refusal` part OR a resumed
- * store payload) into a render decision. The loading skeleton is detected first (its `status:"loading"`
- * fails the strict insight schema); then a valid insight; then the error / refusal markers. Anything
- * else is `unknown` (rendered as nothing) so a shape drift never throws in the render tree.
- */
+/** Classify a card payload (live OR resumed) into a render decision: skeleton first, then a valid insight,
+ *  then error/refusal markers; anything else is `unknown` (rendered as nothing) so a shape drift never throws. */
 export function classifyCardData(data: unknown): CardClass {
   if (isRecord(data) && data.status === "loading") {
     const chartType = data.kind === "chart" ? (data.chartType as ChartType | undefined) : undefined;
@@ -119,8 +98,7 @@ export function classifyCardData(data: unknown): CardClass {
     if (data.reason === "guest_cap" || data.reason === "daily_budget" || data.reason === "too_long") {
       return { kind: "refusal", reason: data.reason };
     }
-    // The profile + fresh-data kinds (029). Each validates strictly - a malformed profile-card / postings
-    // payload falls through to `unknown` (rendered as nothing) rather than throwing in the render tree.
+    // Each validates strictly - a malformed profile-card/postings payload falls through to `unknown`, never throwing.
     if (data.kind === "profile-card") {
       const pc = ProfileCardSchema.safeParse(data);
       if (pc.success) return { kind: "profile-card", profile: pc.data.profile };
@@ -140,22 +118,9 @@ export function isStreaming(status: string): boolean {
   return status === "submitted" || status === "streaming";
 }
 
-/**
- * Collapse duplicate message ids into a single entry, keeping first-seen order and replacing in place
- * with the latest occurrence (never appending a second copy).
- *
- * The merge seam: an existing conversation is hydrated into `useChat` from the store
- * (`storeToUiMessages` -> `initialMessages`). On a follow-up, `ChatClient` appends the user turn and
- * calls `resumeStream()`; the SDK's `reconnectToStream` subscribes with no `lastEventId` cursor, so the
- * server replays the session's `.out` tail from the start - re-emitting the ALREADY-HYDRATED assistant
- * turn under its original id. The AI SDK's write then `pushMessage`s that replayed turn (its id != the
- * just-appended user turn's id, so it is not treated as a continuation), landing a turn that is already
- * in the list a SECOND time under the same id. That is the operator's "two children with the same key"
- * at `MessageList` (`AssistantMessage key={m.id}`) and the old card visibly re-appearing.
- *
- * Reconciling by id here - replace, never append, order preserved - renders each turn exactly once
- * without suffixing keys (suffixing would key the duplicate uniquely and render the card twice).
- */
+/** Collapse duplicate message ids: replace in place (latest wins), first-seen order kept, never append a
+ *  second copy. reconnectToStream subscribes cursor-less and replays the `.out` tail, re-emitting an
+ *  already-hydrated turn under its id (a duplicate React key); reconciling by id renders each turn exactly once. */
 export function reconcileMessagesById(messages: UIMessage[]): UIMessage[] {
   const indexById = new Map<string, number>();
   const out: UIMessage[] = [];
@@ -171,15 +136,12 @@ export function reconcileMessagesById(messages: UIMessage[]): UIMessage[] {
   return out;
 }
 
-/** The concatenated text of a message's text parts (a plain answer or the one-line verdict prose). */
 export function messageText(message: Pick<UIMessage, "parts">): string {
   const texts = message.parts
     .filter((p): p is { type: "text"; text: string } => p.type === "text" && typeof (p as { text?: unknown }).text === "string")
     .map((p) => p.text);
-  // Preserve the boundary between adjacent text parts. The stream and the store both split prose into
-  // separate text parts (a data part or a step boundary ends one and starts the next); a plain `join("")`
-  // glued the last word of one part to the first of the next ("...market.The market..."). Insert a single
-  // space only where neither side already carries boundary whitespace, so existing spacing is never doubled.
+  // Preserve the boundary between adjacent text parts: a plain `join("")` glued word-to-word ("market.The
+  // market..."). Insert a single space only where neither side already carries boundary whitespace.
   let out = "";
   for (const t of texts) {
     if (out.length > 0 && !/\s$/.test(out) && !/^\s/.test(t)) out += " ";
@@ -193,12 +155,7 @@ export interface ProseSpan {
   bold: boolean;
 }
 
-/**
- * Split assistant prose into bold / plain spans for the ai bubble. The agent's answers arrive as light
- * markdown; render `**bold**` as a real bold span and strip the remaining inline markers (`code`,
- * *emph*, ATX headings) to plain text - no markdown library, the surface is one bubble of short prose.
- * User text is never passed through here (their question renders verbatim). Pure, so it is unit-tested.
- */
+/** Split assistant prose into bold/plain spans: render `**bold**`, strip other inline markers (no markdown library). User text never passes here. */
 export function proseSpans(text: string): ProseSpan[] {
   const spans: ProseSpan[] = [];
   const bold = /\*\*(.+?)\*\*/g;
@@ -221,8 +178,7 @@ function stripInlineMarkers(s: string): string {
     .replace(/\*\*/g, ""); // any unmatched bold marker
 }
 
-// A resumed store message. Structural, not the full `Store.Message` (which carries a Date and
-// conversation_id the renderer never reads) - keeps this module free of the postgres/store import.
+// A resumed store message; structural (not the full `Store.Message`) to keep this module free of the postgres/store import.
 export interface StoredMessage {
   id: string;
   role: "user" | "assistant";
@@ -230,19 +186,12 @@ export interface StoredMessage {
   parts: unknown;
 }
 
-/** One store payload can hold a single card or an array of them; normalize to a list. */
 function payloadList(parts: unknown): unknown[] {
   if (parts == null) return [];
   return Array.isArray(parts) ? parts : [parts];
 }
 
-/**
- * Hydrate persisted store messages into `UIMessage[]` for `useChat`'s initial state (resume).
- * A user message becomes one text part; an assistant message becomes its prose text (if any) plus one
- * `data-*` part per persisted card payload, tagged by the payload's kind so the renderer classifies it
- * exactly as it would a freshly streamed part. Cards keep a stable per-message part id so tab / chip
- * state survives re-render.
- */
+/** Hydrate persisted store messages into `UIMessage[]` (resume): each card becomes a `data-*` part tagged by its kind, so the renderer classifies it exactly as a streamed one. */
 export function storeToUiMessages(messages: StoredMessage[]): UIMessage[] {
   return messages.map((m) => {
     const parts: UIMessage["parts"] = [];
@@ -250,11 +199,9 @@ export function storeToUiMessages(messages: StoredMessage[]): UIMessage[] {
     if (m.role === "assistant") {
       payloadList(m.parts).forEach((payload, i) => {
         const cls = classifyCardData(payload);
-        // Never resume a stuck skeleton: a persisted loading payload (defensive - the agent already
-        // drops these) or an unrecognized shape is skipped so a resumed turn shows its real card only.
+        // Never resume a stuck skeleton or unknown shape - a resumed turn shows its real card only.
         if (cls.kind === "unknown" || cls.kind === "skeleton") return;
-        // Re-tag by the classified kind so a resumed profile-card / postings / invite part is read back
-        // exactly as the live stream wrote it (the classifier keys off the `data-<kind>` prefix + payload).
+        // Re-tag by the classified kind so a resumed part reads back exactly as the live stream wrote it.
         const type = PART_TYPE_BY_KIND[cls.kind] ?? "data-insight";
         parts.push({ type, id: `${m.id}-card-${i}`, data: payload } as UIMessage["parts"][number]);
       });

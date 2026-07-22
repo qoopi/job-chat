@@ -9,26 +9,13 @@ import { MockChatTransport } from "@/lib/e2e-transport";
 import { readPersistedSession, writePersistedSession } from "./chat-session-store";
 import type { jobChatAgent } from "../../trigger/chat";
 
-// The transport surface ChatClient drives: the standard `ChatTransport` plus `stopGeneration`. Session
-// state is owned entirely by the transport now - hydrated at construction from the persisted session
-// (`sessions`), refreshed via the `accessToken` callback on 401, and lazily started on the first send
-// (`startSession`). There is no imperative `setSession` seam. Both the real transport and the E2E mock
-// implement this.
+// The transport surface (ChatTransport + stopGeneration); session state is owned by the transport (hydrated, token-refreshed on 401, lazily started).
 export interface JobChatTransport extends ChatTransport<UIMessage> {
-  // Stop must reach the backend after a RESUMED mount: `useChat.stop()` aborts only the local reader
-  // (the AI SDK does not thread an abort through `reconnectToStream`), so the composer's onStop pairs it
-  // with `stopGeneration`, which posts `{kind:"stop"}` on `.in` and halts the agent's streamText.
+  // Stop must reach the backend after a RESUMED mount: `useChat.stop()` aborts only the local reader, so onStop pairs it with `stopGeneration` ({kind:"stop"} on `.in`).
   stopGeneration(chatId: string): Promise<boolean>;
 }
 
-// The transport seam. Production: the standard Trigger.dev chat transport (skill-endorsed, unchanged) -
-// it mints a session-scoped token from our ownership-checked `mintChatToken` action and streams the
-// durable run's `.out`. E2E: a scripted mock so the client loop runs with no Trigger/Bedrock. Both hooks
-// are called unconditionally (React rules), but the mock is only CONSTRUCTED under the e2e flag and its
-// substance lives in tests/ - src imports the `@/lib/e2e-transport` stub (zero mock bytes), and only the
-// E2E build (JOBCHAT_E2E=1) swaps in the real mock via next.config `turbopack.resolveAlias`, so a
-// production bundle ships no test code. `import type { jobChatAgent }` is erased at build, so no server
-// code (postgres, ClickHouse) leaks into the client.
+// Transport seam. Prod: the Trigger.dev transport (token via our ownership-checked `mintChatToken`). E2E: a scripted mock, CONSTRUCTED only under the e2e flag - no test/server code ships to the client.
 export function useJobChatTransport({
   e2e,
   conversationId,
@@ -36,15 +23,11 @@ export function useJobChatTransport({
   e2e: boolean;
   conversationId: string;
 }): JobChatTransport {
-  // Hydrate this conversation's persisted session at transport construction (the SDK reads `sessions`
-  // once, on first render). A settled entry makes `reconnectToStream` no-op; a live one lets it resume
-  // from the persisted `.out` cursor. Read once (SSR-guarded) - the transport ignores later changes.
+  // Hydrate the persisted session at construction (SDK reads `sessions` once); a settled entry no-ops reconnect, a live one resumes from the cursor.
   const [hydrated] = useState(() => {
     const s = readPersistedSession(conversationId);
     return s ? { [conversationId]: s } : undefined;
   });
-  // Constructed only under the e2e flag: in production the seam resolves to the stub, whose constructor
-  // is never reached (real transport is returned), so no mock instance and no mock bytes ship.
   const mock = useMemo(
     () => (e2e ? new MockChatTransport(hydrated) : null),
     [e2e, hydrated],
@@ -56,13 +39,9 @@ export function useJobChatTransport({
       if (!r.ok) throw new Error("chat session unavailable");
       return r.token;
     },
-    // Lazily start (or resume) the session on the first `sendMessage` for a chatId with no cached
-    // session - THE documented turn-1 delivery path (createStartSessionAction creates the Session +
-    // triggers the run + returns the browser token). Every follow-up reuses the cached session.
+    // Lazily start/resume the session on the first `sendMessage` - the turn-1 delivery path; follow-ups reuse the cached session.
     startSession: ({ chatId }) => startChatSession({ chatId }),
     sessions: hydrated,
-    // Persist every session change (token refresh, cursor advance, stream start/stop) so the next mount
-    // resumes exactly where this one left off; a null clears the stored key when the session closes.
     onSessionChange: writePersistedSession,
   });
   return e2e && mock ? mock : real;

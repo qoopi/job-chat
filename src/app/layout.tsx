@@ -3,9 +3,7 @@ import { Inter } from "next/font/google";
 import { cookies } from "next/headers";
 import "./globals.css";
 
-// Inter is the product typeface (Geist is a design-token alternative only). Self-hosted by next/font
-// so there is no external fetch and no flash of fallback text; exposed as --font-inter, which
-// globals.css wires into --font-sans.
+// Inter, self-hosted by next/font (no external fetch, no fallback flash); exposed as --font-inter.
 const inter = Inter({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],

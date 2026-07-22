@@ -5,8 +5,7 @@ import type { DataPoint } from "@shared/insight";
 import { labelKeyOf, valueKeyOf } from "@/lib/insight-format";
 import { CHART_COLORS, TOOLTIP_STYLE } from "./chart-style";
 
-// Share donut (share_split: {label, count}). The center shows the leading slice's share; a legend
-// list beside it names each slice with its count and percentage. Q5/Q6 are pinned to this visual.
+// Share donut: the center shows the leading slice's share; a legend beside it names each slice with count + percentage.
 export function DonutChart({ series }: { series: DataPoint[] }) {
   const labelKey = labelKeyOf(series);
   const valueKey = valueKeyOf(series, labelKey);

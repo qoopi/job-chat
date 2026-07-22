@@ -5,18 +5,12 @@ import { GITHUB_URL, HACKATHON_URL, SEARCHNAPPLY_URL } from "@/lib/links";
 import { isE2E } from "@/lib/e2e";
 import { listOwnerConversations, resolveViewer } from "@/lib/server-store";
 
-// Landing (mock 4b) - product in one shell-colored screen. The ask box + chips (LandingComposer) submit
-// the first message and hand off to the chat with the stream already attached. Credit
-// links live here: the hackathon credit in the header, GitHub + searchnapply in the footer.
-// The header is session-aware - the session is read server-side (resolveViewer) and seeds
-// LandingSignIn (signed-in shows "Open your chats" -> the most recent conversation + the account chip/menu;
-// guest shows Sign in), and a signed-in visitor gets a "Welcome back" sub-line. Skipped under E2E (no
-// Postgres/auth session there), where the landing is always the guest surface.
+// Landing: the ask box + chips (LandingComposer) hand off to the chat. Session-aware header (resolveViewer
+// seeds LandingSignIn); a signed-in visitor gets a "Welcome back" sub-line. Skipped under E2E (no auth session).
 export default async function Landing() {
   const e2e = isE2E();
   const viewer = e2e ? null : await resolveViewer();
-  // "Open your chats" targets the most recent conversation (else a fresh shell), and the last title feeds
-  // the welcome sub-line. One list read, signed-in only.
+  // "Open your chats" targets the most recent conversation (else a fresh shell); one list read, signed-in only.
   const recent = viewer?.accountUserId
     ? (await listOwnerConversations(viewer.accountUserId))[0]
     : undefined;

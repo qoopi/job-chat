@@ -4,12 +4,8 @@ import { useState } from "react";
 import type { Experience, Profile, Skill } from "@shared/profile";
 import { isGithubSkipped, profileSubline, profileTitle, splitSkills } from "@/lib/profile-format";
 
-// The profile card - an InsightCard child (verdict / body / foot anatomy, no tabs). Two surfaces:
-//  - ProfileCard: the in-chat compact identity card (+ a GitHub-skipped variant).
-//  - ProfileExpanded: the LCP full view, READ-ONLY this window (the mock's edit ✕ / + Add / Save-changes
-//    affordances are inert-omitted per the epic reconciliation; Update/Delete live in the form's saved
-//    state, not here).
-// Everything derives from the one `Profile` payload via the shared profile-format helpers.
+// The profile card (an InsightCard child, no tabs). Two surfaces: ProfileCard (in-chat compact) and
+// ProfileExpanded (LCP full view, READ-ONLY). Everything derives from the one `Profile` payload.
 
 const MAX_SKILLS = 6; // cap the in-chat skill row (proven first)
 

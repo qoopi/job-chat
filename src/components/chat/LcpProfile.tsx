@@ -6,20 +6,15 @@ import { deleteProfile, getMyProfile, getProfileRunStatus, saveProfile } from "@
 import { pollProfileSave } from "@/lib/profile-poll";
 import { isGithubSkipped, profileSubline, profileSummary, profileTitle } from "@/lib/profile-format";
 
-// The account's profile in the Left Chat Part - the five-state form (mock 04): empty -> saving (per-
-// source progress) -> saved (summary + Edit/Delete) | github-skipped (Retry GitHub) | error (previous
-// profile untouched). Save triggers the 028 action and polls getMyProfile until extraction terminates
-// (the poll core, profile-poll.ts, closes the re-save edge via the runId). On success it injects the
-// profile card into the live thread (onProfileSaved) so the user sees it without a reload.
+// The account's profile form in the LCP (five states: empty/saving/saved/github-skipped/error). Save polls
+// getMyProfile until extraction terminates (profile-poll.ts closes the re-save edge), then injects the card into the live thread.
 
-// The DECODED-PDF cap the form enforces before the round trip (the server also caps ~4.5MB; a hair over
-// is allowed there so a legit ~4MB file is never rejected).
+// The DECODED-PDF cap the form enforces before the round trip (the server also caps ~4.5MB).
 const MAX_PDF_BYTES = 4 * 1024 * 1024;
 
 type Status = "loading" | "form" | "saving" | "saved" | "github-skipped" | "error";
 
-// The e2e fixture profile - the automated suite has no Postgres, so a save short-circuits to this saved
-// profile (the invite -> form -> card path runs entirely against the mock transport).
+// The e2e fixture profile - the suite has no Postgres, so a save short-circuits to this (mock-transport path).
 const E2E_PROFILE: Profile = {
   titles: ["Senior Backend Engineer"],
   seniority: "senior",
@@ -82,12 +77,9 @@ export function LcpProfile({
   const [status, setStatus] = useState<Status>(e2e ? "form" : "loading");
   const [profile, setProfile] = useState<Profile | null>(null);
   const [savedGithub, setSavedGithub] = useState<string | null>(null); // the SAVED github username
-  // The error state's own copy gate - the POLL OUTCOME's `hadPriorProfile`, not derived from local
-  // `profile` state (they can diverge in a multi-tab race; the outcome is the source of truth for what
-  // ITS poll observed).
+  // The error copy gate = the POLL OUTCOME's `hadPriorProfile` (not local state, which can diverge in a multi-tab race).
   const [errorHadPriorProfile, setErrorHadPriorProfile] = useState(false);
 
-  // Form fields.
   const [resumeText, setResumeText] = useState("");
   const [githubInput, setGithubInput] = useState("");
   const [pdfName, setPdfName] = useState<string | null>(null);
@@ -105,8 +97,7 @@ export function LcpProfile({
     };
   }, []);
 
-  // Initial load: resolve the real state (saved / github-skipped / error / empty). e2e has no store, so
-  // it opens straight on the empty form.
+  // Initial load: resolve the real state (saved/github-skipped/error/empty); e2e opens on the empty form.
   useEffect(() => {
     if (e2e) return; // e2e already starts on the empty form (initial state)
     let alive = true;

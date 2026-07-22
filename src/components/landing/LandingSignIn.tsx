@@ -8,15 +8,8 @@ import { openAuthDialog } from "@/lib/auth-dialog";
 import { clearGuestSession } from "@/app/actions";
 import { AccountMenu } from "@/components/chat/AccountMenu";
 
-// The landing header's auth affordance. The session is read server-side (the landing
-// page resolves it via resolveViewer) and seeded here:
-//  - Guest -> "Sign in", which opens the lazy auth dialog (rendered by LandingComposer via the shared
-//    open-store). Unchanged.
-//  - Signed-in -> a primary "Open your chats" (-> the most recent conversation, else /chat/new) PLUS the
-//    same account chip + menu as the chat title bar: email header, Your profile, Dark mode, Sign out.
-// Sign-out mirrors the sidebar's (Better Auth signOut + rotate the guest cookie) but STAYS on the landing
-// and flips the header to guest IN PLACE - no navigation. The landing has no LCP, so "Your profile" routes
-// into the app (a fresh chat with the profile open).
+// The landing header's auth affordance (session seeded from the server resolve). Guest -> "Sign in" (opens the
+// dialog); signed-in -> "Open your chats" + the account menu. Sign-out flips to guest IN PLACE (no navigation).
 export function LandingSignIn({
   signedIn: signedInInitial = false,
   accountName,
@@ -29,7 +22,6 @@ export function LandingSignIn({
   openChatsHref?: string;
 }) {
   const router = useRouter();
-  // Seeded from the server resolve; a client sign-out flips it to guest in place (stay on the landing).
   const [signedIn, setSignedIn] = useState(signedInInitial);
 
   if (!signedIn) {

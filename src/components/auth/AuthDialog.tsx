@@ -8,17 +8,10 @@ import { GoogleIcon } from "@/components/icons";
 const FOCUSABLE_SELECTOR =
   'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
-// The lazy auth dialog (interaction-spec s6, mock 3a/5a). Opens ONLY on demand (Sign in tap or the cap
-// moment - never on load), sits topmost (dialog > LCP > thread), and closes on cancel / Esc / backdrop
-// with the chat untouched. Google-ONLY (email/password removed).
-// `signIn.social` is a full-page CLIENT-initiated redirect to Google; on success
-// Better Auth lands the browser on the STABLE `/auth/complete` route (which finalizes the sign-in
-// server-side), so there is NO in-page success callback - the dialog's job is to START the redirect. On
-// failure Better Auth bounces back to this page with `?error=<code>`; we read it on mount and surface it
-// here (never a silent reload). The host opens the dialog on `?error=` (useOpenAuthDialogOnError).
+// The lazy auth dialog: opens on demand, topmost, Google-ONLY. signIn.social is a full-page redirect; on
+// success Better Auth lands on /auth/complete (no in-page success callback), on failure it bounces back with ?error= (read + surfaced here).
 
-/** Map a Google/OAuth redirect error code to a human line. Google-only, so the realistic codes are the
- *  callback failures (cookie/state loss, an unlinkable account); anything else gets the generic retry. */
+/** Map a Google OAuth redirect error code to a human line; anything unknown gets the generic retry. */
 function googleErrorMessage(code: string): string {
   switch (code) {
     case "account_not_linked":
@@ -30,10 +23,8 @@ function googleErrorMessage(code: string): string {
   }
 }
 
-// `next` is the post-sign-in destination the HOST decides: the landing host passes
-// `/chat/new` (sign-in takes the user INTO the app), a chat host passes its own conversation path (sign-in
-// returns to that chat). It flows through /auth/complete's resolve-then-compare-origin safeNext guard, so
-// it must stay a same-origin path. Falls back to the current page for any host that omits it.
+// `next` is the post-sign-in destination the HOST decides (landing -> /chat/new; a chat -> its path). It flows
+// through /auth/complete's safeNext guard, so it must stay a same-origin path; falls back to the current page.
 export function AuthDialog({
   onClose,
   next,
@@ -41,10 +32,7 @@ export function AuthDialog({
   onClose: () => void;
   next?: string;
 }) {
-  // Seed the error from a Google redirect's `?error=<code>` (Better Auth's errorCallbackURL bounced the
-  // browser back here). Read in the initializer, not an effect: the dialog only ever mounts client-side
-  // (dialogOpen is false on the server), so `window` is defined and there is no SSR flash. The param is
-  // stripped by the effect below so a refresh does not re-surface a stale error.
+  // Seed the error from `?error=<code>` in the initializer (client-only mount, so `window` is defined, no SSR flash); stripped by the effect below.
   const [error, setError] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     const code = new URLSearchParams(window.location.search).get("error");
@@ -53,10 +41,8 @@ export function AuthDialog({
   const [loading, setLoading] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Esc closes the dialog. As the topmost layer it takes Esc over the LCP, and it does so INDEPENDENTLY
-  // of window keydown-listener registration order: `stopImmediatePropagation` suppresses every other
-  // window keydown listener (the LCP's Esc handler), so a single Esc closes only the dialog and never
-  // falls through to the layer beneath it - whether this listener runs before or after ChatClient's.
+  // Esc closes the dialog. As the topmost layer it uses stopImmediatePropagation to suppress every other
+  // window keydown listener (the LCP's Esc handler), so one Esc closes only the dialog - order-independent.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
@@ -67,9 +53,7 @@ export function AuthDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Modal a11y. Move focus INTO the
-  // dialog on open, contain Tab within it (a keyboard user must not reach the dimmed shell behind the
-  // modal - interaction-spec "Priority of layers"), and restore focus to the opener when it closes.
+  // Modal a11y: move focus INTO the dialog, contain Tab within it (no reaching the dimmed shell behind), restore focus to the opener on close.
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     const node = dialogRef.current;
@@ -99,8 +83,7 @@ export function AuthDialog({
     };
   }, []);
 
-  // Strip the surfaced `?error=` from the URL (the message is already seeded above) so a refresh /
-  // re-mount does not re-surface a stale error.
+  // Strip the surfaced `?error=` so a refresh doesn't re-surface a stale error (the message is already seeded).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (!params.has("error")) return;
@@ -117,20 +100,14 @@ export function AuthDialog({
     setError(null);
     setLoading(true);
     try {
-      // Full-page CLIENT-initiated redirect. STABLE callbackURL (a fixed route, not
-      // window.location.href) that finalizes the sign-in and lands the user on the HOST-decided `next`
-      // (landing -> /chat/new; a chat -> that chat); errorCallbackURL returns to THIS page so the ?error
-      // handler above can show what failed. Fall back to the current page when a host omits `next`.
+      // Full-page redirect: STABLE callbackURL finalizes the sign-in and lands on the HOST-decided `next`; errorCallbackURL returns HERE so the ?error handler shows failures.
       const dest = next ?? window.location.pathname + window.location.search;
       const res = await authClient.signIn.social({
         provider: "google",
         callbackURL: `/auth/complete?next=${encodeURIComponent(dest)}`,
         errorCallbackURL: window.location.pathname,
       });
-      // The better-auth client RESOLVES with { error } on HTTP failures (e.g. a 403 INVALID_ORIGIN) -
-      // it does NOT throw, so without this check nothing surfaces and the button stays dead in
-      // `loading`. On success the full-page redirect is already underway; loading stays true until
-      // the browser navigates away.
+      // better-auth RESOLVES with { error } on HTTP failures (it does NOT throw), so check it or the button stays dead in `loading`.
       if (res?.error) {
         setError("Google sign-in is unavailable right now.");
         setLoading(false);
