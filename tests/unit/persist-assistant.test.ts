@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Message, Store } from "@shared/store";
-import { persistAssistantTurn } from "../../trigger/persistence";
+import { extractAssistantPersistence, persistAssistantTurn } from "../../trigger/persistence";
 import { buildInsight } from "../../trigger/parts";
 
 // A turn that fails is a TURN - it persists its assistant row with the error card, so a
@@ -134,5 +134,55 @@ describe("persistAssistantTurn persists failed turns as turns (AC-6/7)", () => {
     expect(appended[0].content).toBe("Two words.");
     expect(appended[0].parts).toBeNull();
     expect(appended[0].id).toBe("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+  });
+});
+
+// Persistence acceptance for the three remaining part kinds (030): a postings / auth-invite /
+// profile-invite part must extract + persist as its strict payload (render once on reload), exactly as
+// the profile-card kind (028) and the insight/error/refusal kinds do. A skeleton or malformed shape must
+// still be dropped, so a failed turn never resumes as a stuck card.
+describe("extractAssistantPersistence accepts the postings + invite kinds (AC-1/AC-7)", () => {
+  const postings = {
+    kind: "postings",
+    rows: [
+      { title: "Senior Backend Engineer", company: "Google", city: "Berlin", remote: true, salaryMin: 150000, salaryMax: 190000, experience: "Senior", publishedAt: "2026-07-18 10:00:00", score: 9 },
+    ],
+    total: 23,
+  };
+
+  it("extracts a data-postings payload (score-ordered rows + total) as the persisted surface", () => {
+    const { parts } = extractAssistantPersistence({
+      parts: [{ type: "data-postings", id: "call-1", data: postings }],
+    });
+    expect(parts).toEqual(postings);
+  });
+
+  it("extracts the auth-invite and profile-invite marker payloads", () => {
+    expect(
+      extractAssistantPersistence({ parts: [{ type: "data-auth-invite", id: "call-1", data: { kind: "auth-invite" } }] }).parts,
+    ).toEqual({ kind: "auth-invite" });
+    expect(
+      extractAssistantPersistence({ parts: [{ type: "data-profile-invite", id: "call-1", data: { kind: "profile-invite" } }] }).parts,
+    ).toEqual({ kind: "profile-invite" });
+  });
+
+  it("drops a malformed postings payload (shape drift never persists as a stuck card)", () => {
+    const { parts } = extractAssistantPersistence({
+      parts: [{ type: "data-postings", id: "call-1", data: { kind: "postings", rows: "oops" } }],
+    });
+    expect(parts).toBeNull();
+  });
+
+  it("persists a postings turn's payload through the store (round-trips as the postings card)", async () => {
+    const { store, appended } = fakeStore();
+    const responseMessage = {
+      id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      role: "assistant",
+      parts: [{ type: "data-postings", id: "call-1", data: postings }],
+    };
+    await persistAssistantTurn(store, { conversationId: "c1", responseMessage });
+    expect(appended).toHaveLength(1);
+    expect(appended[0].parts).toEqual(postings);
+    expect(appended[0].id).toBe("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
   });
 });
