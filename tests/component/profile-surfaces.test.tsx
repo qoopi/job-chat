@@ -207,6 +207,22 @@ describe("PostingsCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
     expect(onEdit).toHaveBeenCalled();
   });
+
+  // The 029-inherited rows-cap-50 contract (030's emitter obligation): total<=50 means the `rows` array
+  // IS the complete matched set, so "Open all {total}" is literal; total>50 means the emitter carried
+  // only the top-50 rows, so the chip must NOT claim "all" - it must read "Open top 50 of {total}".
+  test("boundary: total=50 (rows genuinely complete) keeps the literal 'Open all N' copy", () => {
+    const rows = Array.from({ length: 50 }, (_, i) => ({ ...postingsRows[0], title: `Role ${i}` }));
+    render(<PostingsCard rows={rows} total={50} onOpenPanel={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Open all 50 in panel" })).toBeTruthy();
+  });
+
+  test("boundary: total=51 (rows capped at 50) adapts the chip copy - never overclaims 'all'", () => {
+    const rows = Array.from({ length: 50 }, (_, i) => ({ ...postingsRows[0], title: `Role ${i}` }));
+    render(<PostingsCard rows={rows} total={51} onOpenPanel={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Open top 50 of 51 in panel" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open all 51 in panel" })).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------

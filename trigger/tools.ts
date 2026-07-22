@@ -7,6 +7,8 @@ import {
   type TemplateName,
 } from "@shared/analytics";
 import { ChartTypeSchema, type ChartType } from "@shared/insight";
+import type { Profile } from "@shared/profile";
+import type { CallerKind } from "./guard";
 import {
   buildComposedInsight,
   buildComposedSkeleton,
@@ -55,15 +57,36 @@ const DESCRIPTIONS: Record<TemplateName, string> = {
 };
 
 export type InsightPart = { type: "data-insight"; id: string; data: unknown };
-// Every part the agent writes to the chat stream: the tools emit insight/error; the run-level guard
-// backstop emits refusal (below).
-export type EmitPart = InsightPart | ErrorPart | RefusalPart;
+/** The postings card wire part (the search_postings emitter): `data-postings` + the strict payload. */
+export type PostingsEmitPart = { type: "data-postings"; id: string; data: unknown };
+/** The fit-intent invite wire parts (the request_profile emitter): the server picks which by identity. */
+export type InviteEmitPart = {
+  type: "data-auth-invite" | "data-profile-invite";
+  id: string;
+  data: unknown;
+};
+// Every part the agent writes to the chat stream: the tools emit insight/error/postings/invite; the
+// run-level guard backstop emits refusal (below).
+export type EmitPart = InsightPart | ErrorPart | RefusalPart | PostingsEmitPart | InviteEmitPart;
 export type { ErrorPart, RefusalPart };
 export type Emit = (part: EmitPart) => void;
 
 export interface CatalogDeps {
   analytics: Analytics;
   emit: Emit;
+  /**
+   * The conversation identity kind (request_profile picks auth-invite for a guest, profile-invite for a
+   * signed-in account). Resolved per turn from the owner's `auth_user_id` (guard.ts's rule); optional so
+   * the six-tool tests need not pass it. Unset => the guest (sign-in) card - the fail-safe.
+   */
+  callerKind?: CallerKind;
+  /**
+   * The conversation owner's structured profile (search_postings merges the model's search terms against
+   * it server-side). Resolved per turn; null/absent = no profile on file, so search_postings degrades to
+   * a "call request_profile" signal rather than searching. The profile object stays in this layer - it
+   * never reaches the ClickHouse path (AC-13); only DERIVED filter VALUES do.
+   */
+  profile?: Profile | null;
 }
 
 function catalogTool(name: TemplateName, deps: CatalogDeps) {
@@ -161,9 +184,108 @@ function composedTool(deps: CatalogDeps) {
   });
 }
 
+// ---- Profile-driven fit tools (search_postings + request_profile) -------------------------------
+// The two fit-intent tools. request_profile invites a profile-less user to create one (the SERVER
+// picks the card from identity, so the model can never emit the wrong one). search_postings runs the
+// deterministic scorer and emits the postings card; the server MERGES the model's search terms against
+// the stored profile - experience + salary floor are always the profile's (the model cannot inject a
+// field the note did not give it), while title terms / city / remote refinements are honored.
+
+/** The model-facing search_postings input: the SEARCH INTENT + optional follow-up refinements. The
+ *  authoritative filters (experience band, salary floor) are NOT here - the server takes them from the
+ *  profile so the model cannot leak or invent them. Strict, so an unknown key is rejected. */
+const SearchPostingsToolInput = z
+  .object({
+    titleTerms: z.array(z.string().min(1)).max(10).optional(),
+    cities: z.array(z.string().min(1)).max(20).optional(),
+    remoteOk: z.boolean().optional(),
+  })
+  .strict();
+type SearchToolInput = z.infer<typeof SearchPostingsToolInput>;
+
+/** Merge the model's search terms with the stored profile into the scorer's params. SERVER-authoritative
+ *  from the profile: `experience` (the seniority band) and `salaryMin` - the model cannot set these.
+ *  Model-refinable (a follow-up narrows, else the profile's own value is used): `titleTerms`, `cities`,
+ *  `remoteOk`. Pure, so the merge policy is unit-testable. `limit` is the emitter's hard cap (50). */
+export function mergeSearchParams(input: SearchToolInput, profile: Profile) {
+  return {
+    titleTerms: input.titleTerms && input.titleTerms.length > 0 ? input.titleTerms : profile.titles,
+    experience: profile.seniority ?? undefined, // authoritative - never from the model
+    cities: input.cities && input.cities.length > 0 ? input.cities : profile.locations,
+    remoteOk: input.remoteOk ?? profile.remotePref ?? undefined,
+    salaryMin: profile.salaryMin ?? undefined, // authoritative - never from the model
+    limit: 50, // the inherited contract: carry ALL matches up to the hard cap of 50
+  };
+}
+
+const SEARCH_POSTINGS_DESCRIPTION =
+  "Return the job postings that fit the signed-in user's stored profile, as the postings card. Call " +
+  "this on a personal fit-intent WHEN a PROFILE note is present. Supply titleTerms drawn from the " +
+  "profile's titles; optionally add cities or remoteOk to refine a follow-up ('only remote', 'in " +
+  "Berlin'). The server applies the profile's seniority and salary floor itself. The card is the whole " +
+  "answer - add no prose.";
+
+function searchPostingsTool(deps: CatalogDeps) {
+  return tool({
+    description: SEARCH_POSTINGS_DESCRIPTION,
+    inputSchema: SearchPostingsToolInput,
+    execute: async (rawInput, { toolCallId }) => {
+      const id = toolCallId;
+      // No profile on file: the model should have routed to request_profile. Degrade safely - emit no
+      // card, signal the model to re-route (never a fabricated shortlist).
+      if (!deps.profile) {
+        return { error: "No profile on file - call request_profile so the user can create one." };
+      }
+      const params = mergeSearchParams(rawInput as SearchToolInput, deps.profile);
+      try {
+        const { rows, total } = await deps.analytics.searchPostings(params);
+        deps.emit({ type: "data-postings", id, data: { kind: "postings", rows, total } });
+        return {
+          total,
+          shown: rows.length,
+          note:
+            total === 0
+              ? "No postings match this profile - the card states this. Add no prose and invent no postings."
+              : "The postings card is the complete answer - add no prose beside it.",
+        };
+      } catch (err) {
+        console.error(`[search_postings] query failed`, err);
+        deps.emit(errorPart(id, "system"));
+        return { error: "The search failed - tell the user something went wrong and to try again." };
+      }
+    },
+  });
+}
+
+const REQUEST_PROFILE_DESCRIPTION =
+  "The user asked for a personal job fit but has no usable profile yet (NO PROFILE note is present). " +
+  "Call this to invite them to set one up - the server emits the right card (sign in with Google for a " +
+  "guest, create-profile for a signed-in user). Takes no arguments; the card is the whole answer, add " +
+  "no prose.";
+
+function requestProfileTool(deps: CatalogDeps) {
+  return tool({
+    description: REQUEST_PROFILE_DESCRIPTION,
+    inputSchema: z.object({}).strict(),
+    execute: async (_input, { toolCallId }) => {
+      const id = toolCallId;
+      // Fail-safe: an unknown identity gets the guest (sign-in) card - the server decides, never the model.
+      const kind: CallerKind = deps.callerKind ?? "guest";
+      if (kind === "guest") {
+        deps.emit({ type: "data-auth-invite", id, data: { kind: "auth-invite" } });
+        return { invite: "auth", note: "The sign-in invite card is the whole answer - add no prose." };
+      }
+      deps.emit({ type: "data-profile-invite", id, data: { kind: "profile-invite" } });
+      return { invite: "profile", note: "The create-profile invite card is the whole answer - add no prose." };
+    },
+  });
+}
+
 export function buildCatalogTools(deps: CatalogDeps): ToolSet {
   const tools: ToolSet = {};
   for (const name of CATALOG_TOOL_NAMES) tools[name] = catalogTool(name, deps);
   tools.query_postings = composedTool(deps);
+  tools.search_postings = searchPostingsTool(deps);
+  tools.request_profile = requestProfileTool(deps);
   return tools;
 }

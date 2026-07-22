@@ -69,3 +69,18 @@ export function postingsVerdict(total: number, shown: number): string {
   if (shown >= total) return `${total} postings match your profile.`;
   return `${total} postings match your profile — showing the best ${shown}.`;
 }
+
+/** The postings part's emitter hard cap (trigger/tools.ts's `mergeSearchParams` mirrors this same 50 -
+ *  the inherited 029-review contract: the part carries ALL matching rows up to this cap). */
+export const POSTINGS_ROWS_CAP = 50;
+
+/**
+ * The "Open ... in panel" chip label - the ONE home for the rows-cap-50 honesty contract: when
+ * `total` is within the emitter's hard cap, `rows` genuinely IS the complete matched set, so "Open all
+ * {total}" is literal; when `total` exceeds the cap, the emitter truncated to the top-`rowsShown` rows,
+ * so the chip must not claim "all" - it reads "Open top {rowsShown} of {total}" instead.
+ */
+export function openPanelLabel(rowsShown: number, total: number): string {
+  if (total > POSTINGS_ROWS_CAP) return `Open top ${rowsShown} of ${total}`;
+  return `Open all ${total}`;
+}

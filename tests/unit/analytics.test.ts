@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ClickHouseClient } from "@clickhouse/client";
-import { buildComposedSql, buildTemplateSql, createAnalytics } from "@shared/analytics";
+import {
+  buildComposedSql,
+  buildSearchPostingsSql,
+  buildTemplateSql,
+  createAnalytics,
+  seniorityBand,
+  SENIORITY_BANDS,
+} from "@shared/analytics";
+import { SENIORITY_LEVELS } from "@shared/profile";
 
 describe("buildTemplateSql", () => {
   it("interpolates salary_compare cities + role and uses quantileExact over FINAL", () => {
@@ -480,6 +488,153 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
     expect(buildComposedSql({ measures: ["count"] }, "postings_test").sql).toContain(
       "FROM postings_test FINAL",
     );
+  });
+});
+
+// The profile-driven selection scorer (030). searchPostings builds a whitelisted, deterministic
+// scored query - the FIXED formula 3*min(titleTermHits,2) + 2*experienceMatch + 2*cityMatch +
+// 1*(remoteOk AND remote) + 1*salaryFloorMet, ORDER BY score DESC, publishedAt DESC. The seniority
+// mapping is case-insensitive over the live experience_level values (recorded 2026-07-22).
+describe("seniorityBand (case-insensitive mapping from the live experience_level values)", () => {
+  // The observed live DISTINCT values (open set, 2026-07-22): "Senior","Staff","Mid","senior","",
+  // "executive","mid-level","internship","principal". Each maps to one of the 4 profile bands (or "").
+  it.each([
+    ["Senior", "senior"],
+    ["senior", "senior"], // case variant seen live
+    ["Staff", "lead"],
+    ["Mid", "mid"],
+    ["mid-level", "mid"],
+    ["executive", "lead"],
+    ["principal", "lead"],
+    ["internship", "junior"],
+    ["", ""], // empty -> no band (no experience points)
+    ["Unheard-of Level", ""], // an unmapped value contributes no experience points
+  ])("maps %j -> %j", (input, band) => {
+    expect(seniorityBand(input)).toBe(band);
+  });
+});
+
+// One-home contract: BAND_KEYWORDS (private to shared/analytics.ts) is the SOLE source both
+// `seniorityBand` (TS, the requested-band normalization) and the SQL `multiIf` (seniorityBandSql, over
+// the posting's experience_level) derive from. A joint assertion per band - the TS mapping AND the SQL
+// clause for the SAME keyword - so a future refactor that forks them into two separate lists (defeating
+// the one-home design) fails here, even though today's single shared array cannot itself diverge.
+describe("BAND_KEYWORDS one home (TS seniorityBand + SQL multiIf move together)", () => {
+  it.each([
+    ["junior", "graduate"],
+    ["senior", "senior"],
+    ["lead", "director"],
+    ["mid", "intermediate"],
+  ])("the %s-band keyword %j classifies identically in TS and in the SQL multiIf", (band, keyword) => {
+    expect(seniorityBand(keyword)).toBe(band);
+    const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["x"], experience: keyword }, "postings");
+    // The SQL requested-band comparison target (2 * (multiIf(...) = '<band>')) must match seniorityBand's
+    // own answer for this keyword, and the multiIf must carry an ILIKE clause built from it.
+    expect(rowsSql).toContain(`= '${band}')`);
+    expect(rowsSql).toContain(`experience_level ILIKE '%${keyword}%'`);
+  });
+});
+
+// AC-13 forces a SECOND home for the seniority values: shared/analytics.ts may NOT import
+// @shared/profile, so SENIORITY_BANDS (the scorer's bands) duplicates the profile's SENIORITY_LEVELS with
+// no compile-time link. A test MAY import both (the grep gate is on the source, not tests), so this guards
+// the latent coupling: a new profile seniority level must be added to the scorer's bands in lockstep, or
+// this fails - the one place the two lists are checked to agree.
+describe("SENIORITY_BANDS agrees with the profile SENIORITY_LEVELS (forced-duplication guard, AC-13)", () => {
+  it("the scorer's bands are exactly the profile's seniority enum (same values, same count)", () => {
+    expect(new Set(SENIORITY_BANDS)).toEqual(new Set(SENIORITY_LEVELS));
+    expect(SENIORITY_BANDS.length).toBe(SENIORITY_LEVELS.length);
+  });
+});
+
+describe("Should_ScoreByFixedFormula_When_SearchPostingsBuilt (AC-7/AC-8)", () => {
+  const params = {
+    titleTerms: ["senior", "backend", "engineer"],
+    experience: "senior",
+    cities: ["Berlin", "Munich"],
+    remoteOk: true,
+    salaryMin: 150000,
+  };
+
+  it("emits the exact fixed score formula (weights 3/2/2/1/1) with the title-hit cap at 2", () => {
+    const { rowsSql } = buildSearchPostingsSql(params, "postings");
+    // 3 * least(<sum of title ILIKEs>, 2)
+    expect(rowsSql).toContain(
+      "3 * least((title ILIKE '%senior%') + (title ILIKE '%backend%') + (title ILIKE '%engineer%'), 2)",
+    );
+    // 2 * experienceMatch (the posting's mapped band = the requested band)
+    expect(rowsSql).toContain("2 * (multiIf(");
+    expect(rowsSql).toContain("= 'senior')");
+    // 2 * cityMatch
+    expect(rowsSql).toContain("2 * (city IN ('Berlin', 'Munich'))");
+    // 1 * (remoteOk AND remote)
+    expect(rowsSql).toContain("1 * (location_kind = 'remote')");
+    // 1 * salaryFloorMet (the posting ceiling reaches the requested floor; NULL salary is never a match)
+    expect(rowsSql).toContain("1 * (salary_max IS NOT NULL AND salary_max >= 150000)");
+  });
+
+  it("orders by score DESC then publishedAt DESC, over the open set, keeping only matches (score > 0)", () => {
+    const { rowsSql } = buildSearchPostingsSql(params, "postings");
+    expect(rowsSql).toContain("FROM postings FINAL");
+    expect(rowsSql).toContain("WHERE ingested_at = (SELECT max(ingested_at) FROM postings)");
+    expect(rowsSql).toContain("WHERE score > 0");
+    expect(rowsSql).toContain("ORDER BY score DESC, published_at DESC");
+    expect(rowsSql).toContain("LIMIT 10"); // interface default
+  });
+
+  it("maps the experience_level band case-insensitively via ILIKE (the live case variants)", () => {
+    const { rowsSql } = buildSearchPostingsSql(params, "postings");
+    expect(rowsSql).toContain("experience_level ILIKE '%senior%'");
+    expect(rowsSql).toContain("experience_level ILIKE '%staff%'"); // lead band keyword
+    expect(rowsSql).toContain("experience_level ILIKE '%intern%'"); // junior band keyword
+  });
+
+  it("drops a formula term to 0 when its param is absent (formula stays verbatim)", () => {
+    const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["engineer"] }, "postings");
+    expect(rowsSql).toContain("3 * least((title ILIKE '%engineer%'), 2)");
+    expect(rowsSql).toContain("2 * 0 + 2 * 0 + 1 * 0 + 1 * 0"); // experience/city/remote/salary all absent
+  });
+
+  it("does NOT add the experience term for an unmapped requested experience", () => {
+    const { rowsSql } = buildSearchPostingsSql(
+      { titleTerms: ["engineer"], experience: "wizard" },
+      "postings",
+    );
+    expect(rowsSql).toContain("3 * least((title ILIKE '%engineer%'), 2) + 2 * 0"); // no band -> 0
+  });
+
+  it("escapes injection-style free-text in titleTerms and cities (the chStr/likeEscape contract)", () => {
+    const { rowsSql } = buildSearchPostingsSql(
+      { titleTerms: ["x' OR '1'='1"], cities: ["y' OR '1'='1"] },
+      "postings",
+    );
+    expect(rowsSql).toContain("title ILIKE '%x\\' OR \\'1\\'=\\'1%'");
+    expect(rowsSql).toContain("city IN ('y\\' OR \\'1\\'=\\'1')");
+  });
+
+  it("computes the meta over the matched set (total, freshestAt, dominant company)", () => {
+    const { metaSql } = buildSearchPostingsSql(params, "postings");
+    expect(metaSql).toContain("count() AS c");
+    expect(metaSql).toContain("max(ingested_at) AS freshestAt");
+    expect(metaSql).toContain("WHERE score > 0");
+    expect(metaSql).toContain("GROUP BY company");
+    expect(metaSql).toContain("ORDER BY c DESC, company ASC");
+  });
+
+  it("honors the injected table name and a raised limit (the emitter's hard cap of 50)", () => {
+    const { rowsSql, metaSql } = buildSearchPostingsSql(
+      { titleTerms: ["engineer"], limit: 50 },
+      "postings_test",
+    );
+    expect(rowsSql).toContain("FROM postings_test FINAL");
+    expect(rowsSql).toContain("LIMIT 50");
+    expect(metaSql).toContain("FROM postings_test FINAL");
+  });
+
+  it("rejects invalid params at the boundary (Zod, strict)", () => {
+    expect(() => buildSearchPostingsSql({ titleTerms: ["a"], bogus: 1 }, "postings")).toThrow(); // strict
+    expect(() => buildSearchPostingsSql({ limit: 51 }, "postings")).toThrow(); // hard cap 50
+    expect(() => buildSearchPostingsSql({ salaryMin: -1 }, "postings")).toThrow(); // positive
   });
 });
 

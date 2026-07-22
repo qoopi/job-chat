@@ -1,4 +1,4 @@
-import type { EvalCase } from "./eval-set";
+import { casePopulation, type EvalCase } from "./eval-set";
 import { aggregate, GATE, type ScoredCase } from "./scorer";
 
 // Deterministic reporting (fixed order, no timestamps): a per-case line and the aggregate + gate summary.
@@ -72,6 +72,35 @@ export function printReport(scored: ScoredCase[]): void {
     `  scope     : ${agg.scopePass}/${agg.scopeTotal}  (${pct(agg.scopePass, agg.scopeTotal)})   (informational; 018 strand 5 market-wide scope qualification)`,
   );
   console.log(`  errors    : ${agg.errors} case(s) hit a runtime/model error`);
+
+  // Per-population gate (AC-14 is read PER-POPULATION, never the masking aggregate): the unchanged
+  // BASELINE (all non-profile cases) must hold >= total-1 tool+mode (34/35 on the full set), the 12
+  // charts all pass, and the REVISED P2 + NEW PROFILE subsets each pass in full.
+  const tm = (arr: ScoredCase[]) => arr.filter((s) => s.toolModePass).length;
+  const baseline = scored.filter((s) => casePopulation(s.id) === "baseline");
+  const p2 = scored.filter((s) => casePopulation(s.id) === "p2-revised");
+  const profile = scored.filter((s) => casePopulation(s.id) === "profile");
+  const unchanged = [...baseline, ...p2]; // the AC-14 "unchanged/baseline" population
+  const unchangedPass = tm(unchanged) >= unchanged.length - 1; // at most one regression among the 35
+  const chartsPass = agg.chartTotal > 0 && agg.chartPass === agg.chartTotal;
+  const p2Pass = tm(p2) === p2.length;
+  const profilePass = tm(profile) === profile.length;
+  const ac14 = unchangedPass && chartsPass && p2Pass && profilePass;
+  console.log(RULE);
+  console.log(`PER-POPULATION (AC-14 exit gate)`);
+  console.log(
+    `  unchanged/baseline : ${tm(unchanged)}/${unchanged.length} tool+mode   gate >= ${Math.max(unchanged.length - 1, 0)}/${unchanged.length} : ${unchangedPass ? "PASS" : "FAIL"}   (of which true-baseline ${tm(baseline)}/${baseline.length})`,
+  );
+  console.log(
+    `  charts             : ${agg.chartPass}/${agg.chartTotal}   gate all : ${chartsPass ? "PASS" : "FAIL"}`,
+  );
+  console.log(
+    `  revised P2         : ${tm(p2)}/${p2.length} tool+mode   gate all : ${p2Pass ? "PASS" : "FAIL"}`,
+  );
+  console.log(
+    `  new profile        : ${tm(profile)}/${profile.length} tool+mode   gate all : ${profilePass ? "PASS" : "FAIL"}`,
+  );
+  console.log(`  AC-14 (all populations) : ${ac14 ? "PASS" : "FAIL"}`);
 
   const failures = scored.filter(
     (s) => !s.toolModePass || (s.chartBearing && s.chartPass === false),

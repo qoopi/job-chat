@@ -225,6 +225,16 @@ export function fakeAnalytics(): Analytics {
   return {
     runQuery: async (name) => result(`-- fake template ${name}`),
     runComposedQuery: async () => result(`-- fake query_postings`),
+    // A fixed, schema-valid postings result so a with-profile search case registers a postings card
+    // (=> "data" mode). It never scores real rows - the harness judges the agent's CHOICES.
+    searchPostings: async () => ({
+      rows: [
+        { title: "Senior Backend Engineer", company: "Google", city: "Berlin", remote: true, salaryMin: 150000, salaryMax: 190000, experience: "Senior", publishedAt: "2026-07-18 10:00:00", score: 9 },
+        { title: "Staff Engineer", company: "Meta", city: "Berlin", remote: false, salaryMin: null, salaryMax: null, experience: "Staff", publishedAt: "2026-07-17 10:00:00", score: 7 },
+      ],
+      total: 2,
+      meta: { freshestAt: FIXTURE_INGESTED_AT, topCompany: "Google", topShare: 0.5 },
+    }),
     coverageProfile: fakeCoverageProfile,
   };
 }

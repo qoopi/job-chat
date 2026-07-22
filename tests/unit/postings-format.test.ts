@@ -5,6 +5,7 @@ import {
   hasSalary,
   isSeniorPlus,
   locationLabel,
+  openPanelLabel,
   postingsVerdict,
   salaryLabel,
   shownCount,
@@ -89,5 +90,19 @@ describe("shownCount / postingsVerdict", () => {
   });
   it("verdict omits the 'showing the best' clause when all are shown", () => {
     expect(postingsVerdict(5, 5)).toBe("5 postings match your profile.");
+  });
+});
+
+// The rows-cap-50 honesty contract (030-inherited from 029's review): the emitter carries ALL matching
+// rows up to a hard cap of 50, so "Open all {total}" is literal only while total is within that cap;
+// past it, rows is truncated to the top-50 and the chip must say so instead of overclaiming "all".
+describe("openPanelLabel", () => {
+  it("is literal 'Open all N' at and below the cap (rows is the complete set)", () => {
+    expect(openPanelLabel(23, 23)).toBe("Open all 23");
+    expect(openPanelLabel(50, 50)).toBe("Open all 50");
+  });
+  it("adapts to 'Open top N of M' once total exceeds the cap (rows is truncated)", () => {
+    expect(openPanelLabel(50, 51)).toBe("Open top 50 of 51");
+    expect(openPanelLabel(50, 200)).toBe("Open top 50 of 200");
   });
 });

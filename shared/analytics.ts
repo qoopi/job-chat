@@ -1,5 +1,9 @@
 import { z } from "zod";
 import type { ClickHouseClient } from "@clickhouse/client";
+// Type-only import (erased at build): the scored row is the searchPostings return shape's one home.
+// This is NOT the profile type/fields - AC-13 forbids the profile object in the CH path, never the
+// scored OUTPUT row, and a `import type` pulls no runtime profile code into this module.
+import type { ScoredPostingRow } from "@shared/insight";
 
 // The analytics catalog: the ONLY path from the agent to ClickHouse. Six parameterized SQL templates
 // (one per launch-question shape), each validated with Zod, read dedup-correct via FINAL, and bounded
@@ -30,6 +34,14 @@ const QUERY_SETTINGS = {
   // Return count()/UInt64 as JSON numbers (our counts are tiny; no precision risk) so callers get
   // numbers, not strings.
   output_format_json_quote_64bit_integers: 0,
+  // Make `x IN (...)` return 0 (never NULL) for a NULL left-hand value. ClickHouse's DEFAULT
+  // (transform_null_in = 0) evaluates `NULL IN ('a')` to NULL, NOT 0 (verified on the live server, v26.2).
+  // The searchPostings scorer's cityMatch term `(city IN (...))` sits INSIDE the score arithmetic, so a
+  // NULL there makes the whole `score` NULL and `WHERE score > 0` silently DROPS an otherwise-strong match
+  // that merely lists no city. transform_null_in = 1 yields the intended "no city point" (0) instead. Safe
+  // for every WHERE-clause IN too (NULL and 0 both exclude the row there), and the concrete city / currency
+  // sets never contain NULL, so the NULL==NULL equality this setting also enables never fires.
+  transform_null_in: 1,
 } as const;
 
 /** Escape a value as a ClickHouse single-quoted string literal (backslash-style escaping). */
@@ -479,6 +491,167 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   return { sql, where, openSet, reverse: chronologicalTrend, salary: isSalary };
 }
 
+// ---- Profile-driven selection scorer (searchPostings) -------------------------------------------
+// The deterministic postings scorer behind the search_postings tool: a whitelisted, interpolated,
+// scored query over the open set. Same safety contract as the templates (Zod-validated params, every
+// free-text value chStr/likeEscape-escaped, enum/numeric params typed). The score is a FIXED formula;
+// the seniority mapping is case-insensitive over the live experience_level values. No profile TYPE or
+// FIELD reaches here (AC-13) - only DERIVED filter VALUES (title terms, cities, a band string) do.
+
+/** The four profile seniority bands the free-text experience levels map to. */
+export const SENIORITY_BANDS = ["junior", "mid", "senior", "lead"] as const;
+export type SeniorityBand = (typeof SENIORITY_BANDS)[number];
+
+/**
+ * The keyword rules mapping a free-text experience_level to a band; FIRST match wins, unmatched -> "".
+ * Derived from the live DISTINCT experience_level values (open set, recorded 2026-07-22):
+ * "Senior" x1855, "Staff" x1086, "Mid" x417, "senior" x61, "" x28, "executive" x16, "mid-level" x12,
+ * "internship" x7, "principal" x6. Keyword substrings (not an exact set) so the mapping is robust to
+ * BOTH the case variants seen live AND unseen future values. ONE home: `seniorityBand` (the requested-
+ * band normalization) and `seniorityBandSql` (the posting-side SQL) both derive from this.
+ */
+const BAND_KEYWORDS: { band: SeniorityBand; keywords: string[] }[] = [
+  { band: "junior", keywords: ["junior", "intern", "entry", "graduate", "trainee"] },
+  { band: "senior", keywords: ["senior"] },
+  { band: "lead", keywords: ["lead", "staff", "principal", "executive", "director", "head"] },
+  { band: "mid", keywords: ["mid", "intermediate"] },
+];
+
+/** The band a free-text experience level maps to (case-insensitive), or "" when none matches (no
+ *  experience points). The requested experience is normalized through this before it is compared. */
+export function seniorityBand(text: string): SeniorityBand | "" {
+  const t = text.toLowerCase();
+  for (const { band, keywords } of BAND_KEYWORDS)
+    if (keywords.some((k) => t.includes(k))) return band;
+  return "";
+}
+
+/** The SQL band expression over a column: a multiIf mirroring `seniorityBand`, using ILIKE so it is
+ *  case-insensitive across the live case variants. Unmatched -> '' (never equals a requested band). */
+function seniorityBandSql(column: string): string {
+  const clauses = BAND_KEYWORDS.map(({ band, keywords }) => {
+    // likeEscape each keyword (as roleFilter does) so a future keyword carrying `_`/`%` matches
+    // literally, never as a wildcard - defense-in-depth; today's BAND_KEYWORDS are metacharacter-free.
+    const cond = keywords.map((k) => `${column} ILIKE ${chStr(`%${likeEscape(k)}%`)}`).join(" OR ");
+    return `${cond}, ${chStr(band)}`;
+  });
+  return `multiIf(${clauses.join(", ")}, '')`;
+}
+
+/**
+ * The searchPostings params: DERIVED filter VALUES only (the server builds these from the stored
+ * profile; the profile object never crosses this boundary). `experience` is a band string; `limit`
+ * defaults to the interface's 10 and is hard-capped at 50 (the emitter raises it to 50 to carry all
+ * matches up to that cap). Strict, so an unknown key is rejected, not stripped. Analytics-internal (the
+ * search_postings TOOL input is a separate, narrower schema in trigger/tools.ts) - not exported.
+ */
+const SearchPostingsParams = z
+  .object({
+    titleTerms: z.array(z.string().min(1)).max(10).default([]),
+    experience: z.string().min(1).nullish(),
+    cities: z.array(z.string().min(1)).max(20).default([]),
+    remoteOk: z.boolean().optional(),
+    salaryMin: z.number().int().positive().max(1_000_000_000).optional(),
+    limit: z.number().int().positive().max(50).default(10),
+  })
+  .strict();
+type SearchPostingsQuery = z.infer<typeof SearchPostingsParams>;
+
+/**
+ * The FIXED score formula (implemented verbatim per the epic):
+ *   3*min(titleTermHits,2) + 2*experienceMatch + 2*cityMatch + 1*(remoteOk AND remote) + 1*salaryFloorMet
+ * A term whose param is absent contributes the literal `0`, so the formula stays whole. `salaryFloorMet`
+ * = the posting's ceiling reaches the requested floor (a NULL salary is never a match).
+ */
+function scoreExpr(p: SearchPostingsQuery): string {
+  const titleHits =
+    p.titleTerms.length > 0
+      ? `least(${p.titleTerms.map((t) => `(title ILIKE ${chStr(`%${likeEscape(t)}%`)})`).join(" + ")}, 2)`
+      : "0";
+  const band = p.experience ? seniorityBand(p.experience) : "";
+  const expMatch = band ? `(${seniorityBandSql("experience_level")} = ${chStr(band)})` : "0";
+  const cityMatch =
+    p.cities.length > 0 ? `(city IN (${p.cities.map((c) => chStr(c)).join(", ")}))` : "0";
+  const remoteMatch = p.remoteOk ? "(location_kind = 'remote')" : "0";
+  const salaryMatch =
+    p.salaryMin !== undefined
+      ? `(salary_max IS NOT NULL AND salary_max >= ${p.salaryMin})`
+      : "0";
+  return `3 * ${titleHits} + 2 * ${expMatch} + 2 * ${cityMatch} + 1 * ${remoteMatch} + 1 * ${salaryMatch}`;
+}
+
+/**
+ * Build the rows + meta SQL for searchPostings (pure, like buildTemplateSql/buildComposedSql - the SQL
+ * and the param validation are unit-testable without a client). The score is computed once in an inner
+ * subquery so the outer can filter (score > 0, matches only) and order by the alias cleanly. Meta is
+ * the per-company match counts (reduced in TS to total + dominant company + freshestAt). Open set only
+ * (current-state selection).
+ */
+export function buildSearchPostingsSql(
+  rawParams: unknown,
+  table: string,
+): { rowsSql: string; metaSql: string } {
+  const p = SearchPostingsParams.parse(rawParams);
+  const score = scoreExpr(p);
+  const openSet = openSetFilter(table);
+  const rowsSql = assemble([
+    "SELECT",
+    "  title,",
+    "  company,",
+    "  city,",
+    "  remote,",
+    "  salary_min,",
+    "  salary_max,",
+    "  experience,",
+    "  publishedAt,",
+    "  score",
+    "FROM (",
+    "  SELECT",
+    "    title,",
+    "    company,",
+    "    city,",
+    "    (location_kind = 'remote') AS remote,",
+    "    salary_min,",
+    "    salary_max,",
+    "    experience_level AS experience,",
+    "    toString(published_at) AS publishedAt,",
+    "    published_at,",
+    `    ${score} AS score`,
+    `  FROM ${table} FINAL`,
+    `  WHERE ${openSet}`,
+    ")",
+    "WHERE score > 0",
+    "ORDER BY score DESC, published_at DESC",
+    `LIMIT ${p.limit}`,
+  ]);
+  const metaSql = assemble([
+    "SELECT",
+    "  company,",
+    "  count() AS c,",
+    "  max(ingested_at) AS freshestAt",
+    "FROM (",
+    "  SELECT",
+    "    company,",
+    "    ingested_at,",
+    `    ${score} AS score`,
+    `  FROM ${table} FINAL`,
+    `  WHERE ${openSet}`,
+    ")",
+    "WHERE score > 0",
+    "GROUP BY company",
+    "ORDER BY c DESC, company ASC",
+  ]);
+  return { rowsSql, metaSql };
+}
+
+/** The searchPostings result: the scored rows (matches only, ordered), the pre-limit total for the
+ *  "8 of 23" framing, and the dominance/freshness meta over the matched set. */
+export interface SearchPostingsResult {
+  rows: ScoredPostingRow[];
+  total: number;
+  meta: { freshestAt: string; topCompany: string; topShare: number };
+}
+
 export interface QueryResult {
   sql: string;
   rows: Record<string, unknown>[];
@@ -506,6 +679,13 @@ export interface Analytics {
   // The execution seam for query_postings (the query_postings tool calls this). Tools receive Analytics, never a raw
   // client, so the composed path must live on the interface too.
   runComposedQuery(params: unknown): Promise<QueryResult>;
+  /**
+   * The profile-driven selection: deterministic scored SQL over the open postings. Returns the matched
+   * rows (score > 0) ordered by the FIXED formula, the pre-limit total, and the dominance/freshness
+   * meta. Params are DERIVED filter VALUES only (never the profile object - AC-13). The search_postings
+   * tool is the sole caller (like runComposedQuery is for query_postings).
+   */
+  searchPostings(params: unknown): Promise<SearchPostingsResult>;
   /**
    * The corpus shape for the DATA SCOPE prompt note. ONE cheap query, memoized on the
    * analytics instance - which is a per-process singleton (trigger/chat.ts), so it runs once per PROCESS
@@ -606,9 +786,52 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     };
   }
 
+  // The scored selection: run the rows query and the per-company match-count meta concurrently (max-
+  // not sum-latency), then map the raw rows to ScoredPostingRow and reduce the meta groups to the
+  // total + dominant company + freshestAt. A NULL/empty city maps to null ("not listed"), the remote
+  // UInt8 to a boolean. A 0-match query returns rows=[] and total=0 (the card's honest no-match state).
+  async function searchPostings(rawParams: unknown): Promise<SearchPostingsResult> {
+    const { rowsSql, metaSql } = buildSearchPostingsSql(rawParams, table);
+    const [rawRows, metaRows] = await Promise.all([
+      client
+        .query({ query: rowsSql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })
+        .then((rs) => rs.json<Record<string, unknown>>()),
+      client
+        .query({ query: metaSql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })
+        .then((rs) => rs.json<{ company: string; c: number; freshestAt: string }>()),
+    ]);
+    const rows: ScoredPostingRow[] = rawRows.map((r) => ({
+      title: String(r.title),
+      company: String(r.company),
+      city: r.city == null || r.city === "" ? null : String(r.city),
+      remote: Number(r.remote) === 1,
+      salaryMin: r.salary_min == null ? null : Number(r.salary_min),
+      salaryMax: r.salary_max == null ? null : Number(r.salary_max),
+      experience: String(r.experience),
+      publishedAt: String(r.publishedAt),
+      score: Number(r.score),
+    }));
+    const total = metaRows.reduce((sum, m) => sum + Number(m.c), 0);
+    const top = metaRows[0]; // ordered c DESC, company ASC - the dominant company
+    const freshestAt = metaRows.reduce(
+      (f, m) => (String(m.freshestAt) > f ? String(m.freshestAt) : f),
+      "",
+    );
+    return {
+      rows,
+      total,
+      meta: {
+        freshestAt,
+        topCompany: top ? String(top.company) : "",
+        topShare: total > 0 && top ? Number(top.c) / total : 0,
+      },
+    };
+  }
+
   return {
     runQuery: (name, params) => executeBuilt(buildTemplateSql(name, params, table)),
     runComposedQuery: (params) => executeBuilt(buildComposedSql(params, table)),
+    searchPostings,
     // Cache only a FULFILLED result: on rejection, clear the memo so the next call retries (never a
     // permanently-poisoned rejected promise).
     coverageProfile: () =>

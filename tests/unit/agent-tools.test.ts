@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Analytics } from "@shared/analytics";
-import { buildCatalogTools, CATALOG_TOOL_NAMES } from "../../trigger/tools";
+import type { Profile } from "@shared/profile";
+import { buildCatalogTools, CATALOG_TOOL_NAMES, mergeSearchParams } from "../../trigger/tools";
 import type { EmitPart } from "../../trigger/tools";
 
 const opts = { toolCallId: "call-1", messages: [] } as unknown as Parameters<
@@ -27,6 +28,7 @@ describe("buildCatalogTools", () => {
       })),
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
+      searchPostings: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.top_companies.execute!({}, opts);
@@ -49,6 +51,7 @@ describe("buildCatalogTools", () => {
       })),
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
+      searchPostings: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.salary_distribution.execute!({ city: "SF" }, opts);
@@ -70,6 +73,7 @@ describe("buildCatalogTools", () => {
       }),
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
+      searchPostings: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.salary_distribution.execute!({ city: "SF" }, opts);
@@ -86,6 +90,7 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
     return {
       runQuery: vi.fn(),
       coverageProfile: vi.fn(),
+      searchPostings: vi.fn(),
       runComposedQuery: vi.fn(async () =>({
         sql: "SELECT company, count() AS count FROM postings FINAL WHERE country = 'United States'",
         rows,
@@ -166,6 +171,7 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
     const analytics: Analytics = {
       runQuery: vi.fn(),
       coverageProfile: vi.fn(),
+      searchPostings: vi.fn(),
       runComposedQuery: vi.fn(async () =>{
         throw new Error("ClickHouse unreachable");
       }),
@@ -179,5 +185,158 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
 
     expect(emitted.some((p) => p.type === "data-error" && p.data.kind === "system")).toBe(true);
     expect((out as { error?: string }).error).toBeTruthy();
+  });
+});
+
+// The profile-driven fit tools (030): search_postings emits the postings card + merges the model's
+// terms against the stored profile server-side; request_profile emits the invite the SERVER picks from
+// identity. Both are always registered so the prompt can route fit-intents to them.
+const PROFILE: Profile = {
+  titles: ["Backend Engineer"],
+  seniority: "senior",
+  skills: [{ name: "TypeScript", source: "both" }],
+  locations: ["Berlin"],
+  remotePref: true,
+  salaryMin: 120000,
+  yearsExp: 8,
+  domains: ["fintech"],
+  ossHighlights: [],
+  experience: [],
+};
+
+describe("buildCatalogTools registers the fit tools (search_postings + request_profile)", () => {
+  it("exposes search_postings and request_profile alongside the query tools", () => {
+    const tools = buildCatalogTools({ analytics: {} as Analytics, emit: () => {} });
+    expect(tools).toHaveProperty("search_postings");
+    expect(tools).toHaveProperty("request_profile");
+  });
+});
+
+describe("mergeSearchParams (server-authoritative profile merge)", () => {
+  it("takes experience + salaryMin from the profile ONLY - the model cannot inject them", () => {
+    const merged = mergeSearchParams(
+      // A hostile model tries to widen the salary floor / seniority via extra keys - they are ignored:
+      // the tool schema is strict (they never arrive) and the merge reads the profile for those fields.
+      { titleTerms: ["staff engineer"] },
+      PROFILE,
+    );
+    expect(merged.experience).toBe("senior"); // from the profile band
+    expect(merged.salaryMin).toBe(120000); // from the profile floor
+    expect(merged.titleTerms).toEqual(["staff engineer"]); // the model supplies the search intent
+    expect(merged.cities).toEqual(["Berlin"]); // falls back to the profile's own locations
+    expect(merged.remoteOk).toBe(true); // falls back to the profile's remotePref
+    expect(merged.limit).toBe(50); // the emitter's hard cap
+  });
+
+  it("honors a model refinement for cities/remoteOk (the follow-up path), falls back to the profile otherwise", () => {
+    const refined = mergeSearchParams({ cities: ["Munich"], remoteOk: false }, PROFILE);
+    expect(refined.cities).toEqual(["Munich"]);
+    expect(refined.remoteOk).toBe(false);
+    expect(refined.titleTerms).toEqual(["Backend Engineer"]); // no model terms -> the profile's titles
+  });
+
+  // Mutation check: the tool schema's `.strict()` blocks an injected experience/salaryMin key BEFORE it
+  // reaches mergeSearchParams in production - but that is a schema-layer guarantee, not a merge-logic one.
+  // This forces a model-supplied value THROUGH the merge itself (a raw cast, as if a differently-shaped
+  // caller bypassed the schema), proving mergeSearchParams's OWN policy - not just the schema - discards
+  // it: the profile's values win regardless of what the input object carries.
+  it("a model-supplied experience/salaryMin that reaches the merge is IGNORED - the profile's value always wins", () => {
+    const hostileInput = {
+      titleTerms: ["staff engineer"],
+      experience: "junior", // forced through past the schema - tries to widen the seniority band down
+      salaryMin: 1, // tries to collapse the salary floor to nothing
+    } as unknown as Parameters<typeof mergeSearchParams>[0];
+    const merged = mergeSearchParams(hostileInput, PROFILE);
+    expect(merged.experience).toBe("senior"); // the profile's band, NOT the injected "junior"
+    expect(merged.salaryMin).toBe(120000); // the profile's floor, NOT the injected 1
+  });
+});
+
+describe("Should_EmitPostingsPart_When_SearchPostingsRuns (AC-7)", () => {
+  function searchAnalytics(rows: unknown[], total: number): Analytics {
+    return {
+      runQuery: vi.fn(),
+      runComposedQuery: vi.fn(),
+      coverageProfile: vi.fn(),
+      searchPostings: vi.fn(async () => ({
+        rows: rows as never,
+        total,
+        meta: { freshestAt: "2026-07-18 06:00:00", topCompany: "Google", topShare: 0.5 },
+      })),
+    };
+  }
+
+  it("emits a data-postings part with the scored rows + total and merges terms against the profile", async () => {
+    const emitted: EmitPart[] = [];
+    const rows = [
+      { title: "Senior Backend Engineer", company: "Google", city: "Berlin", remote: true, salaryMin: 150000, salaryMax: 190000, experience: "Senior", publishedAt: "2026-07-18 10:00:00", score: 9 },
+    ];
+    const analytics = searchAnalytics(rows, 23);
+    const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p), profile: PROFILE });
+
+    const out = await tools.search_postings.execute!({ titleTerms: ["backend"] }, opts);
+
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({ type: "data-postings", id: "call-1", data: { kind: "postings", rows, total: 23 } });
+    // The scorer received the profile-authoritative fields, not model-injected ones.
+    const passed = (analytics.searchPostings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(passed).toMatchObject({ titleTerms: ["backend"], experience: "senior", salaryMin: 120000, limit: 50 });
+    // The card is the whole answer (the model view carries the count, not prose).
+    expect((out as { total: number }).total).toBe(23);
+  });
+
+  it("emits no card and signals request_profile when there is no profile on file", async () => {
+    const emitted: EmitPart[] = [];
+    const analytics = searchAnalytics([], 0);
+    const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) }); // no profile
+
+    const out = await tools.search_postings.execute!({ titleTerms: ["backend"] }, opts);
+
+    expect(emitted).toEqual([]); // never a fabricated shortlist
+    expect(analytics.searchPostings).not.toHaveBeenCalled();
+    expect((out as { error: string }).error).toContain("request_profile");
+  });
+
+  it("taxonomizes a search failure as a system error without throwing", async () => {
+    const emitted: EmitPart[] = [];
+    const analytics: Analytics = {
+      runQuery: vi.fn(),
+      runComposedQuery: vi.fn(),
+      coverageProfile: vi.fn(),
+      searchPostings: vi.fn(async () => {
+        throw new Error("ClickHouse unreachable");
+      }),
+    };
+    const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p), profile: PROFILE });
+
+    const out = await tools.search_postings.execute!({ titleTerms: ["backend"] }, opts);
+
+    expect(emitted.some((p) => p.type === "data-error" && (p.data as { kind?: string }).kind === "system")).toBe(true);
+    expect((out as { error?: string }).error).toBeTruthy();
+  });
+});
+
+describe("Should_EmitInvitePart_When_RequestProfileRuns (AC-1, callerKind branches)", () => {
+  it("emits the auth-invite (sign-in) card for a guest", async () => {
+    const emitted: EmitPart[] = [];
+    const tools = buildCatalogTools({ analytics: {} as Analytics, emit: (p) => emitted.push(p), callerKind: "guest" });
+    const out = await tools.request_profile.execute!({}, opts);
+    expect(emitted).toEqual([{ type: "data-auth-invite", id: "call-1", data: { kind: "auth-invite" } }]);
+    expect((out as { invite: string }).invite).toBe("auth");
+  });
+
+  it("emits the create-profile invite card for a signed-in account", async () => {
+    const emitted: EmitPart[] = [];
+    const tools = buildCatalogTools({ analytics: {} as Analytics, emit: (p) => emitted.push(p), callerKind: "account" });
+    const out = await tools.request_profile.execute!({}, opts);
+    expect(emitted).toEqual([{ type: "data-profile-invite", id: "call-1", data: { kind: "profile-invite" } }]);
+    expect((out as { invite: string }).invite).toBe("profile");
+  });
+
+  it("fails safe to the guest (sign-in) card when the identity is unknown", async () => {
+    const emitted: EmitPart[] = [];
+    const tools = buildCatalogTools({ analytics: {} as Analytics, emit: (p) => emitted.push(p) }); // no callerKind
+    await tools.request_profile.execute!({}, opts);
+    expect(emitted[0]).toMatchObject({ type: "data-auth-invite" });
   });
 });

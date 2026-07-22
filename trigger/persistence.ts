@@ -1,5 +1,11 @@
 import type { UIMessage } from "ai";
-import { DataInsightSchema, ProfileCardSchema } from "@shared/insight";
+import {
+  AuthInviteSchema,
+  DataInsightSchema,
+  PostingsSchema,
+  ProfileCardSchema,
+  ProfileInviteSchema,
+} from "@shared/insight";
 import type { Store, MessageRole } from "@shared/store";
 import { MAX_INPUT_CHARS } from "./guard";
 
@@ -17,6 +23,9 @@ type MessageLike = { id?: string; parts?: MessagePartLike[] };
 function isPersistablePayload(data: unknown): boolean {
   if (DataInsightSchema.safeParse(data).success) return true;
   if (ProfileCardSchema.safeParse(data).success) return true; // the out-of-band profile card
+  if (PostingsSchema.safeParse(data).success) return true; // the postings card (search_postings)
+  if (AuthInviteSchema.safeParse(data).success) return true; // the guest fit-intent invite
+  if (ProfileInviteSchema.safeParse(data).success) return true; // the signed-in fit-intent invite
   if (typeof data !== "object" || data === null) return false;
   const d = data as Record<string, unknown>;
   if (d.kind === "system" || d.kind === "unanswerable") return true; // error marker
@@ -55,7 +64,10 @@ export function extractAssistantPersistence(message: MessageLike): {
       p.type === "data-insight" ||
       p.type === "data-error" ||
       p.type === "data-refusal" ||
-      p.type === "data-profile-card"
+      p.type === "data-profile-card" ||
+      p.type === "data-postings" ||
+      p.type === "data-auth-invite" ||
+      p.type === "data-profile-invite"
     ) {
       byId.set(p.id ?? `#${anon++}`, p.data);
     }

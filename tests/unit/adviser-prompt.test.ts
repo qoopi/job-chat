@@ -133,6 +133,22 @@ describe("adviser-v2 system prompt", () => {
     expect(ADVISER_V2.toLowerCase()).toMatch(/general knowledge|general-knowledge/);
   });
 
+  // Fit-intent routing (030): a personal job match is no longer a refusal. With a PROFILE note ->
+  // search_postings; without one -> request_profile (the server picks the invite). The retired
+  // "I cannot match you to roles" line must be gone.
+  it("routes fit-intents to search_postings (with a profile) or request_profile (without), by the PROFILE note", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(ADVISER_V2).toContain("search_postings");
+    expect(ADVISER_V2).toContain("request_profile");
+    expect(p).toMatch(/fit-intent|personal (job )?match/);
+    expect(p).toContain("profile note"); // routing keys off the per-turn PROFILE note
+  });
+
+  it("no longer refuses to match (the 'cannot match you to roles' line is retired)", () => {
+    expect(ADVISER_V2.toLowerCase()).not.toContain("cannot match");
+    expect(ADVISER_V2.toLowerCase()).toMatch(/can match people|unable to match/);
+  });
+
   it("guardrails: always steer to jobs, and stay out of medical/legal/financial professional advice (career IS in scope)", () => {
     const p = ADVISER_V2.toLowerCase();
     expect(p).toMatch(/always .*steer|always end by steering/);
