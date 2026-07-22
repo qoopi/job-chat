@@ -1,5 +1,6 @@
+import type { UIMessage } from "ai";
 import { DataInsightSchema } from "@shared/insight";
-import type { Store } from "@shared/store";
+import type { Store, MessageRole } from "@shared/store";
 import { MAX_INPUT_CHARS } from "./guard";
 
 // The chat store's persistence seam: turning a completed turn's response message into the durable
@@ -145,4 +146,28 @@ export async function persistIncomingUserTurns(
     await store.appendMessage(chatId, "user", text, null);
   }
   return null;
+}
+
+/**
+ * Build the authoritative history the SDK's `hydrateMessages` seam returns (R6/F11). Registering the seam
+ * switches the SDK's snapshot machinery OFF - Postgres becomes the sole chat-history store - so this
+ * return REPLACES the built-in snapshot+replay accumulator. It is deliberately RAW: the persisted rows as
+ * UIMessages (row id preserved, content verbatim - NO coalescing, NO verdict substitution) followed by
+ * any incoming wire turn not already stored (the hydrate branch merges by id but never auto-appends a new
+ * one - the docs' canonical hook returns it itself). `createChatRun` still owns the MODEL-input rebuild
+ * (`buildModelHistory` over the store), so the only consumers of this raw return are the SDK accumulator
+ * and the user COUNT `persistIncomingUserTurns` reads - keeping it raw makes that count identical to the
+ * pre-seam accumulator: an error-turn-between-users coalesce, which would drift the count, cannot arise.
+ */
+export function hydrateHistory(
+  persisted: readonly { id: string; role: MessageRole; content: string }[],
+  incoming: readonly UIMessage[],
+): UIMessage[] {
+  const rows: UIMessage[] = persisted.map((m) => ({
+    id: m.id,
+    role: m.role,
+    parts: [{ type: "text", text: m.content }],
+  }));
+  const stored = new Set(persisted.map((m) => m.id));
+  return [...rows, ...incoming.filter((m) => !stored.has(m.id))];
 }
