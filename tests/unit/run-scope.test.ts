@@ -212,6 +212,47 @@ describe("createChatRun gate: dedup + refuse-before-persist (R3)", () => {
     expect(appended).toEqual([]);
   });
 
+  // Out-of-band append invariant: a profile-card row appended mid-turn (the save flow lands while a
+  // submit is in flight) must NOT make a crash-redispatched submit envelope skip the turn. The gate
+  // computes its already-answered tail over NON-profile-card rows, so the user question - still
+  // unanswered - is the effective tail and the turn runs. buildModelHistory already drops the card, so
+  // the model sees only the question.
+  it("Should_AnswerTurn_When_SaveLandsMidTurn: a redispatched submit still runs when a profile-card trails the unanswered user turn", async () => {
+    const profileCard = {
+      kind: "profile-card",
+      profile: {
+        titles: ["Senior Backend Engineer"],
+        seniority: "senior",
+        skills: [],
+        locations: ["Berlin"],
+        remotePref: null,
+        salaryMin: null,
+        yearsExp: 8,
+        domains: [],
+        ossHighlights: [],
+        experience: [],
+      },
+    };
+    const { store, appended } = recordingStore([
+      { role: "user", content: "Median salary in SF?" },
+      { role: "assistant", content: "", parts: profileCard }, // the out-of-band card, not an answer
+    ]);
+    let captured: StreamModelArgs | undefined;
+    const streamModel = vi.fn((a: StreamModelArgs) => {
+      captured = a;
+      return "answered" as const;
+    });
+    const run = runWith(store, { streamModel });
+
+    const res = await run(argsFor("submit-message", [{ role: "user", content: "Median salary in SF?" }]));
+
+    expect(res).toBe("answered"); // NOT skipped - the card is invisible to the dedup
+    expect(streamModel).toHaveBeenCalledTimes(1);
+    // The card drops from the rebuilt history; the question is the sole trailing turn the model sees.
+    expect(captured!.messages).toEqual([{ role: "user", content: "Median salary in SF?" }]);
+    expect(appended).toEqual([]); // a redelivery persists nothing new
+  });
+
   it("Should_PersistNothing_When_BackstopRefuses (AC-9): the cap backstop refuses BEFORE the incoming user row persists", async () => {
     // Guards run FIRST: the cap counts the PRIOR rows only (matching the action gate), and the refused
     // follow-up persists nothing - not even its own user row (D6). The notice streams as a refusal part.

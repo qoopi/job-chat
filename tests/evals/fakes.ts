@@ -133,6 +133,19 @@ export function createMemoryStore(): Store {
             conversations.get(m.conversation_id)?.user_id === userId),
       ).length;
     },
+    // The profile methods are unused by the eval run path (the harness scores tool/mode choices, not
+    // the profile feature) - minimal, honest stubs.
+    async appendProfileCard() {},
+    async getProfile() {
+      return null;
+    },
+    async saveProfileInputs() {},
+    async saveExtractedProfile() {
+      return true;
+    },
+    async clearResumePdf() {},
+    async markExtractionFailed() {},
+    async deleteProfile() {},
   };
 }
 

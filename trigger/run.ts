@@ -2,7 +2,7 @@ import type { ToolSet } from "ai";
 import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
 import type { CoverageProfile } from "@shared/analytics";
-import type { RefusalReason } from "@shared/insight";
+import { isProfileCardPayload, type RefusalReason } from "@shared/insight";
 import { checkConversationGuards } from "./guard";
 import { buildModelHistory, refusalPart, type ModelMessage } from "./parts";
 import { persistIncomingUserTurns, type RunMessage } from "./persistence";
@@ -112,7 +112,12 @@ export function createChatRun<R>(deps: ChatRunDeps<R>) {
       // (the upsert only stops SAME-id replays), so only this gate stops that duplicate. A regenerate
       // (Retry) always runs (its superseded tail was popped above). A submit whose turn is already
       // answered (a non-user tail) is a redelivery - skip.
-      const tail = persisted[persisted.length - 1];
+      //
+      // The tail is computed over NON-profile-card rows: a profile-card is appended out-of-band by the
+      // save flow (never a turn), so a save landing mid-turn must not make a redispatched envelope skip a
+      // still-unanswered question. buildModelHistory already drops the card from the model input, so this
+      // only aligns the dedup's view of "the last real turn".
+      const tail = [...persisted].reverse().find((m) => !isProfileCardPayload(m.parts));
       const alreadyAnswered = tail !== undefined && tail.role !== "user";
       if (trigger !== "regenerate-message" && alreadyAnswered) return { kind: "skip" };
 

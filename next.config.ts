@@ -18,6 +18,14 @@ const nextConfig: NextConfig = {
         }
       : {},
   },
+  // The saveProfile action carries the resume PDF (form cap ~4MB) as base64 in the action body; raise
+  // the Server Action body limit above the ~5.5MB base64-inflated worst case so the save is not rejected
+  // before it reaches the handler. Server-side the handler still caps the DECODED bytes (too-large).
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "6mb",
+    },
+  },
 };
 
 export default nextConfig;
