@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Profile } from "@shared/profile";
 import { deleteProfile, getMyProfile, getProfileRunStatus, saveProfile } from "@/app/actions";
 import { pollProfileSave } from "@/lib/profile-poll";
-import { profileSubline, profileSummary, profileTitle } from "@/lib/profile-format";
+import { isGithubSkipped, profileSubline, profileSummary, profileTitle } from "@/lib/profile-format";
 
 // The account's profile in the Left Chat Part - the five-state form (mock 04): empty -> saving (per-
 // source progress) -> saved (summary + Edit/Delete) | github-skipped (Retry GitHub) | error (previous
@@ -114,7 +114,7 @@ export function LcpProfile({
         setSavedGithub(my.githubUsername);
         setGithubInput(my.githubUsername ?? "");
         // github-skipped: a username was given but nothing came back proven in code.
-        const skipped = my.githubUsername != null && !my.profile.skills.some((s) => s.source !== "resume");
+        const skipped = my.githubUsername != null && isGithubSkipped(my.profile);
         setStatus(skipped ? "github-skipped" : "saved");
       } else if (my?.extractionFailed) {
         setStatus("error");
