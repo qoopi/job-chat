@@ -8,7 +8,7 @@ import { DonutChart } from "./DonutChart";
 
 // Dispatch a chart insight's series to its designated primitive (parts.ts chartTypeFor pins this). The
 // insight's currency (meta.currency) is threaded to the histogram so its money labels match the source
-// line and Table tab (018 review-fix S3); the other primitives carry no money axis.
+// line and Table tab; the other primitives carry no money axis.
 export function InsightChart({
   chartType,
   series,
@@ -18,7 +18,7 @@ export function InsightChart({
   chartType: ChartType;
   series: DataPoint[];
   currency?: string;
-  /** refresh #2 s2: a capped bars chart's "+ N more" opens the full series as a table in the LCP. */
+  /** A capped bars chart's "+ N more" opens the full series as a table in the LCP. */
   onShowAll?: () => void;
 }) {
   switch (chartType) {

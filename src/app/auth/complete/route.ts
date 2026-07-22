@@ -25,8 +25,8 @@ function safeNext(raw: string | null, origin: string): string {
 // The Google OAuth success landing (the STABLE callbackURL that AuthDialog hands Better Auth). Better
 // Auth's /api/auth/callback/google sets the session cookie then full-page-redirects HERE - there is no
 // client moment to run the sign-in TRANSITION, so we run it server-side: completeSignIn adopts the
-// guest's conversations onto the account and clears the guest cookie (the SAME transition the removed
-// email path used). Then land the now-signed-in user back where they started (`next`). A finalize
+// guest's conversations onto the account and clears the guest cookie. Then land the now-signed-in
+// user back where they started (`next`). A finalize
 // failure OR a sessionless hit (a direct GET / replayed link with no Google round trip - completeSignIn
 // returns `{ ok: false }` WITHOUT throwing) must FAIL SAFE: keep the guest cookie and land on
 // `next?error=` so the dialog surfaces it - never clear the guest identity on a redirect that adopted or
@@ -50,7 +50,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
   if (!ok) return failSafe();
 
-  // Mark the destination as a genuine post-auth arrival (fix round, item 2): ChatClient replays a queued
+  // Mark the destination as a genuine post-auth arrival: ChatClient replays a queued
   // capped draft ONLY when it sees `?fromAuth=1`, so a later ordinary signed-in mount that finds a stale
   // shared-key ("/chat/new") draft can never auto-send it. Set on the resolved same-origin `next`.
   const dest = new URL(next, url.origin);

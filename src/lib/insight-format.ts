@@ -10,9 +10,9 @@ export type { ErrorKind, RefusalReason };
 export { labelKeyOf };
 
 // Pure presentation helpers for the insight surfaces. Kept free of React/"use client" so the copy
-// contracts (AC-10) and the chart series-reading conventions are unit-testable in isolation.
+// contracts and the chart series-reading conventions are unit-testable in isolation.
 
-// refresh #2 s2: a single-measure ("vertical") bar chart of many long, near-unique titles used to smear
+// A single-measure ("vertical") bar chart of many long, near-unique titles used to smear
 // its category labels into an unreadable stack. The fix caps the visible bars at this count; more than
 // this renders the top N plus a "+ N more" affordance into the LCP table.
 export const BARS_CAP = 8;
@@ -23,7 +23,7 @@ export function truncateLabel(label: string, max = 26): string {
 }
 
 /**
- * AC-18: a single-scalar answer - a one-row, one-cell table whose only content is the number the
+ * A single-scalar answer - a one-row, one-cell table whose only content is the number the
  * verdict already states (a no-dimension single-measure query: `{ count: N }`, `{ median_salary: N }`).
  * Rendered as the verdict sentence alone: a one-cell table card is degenerate. Charts and multi-cell
  * tables are never scalars.
@@ -40,7 +40,7 @@ export function isSingleScalar(insight: DataInsight): boolean {
  * When a bars insight renders as a capped top-N vertical chart, the number of bars shown (BARS_CAP);
  * null otherwise (grouped/multi-measure bars, a non-bars chart, or a series at/under BARS_CAP). Lets the
  * source line disclose "showing top N" in agreement with the chart, never letting the visible slice pose
- * as the whole market (refresh #2 s3-consistency).
+ * as the whole market.
  */
 export function barsChartCapsAt(insight: DataInsight): number | null {
   if (insight.kind !== "chart" || insight.chartType !== "bars") return null;
@@ -49,15 +49,15 @@ export function barsChartCapsAt(insight: DataInsight): number | null {
   return insight.series.length > BARS_CAP ? BARS_CAP : null;
 }
 
-/** AC-10: distinct copy for a system failure vs an unanswerable question. Never a raw error. */
+/** Distinct copy for a system failure vs an unanswerable question. Never a raw error. */
 export function errorCopy(kind: ErrorKind): string {
   return kind === "system"
     ? "Something went wrong on my side - try again"
     : "I could not answer that - try rephrasing";
 }
 
-/** AC-15/AC-20: a polite limit notice (not an error) shown until the auth dialog exists. `too_long`
- *  is the agent-run input-size backstop (a payload past MAX_INPUT_CHARS reaching `.in` directly). */
+/** A polite limit notice (not an error). `too_long` is the agent-run input-size backstop (a payload
+ *  past MAX_INPUT_CHARS reaching `.in` directly). */
 export function refusalCopy(reason: RefusalReason): string {
   if (reason === "guest_cap")
     return "You have reached the guest message limit. Sign in to keep going.";
@@ -67,7 +67,7 @@ export function refusalCopy(reason: RefusalReason): string {
 }
 
 // Symbols for the currencies the corpus is likely to carry; anything else prefixes its ISO code
-// ("CHF 180k"), so the amount is never mislabeled with a "$" it is not in (018 strand 3).
+// ("CHF 180k"), so the amount is never mislabeled with a "$" it is not in.
 const CURRENCY_SYMBOL: Record<string, string> = {
   USD: "$",
   EUR: "€",
@@ -117,7 +117,7 @@ function isNumeric(v: unknown): v is number {
 
 // `n` is a SAMPLE-SIZE context column (salary_compare returns {city, median, n}), never a series to
 // plot - a count of ~3 beside a median of ~180000 would be an invisible, misleading second bar. Excluded
-// from the plottable measures so BarsChart never renders it as a grouped series (018 strand 3).
+// from the plottable measures so BarsChart never renders it as a grouped series.
 const CONTEXT_KEYS = new Set(["n"]);
 
 /** Every numeric measure column, in row order, excluding the label and sample-size context (`n`). */

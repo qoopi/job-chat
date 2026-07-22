@@ -2,10 +2,10 @@
 
 import { useCallback, useState } from "react";
 
-// refresh #2 s4: the account menu's Dark-mode toggle. It persists via the EXISTING `theme` cookie
+// The account menu's Dark-mode toggle. It persists via the EXISTING `theme` cookie
 // mechanism - layout.tsx reads that cookie server-side and stamps `<html data-theme>` before paint
 // (no FOUC), so the choice survives a reload for guests AND signed-in users. Per-account server-side
-// theme storage is deferred (P2): the cookie is the store. The toggle also flips the `<html data-theme>`
+// theme storage is deferred: the cookie is the store. The toggle also flips the `<html data-theme>`
 // attribute immediately so the whole app re-themes in place, without waiting for a navigation.
 
 export type Theme = "Light" | "Dark";

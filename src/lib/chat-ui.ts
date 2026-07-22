@@ -33,7 +33,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 /**
  * The `data-*` parts of a message, each with a STABLE id: the part's own id, or `${message.id}-p${i}`.
- * MessageList keys its cards on this id and the LCP target references it (AC-8), so both must derive it
+ * MessageList keys its cards on this id and the LCP target references it, so both must derive it
  * the same way - one home here keeps them from drifting.
  */
 export function dataParts(message: UIMessage): { id: string; data: unknown }[] {
@@ -42,14 +42,14 @@ export function dataParts(message: UIMessage): { id: string; data: unknown }[] {
     .map((p, i) => ({ id: (p as { id?: string }).id ?? `${message.id}-p${i}`, data: (p as { data?: unknown }).data }));
 }
 
-/** The open LCP is identified by which message's which card it shows (epic-pinned; not the payload). */
+/** The open LCP is identified by which message's which card it shows (not the payload). */
 export interface LcpTarget {
   messageId: string;
   partId: string;
 }
 
 /**
- * Resolve an LCP target back to its insight from the current messages (AC-8). The panel body is stored
+ * Resolve an LCP target back to its insight from the current messages. The panel body is stored
  * by identity, not value, so it re-resolves from the immutable persisted payload - a resumed
  * conversation renders the same LCP. Null when the message/part is gone or is not an insight.
  */
@@ -172,7 +172,7 @@ function stripInlineMarkers(s: string): string {
     .replace(/\*\*/g, ""); // any unmatched bold marker
 }
 
-// A resumed store message (AC-13). Structural, not the full `Store.Message` (which carries a Date and
+// A resumed store message. Structural, not the full `Store.Message` (which carries a Date and
 // conversation_id the renderer never reads) - keeps this module free of the postgres/store import.
 export interface StoredMessage {
   id: string;
@@ -188,7 +188,7 @@ function payloadList(parts: unknown): unknown[] {
 }
 
 /**
- * Hydrate persisted store messages into `UIMessage[]` for `useChat`'s initial state (AC-13 resume).
+ * Hydrate persisted store messages into `UIMessage[]` for `useChat`'s initial state (resume).
  * A user message becomes one text part; an assistant message becomes its prose text (if any) plus one
  * `data-*` part per persisted card payload, tagged by the payload's kind so the renderer classifies it
  * exactly as it would a freshly streamed part. Cards keep a stable per-message part id so tab / chip

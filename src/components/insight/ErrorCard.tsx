@@ -6,7 +6,7 @@ import {
   type RefusalReason,
 } from "@/lib/insight-format";
 
-// AC-10 error card: compact message + Retry (re-runs the same question). Distinct copy for a system
+// The error card: compact message + Retry (re-runs the same question). Distinct copy for a system
 // failure vs an unanswerable question; never a stack trace. Retry is shown ONLY when an onRetry handler
 // is supplied - a mid-thread error card gets none (regenerate re-answers the tail, not this turn).
 export function ErrorCard({
@@ -29,7 +29,7 @@ export function ErrorCard({
   );
 }
 
-// AC-13/AC-15/AC-20 refusal. The GUEST cap (refresh #2 s8) is a warm register moment, NOT a red error:
+// The GUEST cap is a warm register moment, NOT a red error:
 // an accent-soft in-thread card inviting a free account (which also saves the conversation), with a
 // primary "Create account" that opens the lazy dialog (`onSignIn`). Every other refusal - a signed-in
 // cap with no sign-in remedy, the daily budget, an over-length turn - stays the plain grey notice.

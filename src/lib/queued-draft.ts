@@ -1,4 +1,4 @@
-// refresh #2 s8 (AC-D32 / ruling 1): a capped guest's send queues the blocked draft, then "Continue with
+// A capped guest's send queues the blocked draft, then "Continue with
 // Google" is a FULL-PAGE redirect (to Google and back to /auth/complete -> the chat), which wipes React
 // state. sessionStorage carries the draft across that same-tab round trip, keyed by conversation; on
 // return - now signed in - ChatClient takes it and auto-sends exactly once. Client-only; a no-op where

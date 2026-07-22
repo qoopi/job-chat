@@ -359,7 +359,7 @@ a:hover {
   font-size: var(--fs-sm);
   color: var(--shell-fg-dim);
 }
-/* AC-21: per-row delete affordance + inline confirm (never a modal). */
+/* Per-row delete affordance + inline confirm (never a modal). */
 .sb-item-row {
   position: relative;
 }
@@ -411,7 +411,7 @@ a:hover {
   color: var(--shell-fg-dim);
 }
 /* .avatar survives on the collapsed sidebar; the sb-foot/sb-who identity block was removed with the
-   sidebar foot (refresh #2 s5 - auth moved to the title bar). */
+   sidebar foot (auth moved to the title bar). */
 .avatar {
   width: 30px;
   height: 30px;
@@ -443,7 +443,7 @@ a:hover {
   color: var(--shell-strong);
 }
 
-/* ---------- account chip + menu (refresh #2 s4: auth affordance in the title bar) ---------- */
+/* ---------- account chip + menu (auth affordance in the title bar) ---------- */
 .account {
   position: relative;
   flex-shrink: 0;
@@ -573,7 +573,7 @@ a:hover {
   transform: translateX(14px);
 }
 
-/* ---------- Left Chat Part: profile empty state (refresh #2 s7) ---------- */
+/* ---------- Left Chat Part: profile empty state ---------- */
 .profile-empty {
   display: flex;
   flex-direction: column;
@@ -601,7 +601,7 @@ a:hover {
   font-size: var(--fs-2xs);
   color: var(--text-3);
 }
-/* AC-D26: the resume dropzone - a dashed box (ported verbatim from the mirror _shared/components.css). */
+/* The resume dropzone - a dashed box (ported verbatim from the mirror _shared/components.css). */
 .dropzone {
   border: 1.5px dashed var(--border-strong);
   border-radius: var(--r-md);
@@ -620,7 +620,7 @@ a:hover {
   border-color: var(--border-strong);
 }
 
-/* refresh #2 s5: the history row's second line - a muted, single-line first-message preview that
+/* The history row's second line - a muted, single-line first-message preview that
    distinguishes duplicate titles. */
 .sb-item .sb-preview {
   display: block;
@@ -821,7 +821,7 @@ a:hover {
   border: 1px solid var(--border);
   color: var(--text);
 }
-/* AC-17: a bubble that wraps past one line drops the pill radius for the gentler --r-lg. */
+/* A bubble that wraps past one line drops the pill radius for the gentler --r-lg. */
 .bubble.wrapped {
   border-radius: var(--r-lg);
 }
@@ -884,7 +884,7 @@ a:hover {
   cursor: pointer;
 }
 
-/* AC-8 table preview: 5-row preview + "Open full table" affordance for an over-threshold table. */
+/* Table preview: 5-row preview + "Open full table" affordance for an over-threshold table. */
 .table-preview {
   display: flex;
   flex-direction: column;
@@ -933,7 +933,7 @@ a:hover {
 }
 
 /* code block (SQL view) - theme-native: light grey + dark tokens on light, dark grey + light
-   tokens on dark. Every token type must contrast on its own surface (refresh #2 s1: the old
+   tokens on dark. Every token type must contrast on its own surface (the old
    shell-bg block rendered identifier text invisibly on a matching-grey background in light theme). */
 .codeblock {
   position: relative;
@@ -1014,7 +1014,7 @@ a:hover {
 .chart .bar:hover {
   opacity: 0.8;
 }
-/* refresh #2 s2: the capped bars chart's "+ N more" affordance (opens the full series in the LCP). */
+/* The capped bars chart's "+ N more" affordance (opens the full series in the LCP). */
 .bars-more {
   display: block;
   width: 100%;
@@ -1094,7 +1094,7 @@ a:hover {
 }
 
 /* answering indicator (streaming wait state - typing dots in an ai bubble; replaces the hollow
-   skeleton card on the streaming path, 006 ruling). Reuses .bubble.ai; the dots bounce via a minimal
+   skeleton card on the streaming path). Reuses .bubble.ai; the dots bounce via a minimal
    keyframe (no dot animation existed in the ported system). */
 .bubble.ai.answering {
   display: inline-flex;
@@ -1161,13 +1161,13 @@ a:hover {
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
-/* the sign-in affordance (AC-13) right-aligns after the polite copy */
+/* the sign-in affordance right-aligns after the polite copy */
 .notice .btn {
   margin-left: auto;
   flex-shrink: 0;
 }
 
-/* refresh #2 s8: the guest cap -> register moment. An accent-soft card (not red, not a bubble) that
+/* The guest cap -> register moment. An accent-soft card (not red, not a bubble) that
    invites a free account; the composer stays enabled and a send opens the dialog with the draft queued. */
 .register-card {
   display: flex;

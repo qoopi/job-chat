@@ -5,14 +5,14 @@ import { MoonIcon, PersonIcon, SignOutIcon } from "@/components/icons";
 import { isAuthDialogOpen, setMenuOpen } from "@/lib/layers";
 import { useTheme } from "@/lib/theme";
 
-// refresh #2 s4: the signed-in account affordance, VISIBLE in the title bar (the old bottom-left foot
-// was "hard to locate"). A chip - avatar + first name + caret - toggles a dropdown anchored top-right:
+// The signed-in account affordance, VISIBLE in the title bar. A chip - avatar + first name + caret -
+// toggles a dropdown anchored top-right:
 //  1. header: email + muted "Personal account"
-//  2. "Your profile" -> opens the profile in the LCP (s7)
-//  3. "Dark mode" + a pill toggle (theme persisted via the cookie - s4)
-//  4. "Sign out" (danger) -> ends the session and lands on the landing (s6)
+//  2. "Your profile" -> opens the profile in the LCP
+//  3. "Dark mode" + a pill toggle (theme persisted via the cookie)
+//  4. "Sign out" (danger) -> ends the session and lands on the landing
 // The menu closes on outside click / Esc, and sits BELOW the auth dialog in layer priority (it yields
-// Esc while the dialog is open). Shared by the chat title bar and the landing header (s10).
+// Esc while the dialog is open). Shared by the chat title bar and the landing header.
 export function AccountMenu({
   accountName,
   email,
@@ -32,7 +32,7 @@ export function AccountMenu({
   const initial = name[0]?.toUpperCase() ?? "A";
   const dark = theme === "Dark";
 
-  // Publish the menu's open state to the layer seam (ruling 4) so the LCP's Esc handler yields while the
+  // Publish the menu's open state to the layer seam so the LCP's Esc handler yields while the
   // menu is up (Esc order: dialog > menu > LCP). Reset on close/unmount so the flag never sticks true.
   useEffect(() => {
     setMenuOpen(open);

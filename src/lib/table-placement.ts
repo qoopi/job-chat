@@ -1,4 +1,4 @@
-// AC-8 placement rule. Deterministic and CLIENT-side (epic ruling): the agent never decides where a
+// The placement rule. Deterministic and CLIENT-side: the agent never decides where a
 // table renders, so persisted payloads are untouched and a resumed conversation renders the identical
 // preview/LCP. A table of more than LCP_TABLE_THRESHOLD rows becomes a preview card (first
 // LCP_TABLE_PREVIEW_ROWS rows) that opens the full table in the Left Chat Part; at or below the

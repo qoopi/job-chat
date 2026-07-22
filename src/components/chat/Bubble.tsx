@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 // A pill message bubble: user (accent-tinted, right) or adviser (neutral, left). The timestamp
 // reveals on .msg:hover (components.css). Insight cards render bare in .msg.ai, not in a bubble.
 //
-// AC-17 polish: a bubble whose content wraps past one line trades the pill radius (--r-pill) for the
+// A bubble whose content wraps past one line trades the pill radius (--r-pill) for the
 // gentler --r-lg (a stadium radius looks wrong on a tall multi-line bubble). Detection is a measured
 // className toggle so it catches SOFT wraps (long text), not just hard line breaks; the radius swap
 // itself is pure CSS (.bubble.wrapped). Runs on the client only, after paint - no SSR/hydration effect.
