@@ -42,7 +42,7 @@ export function AuthDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
 
   // Esc closes the dialog. As the topmost layer it uses stopImmediatePropagation to suppress every other
-  // window keydown listener (the LCP's Esc handler), so one Esc closes only the dialog - order-independent.
+  // window keydown listener (the detail panel's Esc handler), so one Esc closes only the dialog - order-independent.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;

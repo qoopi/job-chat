@@ -11,7 +11,7 @@ import type { UIMessage } from "ai";
 import type { DataInsight } from "@shared/insight";
 import { setAuthDialogOpen } from "@/lib/layers";
 
-// The table Left Chat Part, driven through the REAL ChatClient (its lcpTarget state, the
+// The table detail panel, driven through the REAL ChatClient (its detailTarget state, the
 // dock, and the close paths are what is under test). The transport + server action are external
 // boundaries and mocked exactly as chat-client.test.tsx does; here no turn is sent, so they are inert.
 const reconnectMock = vi.fn(async () => null);
@@ -69,8 +69,8 @@ function threadWithTable(n: number): UIMessage[] {
   ];
 }
 
-const lcpRows = () =>
-  document.querySelector(".lcp")?.querySelectorAll("tbody tr").length ?? 0;
+const detailRows = () =>
+  document.querySelector(".detail-panel")?.querySelectorAll("tbody tr").length ?? 0;
 const composer = () =>
   screen.getByRole("textbox", {
     name: "Ask a follow-up",
@@ -84,7 +84,7 @@ const pressEsc = () =>
       ),
   );
 
-async function openLcp(rows: number) {
+async function openDetailPanel(rows: number) {
   render(
     <ChatClient
       conversationId={CONVERSATION_ID}
@@ -103,8 +103,8 @@ afterEach(() => {
   setAuthDialogOpen(false); // reset the module-level layer seam between cases
 });
 
-describe("table LCP (AC-8)", () => {
-  test("Should_PreviewAndOpenLcp_When_TableExceedsThreshold", async () => {
+describe("table detail panel (AC-8)", () => {
+  test("Should_PreviewAndOpenDetailPanel_When_TableExceedsThreshold", async () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -113,22 +113,22 @@ describe("table LCP (AC-8)", () => {
       />,
     );
 
-    // In-thread: a 5-row preview + affordance; the LCP is not open yet, the canvas is not docked.
+    // In-thread: a 5-row preview + affordance; the detail panel is not open yet, the canvas is not docked.
     const affordance = await screen.findByRole("button", {
       name: "Open full table (9 rows)",
     });
-    expect(document.querySelector(".lcp")).toBeNull();
+    expect(document.querySelector(".detail-panel")).toBeNull();
     expect(document.querySelector(".canvas.docked")).toBeNull();
 
     fireEvent.click(affordance);
 
-    // The LCP opens with the FULL 9-row body and the chat docks to the right rail.
-    expect(document.querySelector(".lcp")).toBeTruthy();
-    expect(lcpRows()).toBe(9);
+    // The detail panel opens with the FULL 9-row body and the chat docks to the right rail.
+    expect(document.querySelector(".detail-panel")).toBeTruthy();
+    expect(detailRows()).toBe(9);
     expect(document.querySelector(".canvas.docked")).toBeTruthy();
   });
 
-  test("Should_NotOpenLcp_When_TableAtThreshold", async () => {
+  test("Should_NotOpenDetailPanel_When_TableAtThreshold", async () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -140,11 +140,11 @@ describe("table LCP (AC-8)", () => {
     expect(
       screen.queryByRole("button", { name: /Open full table/ }),
     ).toBeNull();
-    expect(document.querySelector(".lcp")).toBeNull();
+    expect(document.querySelector(".detail-panel")).toBeNull();
   });
 });
 
-describe("table LCP close paths (AC-9)", () => {
+describe("table detail panel close paths (AC-9)", () => {
   test.each([
     [
       "close control",
@@ -158,39 +158,39 @@ describe("table LCP close paths (AC-9)", () => {
       "New chat",
       () => fireEvent.click(screen.getByRole("button", { name: "New chat" })),
     ],
-  ])("Should_CloseLcp_OnEachCloseTrigger: %s", async (_label, act) => {
-    await openLcp(9);
-    expect(document.querySelector(".lcp")).toBeTruthy();
-    expect(composer().disabled).toBe(false); // composer stays usable while the LCP is open
+  ])("Should_CloseDetailPanel_OnEachCloseTrigger: %s", async (_label, act) => {
+    await openDetailPanel(9);
+    expect(document.querySelector(".detail-panel")).toBeTruthy();
+    expect(composer().disabled).toBe(false); // composer stays usable while the detail panel is open
 
     act();
 
-    expect(document.querySelector(".lcp")).toBeNull();
+    expect(document.querySelector(".detail-panel")).toBeNull();
     expect(document.querySelector(".canvas.docked")).toBeNull();
     expect(composer().disabled).toBe(false);
   });
 
-  test("Should_RouteEscToAuthDialog_When_DialogAboveLcp", async () => {
-    await openLcp(9);
-    expect(document.querySelector(".lcp")).toBeTruthy();
+  test("Should_RouteEscToAuthDialog_When_DialogAboveDetailPanel", async () => {
+    await openDetailPanel(9);
+    expect(document.querySelector(".detail-panel")).toBeTruthy();
 
-    // With the dialog-open flag forced true, the dialog is topmost and consumes Esc, so the LCP stays
+    // With the dialog-open flag forced true, the dialog is topmost and consumes Esc, so the detail panel stays
     // open (interaction-spec layer priority).
     setAuthDialogOpen(true);
     pressEsc();
-    expect(document.querySelector(".lcp")).toBeTruthy();
+    expect(document.querySelector(".detail-panel")).toBeTruthy();
 
-    // Once the dialog is gone, Esc closes the LCP again.
+    // Once the dialog is gone, Esc closes the detail panel again.
     setAuthDialogOpen(false);
     pressEsc();
-    expect(document.querySelector(".lcp")).toBeNull();
+    expect(document.querySelector(".detail-panel")).toBeNull();
   });
 });
 
-// The account menu's "Your profile" opens the profile empty state in the LCP (docking the
-// chat), and it closes on the LCP close paths just like a table.
-describe("profile LCP (refresh #2 s7)", () => {
-  test("'Your profile' opens the profile form (empty state) in the LCP; Esc closes it", async () => {
+// The account menu's "Your profile" opens the profile empty state in the detail panel (docking the
+// chat), and it closes on the detail panel close paths just like a table.
+describe("profile detail panel (refresh #2 s7)", () => {
+  test("'Your profile' opens the profile form (empty state) in the detail panel; Esc closes it", async () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -201,7 +201,7 @@ describe("profile LCP (refresh #2 s7)", () => {
         accountEmail="ada@example.com"
       />,
     );
-    expect(document.querySelector(".lcp")).toBeNull();
+    expect(document.querySelector(".detail-panel")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /Account: Ada/ })); // open the account menu
     fireEvent.click(screen.getByRole("button", { name: "Your profile" }));
@@ -232,7 +232,7 @@ describe("profile LCP (refresh #2 s7)", () => {
     expect(document.querySelector(".canvas.docked")).toBeTruthy();
   });
 
-  test("opening a table LCP replaces the open profile (one LCP at a time)", async () => {
+  test("opening a table detail panel replaces the open profile (one detail panel at a time)", async () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -250,13 +250,13 @@ describe("profile LCP (refresh #2 s7)", () => {
       screen.getByRole("button", { name: "Open full table (9 rows)" }),
     );
     expect(screen.queryByText("No profile yet")).toBeNull(); // the profile gave way to the table
-    expect(document.querySelector(".lcp")).toBeTruthy();
+    expect(document.querySelector(".detail-panel")).toBeTruthy();
   });
 
   // The mutual-exclusion pair above only exercised profile-then-table. One panel at a time
-  // must hold in the OTHER direction too - opening the profile while a table LCP is
+  // must hold in the OTHER direction too - opening the profile while a table detail panel is
   // already open must replace it, not stack a second panel.
-  test("opening the profile replaces an open table LCP (reverse direction, one at a time)", () => {
+  test("opening the profile replaces an open table detail panel (reverse direction, one at a time)", () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -274,19 +274,19 @@ describe("profile LCP (refresh #2 s7)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Account: Ada/ }));
     fireEvent.click(screen.getByRole("button", { name: "Your profile" }));
 
-    // the table gave way to the profile - only one LCP body at a time
+    // the table gave way to the profile - only one detail panel body at a time
     expect(screen.queryByRole("region", { name: "Full table" })).toBeNull();
     expect(screen.getByRole("region", { name: "Your profile" })).toBeTruthy();
   });
 });
 
 // The account menu is a transient - Esc/outside-click closes the MENU
-// first when open (menu > LCP; dialog > menu). Both the LCP's table view and the profile view dock the
+// first when open (menu > detail panel; dialog > menu). Both the detail panel's table view and the profile view dock the
 // canvas but the TitleBar (and its account menu) stay mounted throughout, so a user CAN have the menu open
-// above an open LCP. A single Esc must close only the topmost layer (the menu), leaving the LCP for a
-// second Esc - exactly like the dialog-above-LCP case already covered in auth-dialog.test.tsx.
-describe("Esc layer priority: account menu above the LCP (ruling 4)", () => {
-  test("Should_CloseMenuFirst_LeavingLcpOpen_When_BothAreOpen", async () => {
+// above an open detail panel. A single Esc must close only the topmost layer (the menu), leaving the detail panel for a
+// second Esc - exactly like the dialog-above-detail panel case already covered in auth-dialog.test.tsx.
+describe("Esc layer priority: account menu above the detail panel (ruling 4)", () => {
+  test("Should_CloseMenuFirst_LeavingDetailPanelOpen_When_BothAreOpen", async () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -299,17 +299,17 @@ describe("Esc layer priority: account menu above the LCP (ruling 4)", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Open full table (9 rows)" }),
     );
-    expect(document.querySelector(".lcp")).toBeTruthy();
+    expect(document.querySelector(".detail-panel")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Account: Ada/ }));
     expect(screen.getByText("Personal account")).toBeTruthy();
 
     pressEsc();
-    // the menu (topmost) closes on this Esc; the LCP beneath it must stay open
+    // the menu (topmost) closes on this Esc; the detail panel beneath it must stay open
     expect(screen.queryByText("Personal account")).toBeNull();
-    expect(document.querySelector(".lcp")).toBeTruthy();
+    expect(document.querySelector(".detail-panel")).toBeTruthy();
 
-    pressEsc(); // with the menu gone, Esc now reaches the LCP
-    expect(document.querySelector(".lcp")).toBeNull();
+    pressEsc(); // with the menu gone, Esc now reaches the detail panel
+    expect(document.querySelector(".detail-panel")).toBeNull();
   });
 });

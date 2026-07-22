@@ -209,7 +209,7 @@ a:hover {
   min-width: 0;
 }
 .canvas {
-  /* Fills the main alone; when the LCP opens (.docked) flex-grow animates to 0 so the chat docks to a
+  /* Fills the main alone; when the detail panel opens (.docked) flex-grow animates to 0 so the chat docks to a
      360px right rail over 240ms (interaction-spec section 1). flex-basis is the docked rail width. */
   flex: 1 1 360px;
   transition: flex-grow 240ms ease-out;
@@ -230,8 +230,8 @@ a:hover {
   flex-direction: column;
 }
 
-/* ---------- Left Chat Part (LCP): table content type only (interaction-spec section 1) ---------- */
-.lcp {
+/* ---------- detail panel: table content type only (interaction-spec section 1) ---------- */
+.detail-panel {
   flex: 1 1 0;
   min-width: 0;
   display: flex;
@@ -240,7 +240,7 @@ a:hover {
   border-radius: var(--r-lg);
   overflow: hidden;
 }
-.lcp-head {
+.detail-panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -250,7 +250,7 @@ a:hover {
   padding: 0 var(--sp-5);
   border-bottom: 1px solid var(--border);
 }
-.lcp-title {
+.detail-panel-title {
   font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text);
@@ -258,7 +258,7 @@ a:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.lcp-body {
+.detail-panel-body {
   flex: 1;
   overflow: auto;
   padding: var(--sp-4) var(--sp-5);
@@ -561,7 +561,7 @@ a:hover {
   transform: translateX(14px);
 }
 
-/* ---------- Left Chat Part: profile form (five states, mock 04) ---------- */
+/* ---------- detail panel: profile form (five states, mock 04) ---------- */
 .profile-form {
   display: flex;
   flex-direction: column;
@@ -1053,7 +1053,7 @@ a:hover {
 .chart .bar:hover {
   opacity: 0.8;
 }
-/* The capped bars chart's "+ N more" affordance (opens the full series in the LCP). */
+/* The capped bars chart's "+ N more" affordance (opens the full series in the detail panel). */
 .bars-more {
   display: block;
   width: 100%;
@@ -1222,8 +1222,8 @@ a:hover {
 }
 
 /* ---------- auth dialog (lazy - interaction-spec s6; ported from the handoff components.css) ---------- */
-/* backdrop: dims the page, centers the dialog, catches backdrop clicks (s6.5). Above the LCP + toast
-   (dialog > LCP > thread). rgba matches the mock (shell-strong at 38%). */
+/* backdrop: dims the page, centers the dialog, catches backdrop clicks (s6.5). Above the detail panel + toast
+   (dialog > detail panel > thread). rgba matches the mock (shell-strong at 38%). */
 .overlay {
   position: fixed;
   inset: 0;

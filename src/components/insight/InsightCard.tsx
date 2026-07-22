@@ -7,7 +7,7 @@ import {
   freshnessLabel,
   isSingleScalar,
 } from "@/lib/insight-format";
-import { LCP_TABLE_PREVIEW_ROWS, tablePlacement } from "@/lib/table-placement";
+import { DETAIL_TABLE_PREVIEW_ROWS, tablePlacement } from "@/lib/table-placement";
 import { InsightChart } from "./charts/InsightChart";
 import { DataTable } from "./charts/DataTable";
 import { CodeBlock } from "./CodeBlock";
@@ -20,7 +20,7 @@ export function InsightCard({
   insight,
   usedFollowups = [],
   onFollowup,
-  onOpenLcp,
+  onOpenDetailPanel,
   messageId,
   partId,
   pending = false,
@@ -28,8 +28,8 @@ export function InsightCard({
   insight: DataInsight;
   usedFollowups?: string[];
   onFollowup?: (text: string) => void;
-  /** Open this card's full table in the LCP by its STABLE message + part id (stable ids keep the chart-subtree memo stable). */
-  onOpenLcp?: (messageId: string, partId: string) => void;
+  /** Open this card's full table in the detail panel by its STABLE message + part id (stable ids keep the chart-subtree memo stable). */
+  onOpenDetailPanel?: (messageId: string, partId: string) => void;
   messageId?: string;
   partId?: string;
   /** A turn is in flight: chips are disabled so one can't fire a concurrent send racing the live turn. */
@@ -43,7 +43,7 @@ export function InsightCard({
 
   const rows = isChart ? insight.series : insight.rows;
   // Any table VIEW over the threshold renders as a preview + "Open full table" (one rule for every table view).
-  const previewTable = tab === "table" && tablePlacement(rows) === "lcp";
+  const previewTable = tab === "table" && tablePlacement(rows) === "detail";
   // Suppress the source line on an empty (sampleN 0) result (no "0 postings", no epoch freshness); defensive.
   const showSource = insight.meta.sampleN > 0;
   const rel = freshnessLabel(insight.meta.updatedAt);
@@ -53,8 +53,8 @@ export function InsightCard({
 
   // Stable ids keep `openTable` stable, so the chartEl memo can depend on it without recomputing the Recharts subtree.
   const openTable = useCallback(() => {
-    if (onOpenLcp && messageId !== undefined && partId !== undefined) onOpenLcp(messageId, partId);
-  }, [onOpenLcp, messageId, partId]);
+    if (onOpenDetailPanel && messageId !== undefined && partId !== undefined) onOpenDetailPanel(messageId, partId);
+  }, [onOpenDetailPanel, messageId, partId]);
 
   // A stable element ref (keyed on insight identity) so React bails on re-rendering the Recharts subtree when only Show-query/pending toggles.
   const chartEl = useMemo(
@@ -120,7 +120,7 @@ export function InsightCard({
         ) : previewTable ? (
           <div className="table-preview">
             <DataTable
-              rows={rows.slice(0, LCP_TABLE_PREVIEW_ROWS)}
+              rows={rows.slice(0, DETAIL_TABLE_PREVIEW_ROWS)}
               currency={insight.meta.currency}
             />
             <button

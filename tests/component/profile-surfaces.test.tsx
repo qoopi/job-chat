@@ -5,7 +5,7 @@ import type { UIMessage } from "ai";
 import type { Profile } from "@shared/profile";
 import { setAuthDialogOpen } from "@/lib/layers";
 
-// The 029 profile surfaces driven through the REAL ChatClient (part rendering, invite wiring, LCP
+// The 029 profile surfaces driven through the REAL ChatClient (part rendering, invite wiring, detail panel
 // routing, save-injection) plus the leaf cards in isolation. External boundaries (transport + server
 // actions + auth) are mocked exactly as the sibling ChatClient tests do.
 const reconnectMock = vi.fn(async () => null);
@@ -26,7 +26,7 @@ vi.mock("@/lib/auth-client", () => ({
   authClient: { signIn: { social: vi.fn() }, signOut: vi.fn(), useSession: () => ({ data: null, isPending: false }) },
 }));
 // The poll's own contract (attempt ceiling, the re-save edge) is exhaustively unit-tested in
-// profile-poll.test.ts; here it is mocked so LcpProfile's ERROR-STATE RENDERING (which copy, gated on
+// profile-poll.test.ts; here it is mocked so DetailProfile's ERROR-STATE RENDERING (which copy, gated on
 // whether a prior profile existed) is tested in isolation from the poll's real timers.
 vi.mock("@/lib/profile-poll", () => ({ pollProfileSave: vi.fn() }));
 
@@ -34,7 +34,7 @@ import { ChatClient } from "@/components/chat/ChatClient";
 import { ProfileCard, ProfileExpanded } from "@/components/insight/ProfileCard";
 import { PostingsCard } from "@/components/insight/PostingsCard";
 import { InlinePromptCard } from "@/components/insight/InlinePromptCard";
-import { LcpProfile } from "@/components/chat/LcpProfile";
+import { DetailProfile } from "@/components/chat/DetailProfile";
 import { deleteProfile, getMyProfile, saveProfile, type MyProfile } from "@/app/actions";
 import { pollProfileSave } from "@/lib/profile-poll";
 import { profileCardMessageId } from "@/lib/profile-card-id";
@@ -103,7 +103,7 @@ afterEach(() => {
   sessionStorage.clear(); // the pending-invite tests below stash a real sessionStorage key
   // These action mocks are SHARED module-level vi.fn()s; `mockResolvedValueOnce` queues values that
   // outlive a test if the component under test never consumed them (e.g. a test that never opens the
-  // LCP form leaves its queued `getMyProfile` value to bleed into the NEXT test's first call). Reset the
+  // detail panel form leaves its queued `getMyProfile` value to bleed into the NEXT test's first call). Reset the
   // call history + queues and restore each factory's original default so every test starts clean.
   vi.mocked(getMyProfile).mockReset().mockResolvedValue(null);
   vi.mocked(saveProfile).mockReset();
@@ -165,7 +165,7 @@ describe("ProfileCard (in-chat compact)", () => {
   });
 });
 
-describe("ProfileExpanded (LCP, read-only)", () => {
+describe("ProfileExpanded (detail panel, read-only)", () => {
   test("renders every section with NO edit affordances and a per-role show-more", () => {
     render(<ProfileExpanded profile={profile} />);
     expect(screen.getByText("Skills — proven in code")).toBeTruthy();
@@ -243,16 +243,16 @@ describe("part rendering (AC-1 render, AC-6)", () => {
 });
 
 describe("invite wiring (AC-2)", () => {
-  test("Should_OpenLcpProfileForm_When_InviteClicked", async () => {
+  test("Should_OpenDetailProfileForm_When_InviteClicked", async () => {
     renderChat([assistantPart("data-profile-invite", { kind: "profile-invite" })]);
     fireEvent.click(screen.getByRole("button", { name: "Add your profile" }));
-    // the LCP profile form opens (empty state)
+    // the detail panel profile form opens (empty state)
     expect(await screen.findByText("No profile yet")).toBeTruthy();
     expect(screen.getByRole("region", { name: "Your profile" })).toBeTruthy();
   });
 });
 
-describe("LCP routing per new card", () => {
+describe("detail panel routing per new card", () => {
   test("profile card 'Open in panel' opens the read-only expanded profile", () => {
     renderChat([assistantPart("data-profile-card", { kind: "profile-card", profile })]);
     fireEvent.click(screen.getByRole("button", { name: "Open in panel →" }));
@@ -264,8 +264,8 @@ describe("LCP routing per new card", () => {
     renderChat([assistantPart("data-postings", { kind: "postings", rows: postingsRows, total: 23 })]);
     fireEvent.click(screen.getByRole("button", { name: "Open all 23 in panel" }));
     expect(screen.getByRole("region", { name: "Matching postings" })).toBeTruthy();
-    // the LCP full list is uncapped (all 12 rows) with a filter group
-    expect(document.querySelector(".lcp")?.querySelectorAll("tbody tr").length).toBe(12);
+    // the detail panel full list is uncapped (all 12 rows) with a filter group
+    expect(document.querySelector(".detail-panel")?.querySelectorAll("tbody tr").length).toBe(12);
     expect(screen.getByRole("group", { name: "Filter postings" })).toBeTruthy();
   });
 });
@@ -273,11 +273,11 @@ describe("LCP routing per new card", () => {
 // ---------------------------------------------------------------------------------------------------
 // The form + save injection
 // ---------------------------------------------------------------------------------------------------
-describe("LcpProfile form", () => {
+describe("DetailProfile form", () => {
   test("Should_AppendProfileCardMessage_When_SaveCompletes (e2e build injects the card via onProfileSaved)", async () => {
     const onProfileSaved = vi.fn();
     render(
-      <LcpProfile
+      <DetailProfile
         conversationId={CONVERSATION_ID}
         e2e
         onClose={vi.fn()}
@@ -297,7 +297,7 @@ describe("LcpProfile form", () => {
   test("delete from the saved state fires onProfileDeleted and returns to the empty form", async () => {
     const onProfileDeleted = vi.fn();
     render(
-      <LcpProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={onProfileDeleted} />,
+      <DetailProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={onProfileDeleted} />,
     );
     fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
     fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
@@ -307,7 +307,7 @@ describe("LcpProfile form", () => {
   });
 
   test("empty build with no inputs shows a validation message, never a save", () => {
-    render(<LcpProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    render(<DetailProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toMatch(/Add a resume or a GitHub username/);
@@ -318,7 +318,7 @@ describe("LcpProfile form", () => {
   // would otherwise clear it silently with no warning shown.
   test("Should_PrefillGithubAndIndicateResumeOnFile_When_EditingASavedProfile", async () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
-    render(<LcpProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit & re-save" }));
     expect((screen.getByLabelText(/GitHub username/) as HTMLInputElement).value).toBe("octocat");
     expect(screen.getByText("A resume is on file. Re-upload to replace it.")).toBeTruthy();
@@ -397,7 +397,7 @@ describe("card-on-delete", () => {
     ]);
     expect(document.querySelector(".insight")).toBeTruthy(); // the live ProfileCard in the thread
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit profile" })); // opens the LCP form
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" })); // opens the detail panel form
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
 
     await waitFor(() => expect(deleteProfile).toHaveBeenCalledWith(CONVERSATION_ID)); // the persisted row
@@ -410,7 +410,7 @@ describe("card-on-delete", () => {
   test("Should_RenderPersistedCardAsHistory_When_AccountCurrentlyHasNoProfile (orphan card, other conversation)", async () => {
     const OTHER_CONV = "22222222-2222-4222-8222-222222222222";
     const cardId = await profileCardMessageId(OTHER_CONV);
-    // getMyProfile (the account's LIVE current state) is never even called here - the LCP profile panel
+    // getMyProfile (the account's LIVE current state) is never even called here - the detail panel profile panel
     // is not opened - which is the point: the persisted part renders independent of it.
     render(
       <ChatClient
@@ -432,12 +432,12 @@ describe("card-on-delete", () => {
 });
 
 // ---------------------------------------------------------------------------------------------------
-// The poll's error outcome -> LcpProfile's error-state copy (gated on whether a prior profile existed)
+// The poll's error outcome -> DetailProfile's error-state copy (gated on whether a prior profile existed)
 // ---------------------------------------------------------------------------------------------------
-describe("LcpProfile error state (poll contract)", () => {
+describe("DetailProfile error state (poll contract)", () => {
   test("Should_ShowNothingWasSaved_When_FreshExtractionFailsWithNoPriorProfile", async () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(freshFailureMyProfile);
-    render(<LcpProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
     expect(await screen.findByText("Couldn’t build the profile")).toBeTruthy();
     expect(screen.getByText("Nothing was saved.")).toBeTruthy();
     expect(screen.queryByText("Your previous profile is untouched.")).toBeNull();
@@ -449,7 +449,7 @@ describe("LcpProfile error state (poll contract)", () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile).mockResolvedValueOnce(savedMyProfile);
     vi.mocked(saveProfile).mockResolvedValueOnce({ ok: true, taskState: "queued", runId: "run_x" });
     vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "error", hadPriorProfile: true });
-    render(<LcpProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit & re-save" })); // github already prefilled -> passes the build() guard
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
@@ -466,7 +466,7 @@ describe("LcpProfile error state (poll contract)", () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(null); // this tab's initial load: no profile known locally
     vi.mocked(saveProfile).mockResolvedValueOnce({ ok: true, taskState: "queued", runId: "run_y" });
     vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "error", hadPriorProfile: true });
-    render(<LcpProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
 
     await screen.findByText("No profile yet"); // confirms local state resolved empty (profile stays null)
     fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });

@@ -26,7 +26,7 @@ import {
 } from "./chart-style";
 
 // Bars, two shapes: one measure -> sorted horizontal bars (leader accent-filled); many -> grouped vertical bars.
-// Single-measure: cap at BARS_CAP, truncate long labels (full label in the tooltip), "+ N more" into the LCP.
+// Single-measure: cap at BARS_CAP, truncate long labels (full label in the tooltip), "+ N more" into the detail panel.
 export function BarsChart({
   series,
   onShowAll,

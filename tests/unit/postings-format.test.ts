@@ -11,7 +11,7 @@ import {
   shownCount,
 } from "@/lib/postings-format";
 
-// The postings table-cell + corpus-honesty contracts, pinned so the in-chat card and the LCP full list
+// The postings table-cell + corpus-honesty contracts, pinned so the in-chat card and the detail panel full list
 // read the same values. "not listed" for a missing salary (never blank); the honesty share is computed.
 
 function row(over: Partial<ScoredPostingRow> = {}): ScoredPostingRow {

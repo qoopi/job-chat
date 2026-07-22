@@ -10,8 +10,8 @@ import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
 import { Composer, type ComposerState } from "./Composer";
 import { MessageList } from "./MessageList";
-import { LcpPanel } from "./LcpPanel";
-import { LcpProfile } from "./LcpProfile";
+import { DetailPanel } from "./DetailPanel";
+import { DetailProfile } from "./DetailProfile";
 import { AuthDialog } from "@/components/auth/AuthDialog";
 import { authClient } from "@/lib/auth-client";
 import { useJobChatTransport } from "@/lib/chat-transport";
@@ -21,8 +21,8 @@ import {
   dataParts,
   isStreaming,
   reconcileMessagesById,
-  resolveLcpContent,
-  type LcpTarget,
+  resolveDetailContent,
+  type DetailTarget,
 } from "@/lib/chat-ui";
 import { isAuthDialogOpen, isMenuOpen } from "@/lib/layers";
 import { queueDraft, takeQueuedDraft } from "@/lib/queued-draft";
@@ -119,16 +119,16 @@ export function ChatClient({
   const [awaiting, setAwaiting] = useState(false);
   const started = useRef(false);
 
-  // The open LCP, held by identity so its body re-resolves from the immutable payload (a resume renders the same LCP). One at a time.
-  const [lcpTarget, setLcpTarget] = useState<LcpTarget | null>(null);
+  // The open detail panel, held by identity so its body re-resolves from the immutable payload (a resume renders the same detail panel). One at a time.
+  const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
   const [profileOpen, setProfileOpen] = useState(profileOnArrival);
-  const openLcp = useCallback((messageId: string, partId: string) => {
+  const openDetailPanel = useCallback((messageId: string, partId: string) => {
     setProfileOpen(false);
-    setLcpTarget({ messageId, partId });
+    setDetailTarget({ messageId, partId });
   }, []);
-  const closeLcp = useCallback(() => setLcpTarget(null), []);
+  const closeDetailPanel = useCallback(() => setDetailTarget(null), []);
   const openProfile = useCallback(() => {
-    setLcpTarget(null);
+    setDetailTarget(null);
     setProfileOpen(true);
   }, []);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
@@ -170,11 +170,11 @@ export function ChatClient({
     ]);
   }, [setMessages]);
 
-  // New chat starts fresh IN PLACE - clear the thread/LCP/composer without navigating; `freshChatRef` arms the next send to create a brand-new conversation.
+  // New chat starts fresh IN PLACE - clear the thread/detail panel/composer without navigating; `freshChatRef` arms the next send to create a brand-new conversation.
   const startNewChat = useCallback(() => {
     freshChatRef.current = true;
     setMessages([]);
-    setLcpTarget(null);
+    setDetailTarget(null);
     setProfileOpen(false);
     setDraft("");
     setFailed(null);
@@ -432,29 +432,29 @@ export function ChatClient({
   // (SDK session replay, same id); fold those duplicates (replace in place, order kept) so each turn renders once and keys stay unique.
   const view = useMemo(() => reconcileMessagesById(messages), [messages]);
 
-  // The open LCP's body, re-resolved from the current (immutable) messages. The EXPENSIVE resolve (classify +
+  // The open detail panel's body, re-resolved from the current (immutable) messages. The EXPENSIVE resolve (classify +
   // Zod safeParse -> a fresh insight whose new `rows` ref re-sorts the DataTable) is memoized on the target
-  // message's REF, not the whole `view` array - so an LCP left open during an unrelated stream doesn't re-parse per chunk.
-  const targetMessage = lcpTarget
-    ? (view.find((m) => m.id === lcpTarget.messageId) ?? null)
+  // message's REF, not the whole `view` array - so a detail panel left open during an unrelated stream doesn't re-parse per chunk.
+  const targetMessage = detailTarget
+    ? (view.find((m) => m.id === detailTarget.messageId) ?? null)
     : null;
-  const lcpContent = useMemo(
+  const detailContent = useMemo(
     () =>
-      targetMessage && lcpTarget
-        ? resolveLcpContent([targetMessage], lcpTarget)
+      targetMessage && detailTarget
+        ? resolveDetailContent([targetMessage], detailTarget)
         : null,
-    [targetMessage, lcpTarget],
+    [targetMessage, detailTarget],
   );
 
-  // Close-on-Esc, honoring the layer priority (dialog > menu > LCP): yield while `isAuthDialogOpen()` or
-  // `isMenuOpen()` is true; otherwise Esc closes the LCP. Bound once; the functional setState reads current.
+  // Close-on-Esc, honoring the layer priority (dialog > menu > detail panel): yield while `isAuthDialogOpen()` or
+  // `isMenuOpen()` is true; otherwise Esc closes the detail panel. Bound once; the functional setState reads current.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      if (isAuthDialogOpen() || isMenuOpen()) return; // a layer above the LCP consumes Esc first
-      // Close whichever LCP view is open (they are mutually exclusive).
+      if (isAuthDialogOpen() || isMenuOpen()) return; // a layer above the detail panel consumes Esc first
+      // Close whichever detail panel view is open (they are mutually exclusive).
       setProfileOpen(false);
-      setLcpTarget((t) => (t ? null : t));
+      setDetailTarget((t) => (t ? null : t));
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -486,19 +486,19 @@ export function ChatClient({
         onDeleteConversation={(id) => void onDeleteConversation(id)}
       />
       <main className="main">
-        {/* The LCP takes the middle of the canvas (table OR profile); the chat docks to the right rail. */}
+        {/* The detail panel takes the middle of the canvas (table OR profile); the chat docks to the right rail. */}
         {profileOpen ? (
-          <LcpProfile
+          <DetailProfile
             conversationId={conversationId}
             e2e={e2e}
             onClose={closeProfile}
             onProfileSaved={onProfileSaved}
             onProfileDeleted={onProfileDeleted}
           />
-        ) : lcpContent ? (
-          <LcpPanel content={lcpContent} onClose={closeLcp} />
+        ) : detailContent ? (
+          <DetailPanel content={detailContent} onClose={closeDetailPanel} />
         ) : null}
-        <div className={profileOpen || lcpContent ? "canvas docked" : "canvas"}>
+        <div className={profileOpen || detailContent ? "canvas docked" : "canvas"}>
           <TitleBar
             title={titleState}
             signedIn={signedIn}
@@ -515,7 +515,7 @@ export function ChatClient({
               usedFollowups={used}
               onFollowup={onFollowup}
               onRetry={onRetry}
-              onOpenLcp={openLcp}
+              onOpenDetailPanel={openDetailPanel}
               onSignIn={signedIn ? undefined : openAuthDialog}
               onEditProfile={openProfile}
               onAuthInvite={onAuthInvite}
@@ -568,7 +568,7 @@ export function ChatClient({
           </button>
         </div>
       ) : null}
-      {/* Topmost layer (auth dialog > LCP > thread). Sign-in from inside a chat returns to THIS conversation. */}
+      {/* Topmost layer (auth dialog > detail panel > thread). Sign-in from inside a chat returns to THIS conversation. */}
       {dialogOpen ? (
         <AuthDialog
           onClose={closeAuthDialog}

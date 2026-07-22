@@ -221,7 +221,7 @@ describe("chat/[id] resume gate (ruling 2: ownership keys on the resolved Viewer
 
   // The landing's "Your profile" navigates to `/chat/new?profile=1`, which must open
   // the profile on arrival - prove the searchParams wiring itself (ChatClient's own open-on-arrival
-  // behavior is covered separately in lcp.test.tsx).
+  // behavior is covered separately in detail-panel.test.tsx).
   it("Should_ArmProfileOnArrival_When_ProfileParamIsOne", async () => {
     resolveViewerMock.mockResolvedValue(
       viewer({

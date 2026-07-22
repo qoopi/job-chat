@@ -6,7 +6,7 @@ import { deleteProfile, getMyProfile, getProfileRunStatus, saveProfile } from "@
 import { pollProfileSave } from "@/lib/profile-poll";
 import { isGithubSkipped, profileSubline, profileSummary, profileTitle } from "@/lib/profile-format";
 
-// The account's profile form in the LCP (five states: empty/saving/saved/github-skipped/error). Save polls
+// The account's profile form in the detail panel (five states: empty/saving/saved/github-skipped/error). Save polls
 // getMyProfile until extraction terminates (profile-poll.ts closes the re-save edge), then injects the card into the live thread.
 
 // The DECODED-PDF cap the form enforces before the round trip (the server also caps ~4.5MB).
@@ -57,7 +57,7 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export function LcpProfile({
+export function DetailProfile({
   conversationId,
   e2e = false,
   onClose,
@@ -215,14 +215,14 @@ export function LcpProfile({
   }, []);
 
   return (
-    <section className="lcp" role="region" aria-label="Your profile">
-      <div className="lcp-head">
-        <span className="lcp-title">Your profile</span>
+    <section className="detail-panel" role="region" aria-label="Your profile">
+      <div className="detail-panel-head">
+        <span className="detail-panel-title">Your profile</span>
         <button className="x-btn" type="button" aria-label="Close profile" onClick={onClose}>
           &times;
         </button>
       </div>
-      <div className="lcp-body">
+      <div className="detail-panel-body">
         {status === "loading" ? (
           <div className="profile-form">
             <div className="skeleton" style={{ height: 15, width: "50%" }} />
