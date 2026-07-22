@@ -2,9 +2,11 @@
 
 import { cookies, headers } from "next/headers";
 import postgres, { type Sql } from "postgres";
-import { auth } from "@trigger.dev/sdk";
+import { auth, tasks } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore, type ConversationSummary } from "@shared/store";
+import type { Profile } from "@shared/profile";
+import type { extractProfileTask } from "../../trigger/extract-profile";
 import { getGuardConfig } from "@shared/env";
 import { isE2E } from "@/lib/e2e";
 import { auth as authServer } from "@/lib/auth";
@@ -237,4 +239,105 @@ export async function deleteConversation(
   const identity = await resolveCaller();
   if (!identity) return { ok: false, reason: "not_found" };
   return service().deleteConversation(conversationId, identity.userId);
+}
+
+// The server cap on the DECODED resume PDF (the form caps ~4MB; a hair over is allowed so a legit ~4MB
+// file is never rejected by a stricter server bound). next.config raises the Server Action body limit to
+// 6mb to fit the base64-inflated payload before it reaches here.
+const MAX_RESUME_PDF_BYTES = Math.floor(4.5 * 1024 * 1024);
+
+/** The signed-in job seeker's own profile (sanitized - never the transient PDF bytes), for the LCP poll
+ *  read: the structured profile (null while extraction is pending), the github username, and the
+ *  extraction timestamp (null = pending; the panel polls until it advances). */
+export interface MyProfile {
+  profile: Profile | null;
+  githubUsername: string | null;
+  extractedAt: string | null;
+}
+
+export type SaveProfileInput = {
+  conversationId: string;
+  resumeText?: string;
+  resumePdf?: { bytes: string; name: string };
+  githubUsername?: string;
+};
+
+export type SaveProfileResult =
+  | { ok: true; taskState: "queued"; runId: string }
+  | { ok: false; reason: "unauthorized" | "too-large" | "empty" };
+
+function trimmedOrNull(value: string | undefined): string | null {
+  const t = value?.trim();
+  return t && t.length > 0 ? t : null;
+}
+
+/**
+ * Store the profile inputs and kick off background extraction. Signed-in only (profiles exist only on
+ * accounts - auth-first) AND the conversation must be the caller's OWN (a forged conversation id can
+ * never append a card to someone else's thread). The resume PDF (base64) is decoded, size-capped, and
+ * staged transiently; then the extract-profile Trigger task runs the GitHub fetch + the model extraction.
+ * Returns the queued task state - the panel polls `getMyProfile` until `extractedAt` advances.
+ */
+export async function saveProfile(
+  input: SaveProfileInput,
+): Promise<SaveProfileResult> {
+  const identity = await resolveCaller();
+  if (!identity || identity.kind !== "account") {
+    return { ok: false, reason: "unauthorized" };
+  }
+  const store = createStore(sql());
+  // Ownership: the target conversation must belong to the signed-in caller.
+  const owner = await store.getConversationOwner(input.conversationId);
+  if (!owner || owner.user_id !== identity.userId) {
+    return { ok: false, reason: "unauthorized" };
+  }
+
+  const rawResumeText = trimmedOrNull(input.resumeText);
+  const githubUsername = trimmedOrNull(input.githubUsername);
+  let resumePdf: Uint8Array | null = null;
+  if (input.resumePdf && input.resumePdf.bytes.length > 0) {
+    const bytes = Buffer.from(input.resumePdf.bytes, "base64");
+    if (bytes.length > MAX_RESUME_PDF_BYTES) return { ok: false, reason: "too-large" };
+    resumePdf = bytes;
+  }
+  // Nothing to extract from: refuse rather than trigger a task that would produce an empty profile.
+  if (!rawResumeText && !resumePdf && !githubUsername) {
+    return { ok: false, reason: "empty" };
+  }
+
+  await store.saveProfileInputs({
+    userId: identity.userId,
+    rawResumeText,
+    resumePdf,
+    githubUsername,
+  });
+
+  const handle = await tasks.trigger<typeof extractProfileTask>("extract-profile", {
+    userId: identity.userId,
+    conversationId: input.conversationId,
+  });
+  return { ok: true, taskState: "queued", runId: handle.id };
+}
+
+/** The LCP poll read: the caller's own profile, sanitized. `null` for a guest or a caller with no
+ *  profile row yet (the AC-2 invite path). */
+export async function getMyProfile(): Promise<MyProfile | null> {
+  const identity = await resolveCaller();
+  if (!identity || identity.kind !== "account") return null;
+  const row = await createStore(sql()).getProfile(identity.userId);
+  if (!row) return null;
+  return {
+    profile: row.profile,
+    githubUsername: row.github_username,
+    extractedAt: row.extracted_at ? row.extracted_at.toISOString() : null,
+  };
+}
+
+/** Delete the signed-in caller's profile (raw inputs + structured profile). Idempotent; subsequent
+ *  fit-intents then behave as the no-profile path (AC-10). */
+export async function deleteProfile(): Promise<{ ok: boolean }> {
+  const identity = await resolveCaller();
+  if (!identity || identity.kind !== "account") return { ok: false };
+  await createStore(sql()).deleteProfile(identity.userId);
+  return { ok: true };
 }
