@@ -8,6 +8,7 @@ import {
   formatMoney,
   formatUsd,
   freshnessLabel,
+  isSingleScalar,
   labelKeyOf,
   truncateLabel,
   valueKeyOf,
@@ -122,9 +123,12 @@ describe("series key detection (charts read DataPoint[] by convention)", () => {
     { city: "Los Angeles", median: 139000, n: 359 },
   ];
 
-  it("labelKeyOf picks the first string-valued column", () => {
+  it("labelKeyOf picks the first non-numeric column (null-tolerant; principles 8 one home)", () => {
     expect(labelKeyOf(companies)).toBe("company");
     expect(labelKeyOf(compare)).toBe("city");
+    // A null label in row 0 still resolves to its column (first NON-number) - a "first string" rule
+    // would skip it to a later string column, splitting the chart's label column from the model view.
+    expect(labelKeyOf([{ city: null, label: "SF", count: 5 }])).toBe("city");
   });
 
   it("valueKeyOf prefers the primary measure over a secondary count", () => {
@@ -138,6 +142,66 @@ describe("series key detection (charts read DataPoint[] by convention)", () => {
     // - a count of ~3 beside a median of ~180000 would render an invisible, misleading second bar.
     expect(valueKeysOf(compare, "city")).toEqual(["median"]);
     expect(valueKeysOf(companies, "company")).toEqual(["count"]);
+  });
+});
+
+describe("isSingleScalar (AC-18 - a one-cell table is fully stated by the verdict)", () => {
+  const meta = { sql: "SELECT 1", sampleN: 3488, updatedAt: "2026-07-18 19:12:00" };
+  it("is true for a one-row, one-cell table", () => {
+    expect(
+      isSingleScalar({ id: "s", kind: "table", verdict: "3,488 postings.", rows: [{ count: 3488 }], followups: [], meta }),
+    ).toBe(true);
+  });
+  it("is false for a multi-cell one-row table (a real small table, e.g. p25/median/p75)", () => {
+    expect(
+      isSingleScalar({
+        id: "s",
+        kind: "table",
+        verdict: "Salaries span the range.",
+        rows: [{ p25_salary: 130000, median_salary: 160000, p75_salary: 190000 }],
+        followups: [],
+        meta,
+      }),
+    ).toBe(false);
+  });
+  it("is false for a one-row, TWO-cell table (e.g. label+count) - the boundary just past scalar", () => {
+    expect(
+      isSingleScalar({
+        id: "s",
+        kind: "table",
+        verdict: "Amazon leads with 214 postings.",
+        rows: [{ company: "Amazon", count: 214 }],
+        followups: [],
+        meta,
+      }),
+    ).toBe(false);
+  });
+  it("is true for a one-row, one-cell table whose cell is a money value (scalar-ness is shape, not value type)", () => {
+    expect(
+      isSingleScalar({
+        id: "s",
+        kind: "table",
+        verdict: "The average salary is $182k.",
+        rows: [{ avg_salary: 182000 }],
+        followups: [],
+        meta,
+      }),
+    ).toBe(true);
+  });
+  it("is false for a multi-row table and for any chart", () => {
+    expect(
+      isSingleScalar({
+        id: "s",
+        kind: "table",
+        verdict: "Two rows.",
+        rows: [{ count: 1 }, { count: 2 }],
+        followups: [],
+        meta,
+      }),
+    ).toBe(false);
+    expect(
+      isSingleScalar({ id: "c", kind: "chart", chartType: "bars", verdict: "Chart.", series: [{ company: "A", count: 1 }], followups: [], meta }),
+    ).toBe(false);
   });
 });
 

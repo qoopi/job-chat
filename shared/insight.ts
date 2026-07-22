@@ -15,6 +15,19 @@ export type ChartType = z.infer<typeof ChartTypeSchema>;
 const DataPointSchema = z.record(z.string(), z.union([z.string(), z.number(), z.null()]));
 export type DataPoint = z.infer<typeof DataPointSchema>;
 
+/**
+ * The label column of a row set: the first NON-NUMERIC column (a measure is always a number), detected
+ * by "not a number" rather than "is a string" so a null/empty first label still resolves to its column.
+ * Falls back to the first column, then "label". ONE home (principles finding 8) so the model view
+ * (trigger/parts.ts) and the chart/table reading (src/lib/insight-format.ts) never disagree on which
+ * column is the label - a null-in-row-0 label used to split them ("first string" vs "first non-number").
+ */
+export function labelKeyOf(rows: DataPoint[]): string {
+  const first = rows[0] ?? {};
+  const key = Object.keys(first).find((k) => typeof first[k] !== "number");
+  return key ?? Object.keys(first)[0] ?? "label";
+}
+
 const MetaSchema = z
   .object({
     sql: z.string(), // the exact executed ClickHouse SQL - Show query reveals this verbatim

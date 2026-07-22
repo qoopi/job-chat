@@ -106,6 +106,7 @@ export function ChatClient({
     sendMessage,
     stop,
     status,
+    error,
     regenerate,
     setMessages,
     resumeStream,
@@ -515,6 +516,11 @@ export function ChatClient({
   // dialog dims the composer (interaction-spec section 4). When capped (refresh #2 s8) the composer stays
   // ENABLED with its register placeholder - a send there opens the dialog with the draft queued.
   const pending = isStreaming(status) || awaiting;
+  // AC-7 (live): a turn that errors at the SDK level surfaces on useChat's `error` state but streams NO
+  // data-error part, so MessageList would otherwise show no live error card for that class (tool failures
+  // stream the part and are unaffected). Feed the error state through so the card + Retry show live too;
+  // regenerate clears `error` on the next attempt, so the card drops once Retry runs.
+  const liveError = error != null;
   const composerState: ComposerState = dialogOpen
     ? "disabled"
     : pending
@@ -527,7 +533,6 @@ export function ChatClient({
     <div className="app" style={{ height: "100vh" }}>
       <Sidebar
         signedIn={signedIn}
-        accountName={accountName}
         conversations={conversations}
         activeId={conversationId}
         activeTitle={titleState}
@@ -562,6 +567,7 @@ export function ChatClient({
               onRetry={onRetry}
               onOpenLcp={openLcp}
               onSignIn={signedIn ? undefined : openAuthDialog}
+              liveError={liveError}
             />
           </div>
           <Composer

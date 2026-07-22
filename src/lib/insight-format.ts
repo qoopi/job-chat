@@ -1,8 +1,13 @@
 import type { DataInsight, DataPoint, ErrorKind, RefusalReason } from "@shared/insight";
+import { labelKeyOf } from "@shared/insight";
 
 // The error / refusal taxonomy lives in `@shared/insight` (its one home); re-exported here so the UI copy
 // helpers and their callers keep importing the kinds from the insight-format layer.
 export type { ErrorKind, RefusalReason };
+
+// The label-column decision has one home in `@shared/insight` (principles finding 8) - re-exported so the
+// chart components keep reading it from this layer while trigger/parts.ts reads the same helper.
+export { labelKeyOf };
 
 // Pure presentation helpers for the insight surfaces. Kept free of React/"use client" so the copy
 // contracts (AC-10) and the chart series-reading conventions are unit-testable in isolation.
@@ -15,6 +20,20 @@ export const BARS_CAP = 8;
 /** Truncate a long category label for the chart axis (the full label rides in the data + tooltip). */
 export function truncateLabel(label: string, max = 26): string {
   return label.length > max ? `${label.slice(0, max)}…` : label;
+}
+
+/**
+ * AC-18: a single-scalar answer - a one-row, one-cell table whose only content is the number the
+ * verdict already states (a no-dimension single-measure query: `{ count: N }`, `{ median_salary: N }`).
+ * Rendered as the verdict sentence alone: a one-cell table card is degenerate. Charts and multi-cell
+ * tables are never scalars.
+ */
+export function isSingleScalar(insight: DataInsight): boolean {
+  return (
+    insight.kind === "table" &&
+    insight.rows.length === 1 &&
+    Object.keys(insight.rows[0]).length === 1
+  );
 }
 
 /**
@@ -94,13 +113,6 @@ export function freshnessLabel(chTs: string): string {
 
 function isNumeric(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
-}
-
-/** The label column: the first key whose value is a string (company, city, day, label...). */
-export function labelKeyOf(rows: DataPoint[]): string {
-  const first = rows[0] ?? {};
-  const key = Object.keys(first).find((k) => typeof first[k] === "string");
-  return key ?? Object.keys(first)[0] ?? "label";
 }
 
 // `n` is a SAMPLE-SIZE context column (salary_compare returns {city, median, n}), never a series to

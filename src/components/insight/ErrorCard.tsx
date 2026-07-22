@@ -7,7 +7,8 @@ import {
 } from "@/lib/insight-format";
 
 // AC-10 error card: compact message + Retry (re-runs the same question). Distinct copy for a system
-// failure vs an unanswerable question; never a stack trace. Retry is inert here - 006 wires it.
+// failure vs an unanswerable question; never a stack trace. Retry is shown ONLY when an onRetry handler
+// is supplied - a mid-thread error card gets none (regenerate re-answers the tail, not this turn).
 export function ErrorCard({
   kind,
   onRetry,
@@ -19,13 +20,11 @@ export function ErrorCard({
     <div className="err-card">
       <InfoIcon />
       {errorCopy(kind)}
-      <button
-        className="btn btn-outline btn-sm"
-        type="button"
-        onClick={() => onRetry?.()}
-      >
-        Retry
-      </button>
+      {onRetry ? (
+        <button className="btn btn-outline btn-sm" type="button" onClick={onRetry}>
+          Retry
+        </button>
+      ) : null}
     </div>
   );
 }

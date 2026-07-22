@@ -67,8 +67,7 @@ export function Sidebar({
 }: {
   signedIn?: boolean;
   // refresh #2 s5/s6: identity moved to the TitleBar (AccountMenu); the sidebar no longer renders a name
-  // or avatar. Accepted-and-ignored so the shared caller prop shape stays stable.
-  accountName?: string;
+  // or avatar.
   conversations?: HistoryItem[];
   activeId?: string;
   activeTitle?: string;

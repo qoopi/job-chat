@@ -1,5 +1,6 @@
 import {
   DataInsightSchema,
+  labelKeyOf,
   type ChartType,
   type DataInsight,
   type DataPoint,
@@ -479,10 +480,11 @@ const MODEL_LABEL_CAP = 12;
 function rowLabels(rows: DataPoint[]): string[] {
   const first = rows[0];
   if (!first) return [];
-  // The label column is the first non-numeric column (a measure is always a number); detect it by "not
-  // a number" rather than "is a string" so a null/empty first label still resolves to its column.
-  const key = Object.keys(first).find((k) => typeof first[k] !== "number");
-  if (!key) return [];
+  // The label column decision has one home (principles 8): the same helper the chart reading uses, so
+  // the model's labels and the chart's label column can never diverge on a null-in-row-0 label.
+  const key = labelKeyOf(rows);
+  // No non-numeric label column (all measures): no entities to ground the model on.
+  if (typeof first[key] === "number") return [];
   return rows.slice(0, MODEL_LABEL_CAP).map((r) => labelText(r[key]));
 }
 

@@ -8,6 +8,7 @@ import { createStore, type ConversationSummary } from "@shared/store";
 import { getGuardConfig } from "@shared/env";
 import { isE2E } from "@/lib/e2e";
 import { auth as authServer } from "@/lib/auth";
+import { GUEST_COOKIE } from "@/lib/guest-cookie";
 import { AGENT_ID } from "../../trigger/agent-id";
 import {
   chatTokenScopes,
@@ -30,7 +31,6 @@ import type { jobChatAgent } from "../../trigger/chat";
 // UI branches on `reason`). This file holds ONLY async server actions (the "use server" contract);
 // all wiring is module-private.
 
-const GUEST_COOKIE = "jobchat_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 
 // One lazy Postgres pool cached on globalThis (shared key with server-store.ts) so Next.js dev HMR

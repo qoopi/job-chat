@@ -1,5 +1,5 @@
 import { chat } from "@trigger.dev/sdk/ai";
-import { streamText, stepCountIs, type UIMessageChunk } from "ai";
+import { streamText, stepCountIs, type SystemModelMessage, type UIMessageChunk } from "ai";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 import postgres from "postgres";
@@ -53,17 +53,29 @@ async function withStore<T>(fn: (store: Store) => Promise<T>): Promise<T> {
   }
 }
 
+// AC-19: mark the system block as a Bedrock prompt-cache point so repeat turns read it from cache (no
+// behavior change). Conformance correction 5: the toStreamTextOptions `systemProviderOptions` route
+// silently no-ops here (the SDK builds a system block only after chat.prompt.set(), which we never
+// call, and our explicit `system:` after the spread overrides it anyway). Instead pass the structured
+// SystemModelMessage directly - the exact shape the SDK itself emits for a provider cache point (ai@7
+// `Instructions` accepts a SystemModelMessage).
+const cachePointSystem = (system: string): SystemModelMessage => ({
+  role: "system",
+  content: system,
+  providerOptions: { bedrock: { cachePoint: { type: "default" } } },
+});
+
 // The model seam (real path): stream the rebuilt history to Bedrock. The orchestration - persist the
 // incoming turn, apply the cap/budget/size backstop, and REBUILD the model input from the store so the
 // model sees the full alternating history (004 round 4) - lives in `createChatRun` (trigger/run.ts),
 // with this as the injected model. `chat.toStreamTextOptions` contributes prepareStep (compaction /
-// background injection); our explicit system + rebuilt `messages` win after the spread (the app never
+// background injection); our structured system + rebuilt `messages` win after the spread (the app never
 // calls `chat.prompt.set()`, so the SDK sets neither).
-const streamModel = ({ system, messages, tools, signal }: StreamModelArgs) =>
+export const streamModel = ({ system, messages, tools, signal }: StreamModelArgs) =>
   streamText({
     ...chat.toStreamTextOptions({ tools }),
     model,
-    system,
+    system: cachePointSystem(system),
     messages,
     tools,
     abortSignal: signal,
