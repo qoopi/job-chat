@@ -208,6 +208,11 @@ export interface Store {
   /** Remove the caller's profile (raw inputs + structured profile). Idempotent - deleting a
    *  non-existent profile is a no-op; subsequent fit-intents then behave as the no-profile path (AC-10). */
   deleteProfile(userId: string): Promise<void>;
+  /** Delete one message by id within a conversation (idempotent; a no-op if absent or malformed). The
+   *  card-on-delete rule uses it to remove the profile card from the ACTIVE conversation when the profile
+   *  is deleted - the deterministic card id makes it one DELETE. Orphan cards in OTHER conversations stay
+   *  as plain history (acceptable). */
+  deleteMessage(conversationId: string, id: string): Promise<void>;
 }
 
 /**
@@ -448,6 +453,13 @@ export function createStore(sql: Sql): Store {
 
     async deleteProfile(userId) {
       await sql`DELETE FROM profiles WHERE user_id = ${userId}`;
+    },
+
+    async deleteMessage(conversationId, id) {
+      // Both ids feed a uuid column; guard so a malformed id reads as "no such row" (the store's
+      // null-is-not-found contract) rather than raising `invalid input syntax for type uuid`.
+      if (!UUID_RE.test(conversationId) || !UUID_RE.test(id)) return;
+      await sql`DELETE FROM messages WHERE id = ${id} AND conversation_id = ${conversationId}`;
     },
 
     async messageCounts({ userId, sinceUtcMidnight }) {

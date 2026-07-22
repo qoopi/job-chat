@@ -102,18 +102,23 @@ export type RefusalReason = GuardRefusal | "too_long";
 
 /** One scored posting row the selection scorer returns and the postings card renders. Defined here (the
  *  part vocabulary) so the `postings` part type is self-contained; the scorer that fills it lands with
- *  `searchPostings`. `null` for city/salary means "not listed" (the card shows a muted note, never blank). */
-export interface ScoredPostingRow {
-  title: string;
-  company: string;
-  city: string | null;
-  remote: boolean;
-  salaryMin: number | null;
-  salaryMax: number | null;
-  experience: string;
-  publishedAt: string;
-  score: number;
-}
+ *  `searchPostings`. `null` for city/salary means "not listed" (the card shows a muted note, never blank).
+ *  A zod schema (not a bare interface) so a `data-postings` payload is classified/validated on the client
+ *  exactly as the profile card is - a shape drift is dropped, never rendered as junk. */
+export const ScoredPostingRowSchema = z
+  .object({
+    title: z.string(),
+    company: z.string(),
+    city: z.string().nullable(),
+    remote: z.boolean(),
+    salaryMin: z.number().nullable(),
+    salaryMax: z.number().nullable(),
+    experience: z.string(),
+    publishedAt: z.string(),
+    score: z.number(),
+  })
+  .strict();
+export type ScoredPostingRow = z.infer<typeof ScoredPostingRowSchema>;
 
 /** The profile card payload: the structured profile the extraction task produced, rendered as the
  *  in-chat identity card + the LCP expanded view. Appended out-of-band by the save flow (not a turn),
@@ -131,6 +136,17 @@ export type ProfileInvitePart = { kind: "profile-invite" };
 export const ProfileCardSchema = z
   .object({ kind: z.literal("profile-card"), profile: ProfileSchema })
   .strict();
+
+/** The postings-card payload validator: the scored rows + the pre-limit total for the "8 of 23" framing.
+ *  The client classifier validates a `data-postings` part against this before rendering the card. */
+export const PostingsSchema = z
+  .object({ kind: z.literal("postings"), rows: z.array(ScoredPostingRowSchema), total: z.number() })
+  .strict();
+
+/** The two fit-intent invite payloads carry no fields (the whole payload IS the marker); a literal-kind
+ *  validator keeps the classifier symmetric with the card kinds and rejects a widened shape. */
+export const AuthInviteSchema = z.object({ kind: z.literal("auth-invite") }).strict();
+export const ProfileInviteSchema = z.object({ kind: z.literal("profile-invite") }).strict();
 
 /** True for a persisted assistant row whose payload is a profile card. The out-of-band append rule
  *  keys off this: the run gate computes its already-answered tail over NON-profile-card rows, and

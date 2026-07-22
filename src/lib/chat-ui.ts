@@ -1,11 +1,15 @@
 import type { UIMessage } from "ai";
 import {
   DataInsightSchema,
+  PostingsSchema,
+  ProfileCardSchema,
   type ChartType,
   type DataInsight,
   type ErrorKind,
   type RefusalReason,
+  type ScoredPostingRow,
 } from "@shared/insight";
+import type { Profile } from "@shared/profile";
 
 // The client-side reading of a chat turn. `useChat` (via the Trigger transport) exposes messages as
 // `UIMessage[]` whose `parts` mix text with `data-*` parts; the store persists the same card payloads
@@ -25,7 +29,23 @@ export type CardClass =
   | SkeletonCard
   | { kind: "error"; errorKind: ErrorKind }
   | { kind: "refusal"; reason: RefusalReason }
+  | { kind: "profile-card"; profile: Profile }
+  | { kind: "postings"; rows: ScoredPostingRow[]; total: number }
+  | { kind: "auth-invite" }
+  | { kind: "profile-invite" }
   | { kind: "unknown" };
+
+/** The `data-<kind>` wire type each classified card persists/streams as. One home so `storeToUiMessages`
+ *  (resume) and any live writer tag a part identically - the classifier reads them back the same way. */
+const PART_TYPE_BY_KIND: Record<string, string> = {
+  insight: "data-insight",
+  error: "data-error",
+  refusal: "data-refusal",
+  "profile-card": "data-profile-card",
+  postings: "data-postings",
+  "auth-invite": "data-auth-invite",
+  "profile-invite": "data-profile-invite",
+};
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
@@ -48,18 +68,35 @@ export interface LcpTarget {
   partId: string;
 }
 
+/** What a card-backed LCP shows: a full data table, the expanded profile, or the full postings list.
+ *  (The profile FORM is a separate LCP state, opened from the menu / an invite, not a message part.) */
+export type LcpContent =
+  | { kind: "table"; insight: DataInsight }
+  | { kind: "profile-card"; profile: Profile }
+  | { kind: "postings"; rows: ScoredPostingRow[]; total: number };
+
 /**
- * Resolve an LCP target back to its insight from the current messages. The panel body is stored
+ * Resolve an LCP target back to its content from the current messages. The panel body is stored
  * by identity, not value, so it re-resolves from the immutable persisted payload - a resumed
- * conversation renders the same LCP. Null when the message/part is gone or is not an insight.
+ * conversation renders the same LCP. Null when the message/part is gone or is not an LCP-openable card
+ * (a table insight, a profile card, or a postings card).
  */
-export function resolveInsightTarget(messages: UIMessage[], target: LcpTarget): DataInsight | null {
+export function resolveLcpContent(messages: UIMessage[], target: LcpTarget): LcpContent | null {
   const message = messages.find((m) => m.id === target.messageId);
   if (!message) return null;
   const part = dataParts(message).find((p) => p.id === target.partId);
   if (!part) return null;
   const cls = classifyCardData(part.data);
-  return cls.kind === "insight" ? cls.insight : null;
+  if (cls.kind === "insight") return { kind: "table", insight: cls.insight };
+  if (cls.kind === "profile-card") return { kind: "profile-card", profile: cls.profile };
+  if (cls.kind === "postings") return { kind: "postings", rows: cls.rows, total: cls.total };
+  return null;
+}
+
+/** Back-compat table-only resolver (the LCP table path). Thin wrapper over `resolveLcpContent`. */
+export function resolveInsightTarget(messages: UIMessage[], target: LcpTarget): DataInsight | null {
+  const c = resolveLcpContent(messages, target);
+  return c?.kind === "table" ? c.insight : null;
 }
 
 /**
@@ -82,6 +119,18 @@ export function classifyCardData(data: unknown): CardClass {
     if (data.reason === "guest_cap" || data.reason === "daily_budget" || data.reason === "too_long") {
       return { kind: "refusal", reason: data.reason };
     }
+    // The profile + fresh-data kinds (029). Each validates strictly - a malformed profile-card / postings
+    // payload falls through to `unknown` (rendered as nothing) rather than throwing in the render tree.
+    if (data.kind === "profile-card") {
+      const pc = ProfileCardSchema.safeParse(data);
+      if (pc.success) return { kind: "profile-card", profile: pc.data.profile };
+    }
+    if (data.kind === "postings") {
+      const p = PostingsSchema.safeParse(data);
+      if (p.success) return { kind: "postings", rows: p.data.rows, total: p.data.total };
+    }
+    if (data.kind === "auth-invite") return { kind: "auth-invite" };
+    if (data.kind === "profile-invite") return { kind: "profile-invite" };
   }
   return { kind: "unknown" };
 }
@@ -204,8 +253,9 @@ export function storeToUiMessages(messages: StoredMessage[]): UIMessage[] {
         // Never resume a stuck skeleton: a persisted loading payload (defensive - the agent already
         // drops these) or an unrecognized shape is skipped so a resumed turn shows its real card only.
         if (cls.kind === "unknown" || cls.kind === "skeleton") return;
-        const type =
-          cls.kind === "error" ? "data-error" : cls.kind === "refusal" ? "data-refusal" : "data-insight";
+        // Re-tag by the classified kind so a resumed profile-card / postings / invite part is read back
+        // exactly as the live stream wrote it (the classifier keys off the `data-<kind>` prefix + payload).
+        const type = PART_TYPE_BY_KIND[cls.kind] ?? "data-insight";
         parts.push({ type, id: `${m.id}-card-${i}`, data: payload } as UIMessage["parts"][number]);
       });
     }
