@@ -89,7 +89,9 @@ export function selectEvalCases(
 export interface Observed {
   toolCalls: { name: string; input: Record<string, unknown> }[];
   text: string;
-  hasInsight: boolean; // a valid, non-empty insight card was emitted (=> "data" mode)
+  // A data CARD was rendered (=> "data" mode): a valid non-empty insight, OR a postings card, OR a
+  // fit-intent invite (auth/profile). A loading skeleton or an empty marker is NOT a card.
+  renderedCard: boolean;
   error?: string;
 }
 
@@ -144,6 +146,13 @@ export async function runCase(
   await store.appendMessage(conv.id, "user", turns[0], null); // mirror startConversation (turn 1)
   const cumulative: { role: "user"; content: string }[] = [];
 
+  // The identity + profile the case runs under (the profile-driven fit cases). Absent => a guest with
+  // no profile. callerKind drives request_profile's card; the profile drives the PROFILE note (run.ts)
+  // AND search_postings' server-side merge (the tools). This is the eval's PROFILE-note injection seam.
+  const identity = evalCase.identity;
+  const callerKind = identity?.signedIn ? "account" : "guest";
+  const profile = identity?.profile ?? null;
+
   const buildRun = (emit: (part: EmitPart) => void) =>
     createChatRun({
       withStore: (fn) => fn(store),
@@ -156,15 +165,17 @@ export async function runCase(
       now: () => new Date(),
       system,
       coverageProfile: fakeCoverageProfile, // inject the DATA SCOPE note, as production does
+      profile: async () => profile, // inject the PROFILE note when the case carries a profile
       streamModel,
     });
 
-  let observed: Observed = { toolCalls: [], text: "", hasInsight: false };
+  let observed: Observed = { toolCalls: [], text: "", renderedCard: false };
   for (let t = 0; t < turns.length; t++) {
     cumulative.push({ role: "user", content: turns[t] });
     const emitted: EmitPart[] = [];
     const emit = (part: EmitPart) => emitted.push(part);
-    const tools = buildCatalogTools({ analytics: fakeAnalytics(), emit });
+    // The fit tools carry the case's identity + profile, as production's per-turn tools function does.
+    const tools = buildCatalogTools({ analytics: fakeAnalytics(), emit, callerKind, profile });
     try {
       const result = await buildRun(emit)({
         chatId: conv.id,
@@ -177,7 +188,7 @@ export async function runCase(
         observed = {
           toolCalls: [],
           text: "",
-          hasInsight: false,
+          renderedCard: false,
           error: "run refused before the model (unexpected)",
         };
         break;
@@ -191,12 +202,15 @@ export async function runCase(
           input: (tc.input ?? {}) as Record<string, unknown>,
         }));
       const text = (await result.text).trim();
-      const hasInsight = emitted.some(
+      const renderedCard = emitted.some(
         (p) =>
-          p.type === "data-insight" &&
-          DataInsightSchema.safeParse((p as { data: unknown }).data).success,
+          (p.type === "data-insight" &&
+            DataInsightSchema.safeParse((p as { data: unknown }).data).success) ||
+          p.type === "data-postings" ||
+          p.type === "data-auth-invite" ||
+          p.type === "data-profile-invite",
       );
-      observed = { toolCalls, text, hasInsight };
+      observed = { toolCalls, text, renderedCard };
       // Persist the assistant turn (mirror onTurnComplete) so a later turn's rebuilt history carries it.
       const responseMessage = {
         parts: [
@@ -216,7 +230,7 @@ export async function runCase(
       observed = {
         toolCalls: [],
         text: "",
-        hasInsight: false,
+        renderedCard: false,
         error: (err as Error).message,
       };
       break;

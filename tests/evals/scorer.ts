@@ -54,24 +54,30 @@ function paramsSubsetMatch(
   });
 }
 
-// The data tools whose call renders an insight card: the 6 fixed templates + the composed query_postings.
-// A second data tool means a second card - a defect under P1's "one answer, one card" contract - so a
-// data-tool expectation must be met by EXACTLY that tool, called once, with no other data tool alongside.
-const DATA_TOOLS = new Set<string>([...CATALOG_TOOL_NAMES, "query_postings"]);
+// The tools whose call renders a card: the 6 fixed templates + composed query_postings (insight cards),
+// plus search_postings (the postings card) and request_profile (an invite card). A second card tool
+// means a second card - a defect under P1's "one answer, one card" contract - so a card-tool expectation
+// must be met by EXACTLY that tool, called once, with no other card tool alongside.
+const CARD_TOOLS = new Set<string>([
+  ...CATALOG_TOOL_NAMES,
+  "query_postings",
+  "search_postings",
+  "request_profile",
+]);
 
-// The tool+mode gate asks the agent to "select THE expected tool and mode" (definite article, singular). For a data tool
-// that means the expected tool called EXACTLY once and NO other data tool: a right tool called beside an
-// extra data tool emits a second card - a defect, not a pass (the saved v1 Q5 hit this: share_split +
+// The tool+mode gate asks the agent to "select THE expected tool and mode" (definite article, singular). For a card tool
+// that means the expected tool called EXACTLY once and NO other card tool: a right tool called beside an
+// extra card tool emits a second card - a defect, not a pass (the saved v1 Q5 hit this: share_split +
 // query_postings). The pure-plain (no-tool) and report_unanswerable cases are excepted - plain expects
-// zero tools, and report_unanswerable (not a data tool) keeps the lenient membership check as before.
+// zero tools, and report_unanswerable (not a card tool) keeps the lenient membership check as before.
 function toolMatches(expect: EvalExpect, observedTools: string[]): boolean {
   if (expect.tool === undefined) return observedTools.length === 0; // a pure plain answer calls no tool
-  if (!DATA_TOOLS.has(expect.tool)) return observedTools.includes(expect.tool); // report_unanswerable
+  if (!CARD_TOOLS.has(expect.tool)) return observedTools.includes(expect.tool); // report_unanswerable
   const expectedCalls = observedTools.filter((t) => t === expect.tool).length;
-  const extraDataTool = observedTools.some(
-    (t) => t !== expect.tool && DATA_TOOLS.has(t),
+  const extraCardTool = observedTools.some(
+    (t) => t !== expect.tool && CARD_TOOLS.has(t),
   );
-  return expectedCalls === 1 && !extraDataTool;
+  return expectedCalls === 1 && !extraCardTool;
 }
 
 function formatOk(text: string): boolean {
@@ -93,7 +99,7 @@ function scopeQualifiedOk(text: string): boolean {
 export function scoreCase(evalCase: EvalCase, observed: Observed): ScoredCase {
   const { expect } = evalCase;
   const observedTools = observed.toolCalls.map((t) => t.name);
-  const observedMode: EvalMode = observed.hasInsight ? "data" : "plain";
+  const observedMode: EvalMode = observed.renderedCard ? "data" : "plain";
   const modePass = observedMode === expect.mode;
   const toolPass = toolMatches(expect, observedTools);
 

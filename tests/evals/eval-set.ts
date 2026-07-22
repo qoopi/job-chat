@@ -1,4 +1,5 @@
 import type { ChartType } from "@shared/insight";
+import type { Profile } from "@shared/profile";
 import { LAUNCH_QUESTIONS } from "../fixtures/launch-questions";
 import { CONVERSATIONAL_PROMPTS, P2_INTENT_PROMPTS } from "../fixtures/plain-prompts";
 
@@ -41,6 +42,10 @@ export interface EvalCase {
   /** Prior user turns to run (unscored) BEFORE `question`, establishing the history a follow-up inherits
    *  from. The runner drives each in order, persisting the answer, then scores `question`. */
   context?: string[];
+  /** The identity + profile the case runs under (the profile-driven fit cases). Absent => a guest with
+   *  no profile. `signedIn` drives request_profile's card (auth vs profile invite); `profile`, when
+   *  present, injects the PROFILE note AND is what search_postings merges the model's terms against. */
+  identity?: { signedIn: boolean; profile?: Profile };
   expect: EvalExpect;
 }
 
@@ -232,13 +237,80 @@ const FOLLOWUP_CASES: EvalCase[] = [
   },
 ];
 
-// P2-intent (find-me-a-job / what-fits-me): applying, matching, and personal fit are out of scope, so the
-// adviser holds the clarify-path tone in plain mode - no tool, no card. Drawn from the shared prompts fixture.
+// P2-intent: REVISED to the 030 contract. A FIT-intent from a GUEST (no identity => guest, no profile)
+// routes to request_profile - the server emits the sign-in (auth-invite) card, data mode. An APPLYING
+// request stays out of scope -> plain (unchanged), because the prompt keeps "applying on someone's
+// behalf" out of scope. Of the four fixture prompts, index 2 ("Can you help me apply to a role?") is the
+// applying request; the other three (find a job / what fits me / which roles match me) are fit-intents.
 const P2_CASES: EvalCase[] = P2_INTENT_PROMPTS.slice(0, 4).map((question, i) => ({
   id: `P2-${i + 1}`,
   question,
-  expect: { mode: "plain", formatRules: true },
+  expect:
+    i === 2
+      ? { mode: "plain", formatRules: true } // an applying request - out of scope, plain
+      : { mode: "data", tool: "request_profile" }, // a fit-intent -> the sign-in invite
 }));
+
+// The reference profile the with-profile fit cases run under (structured only; the raw resume never
+// reaches the model). Its titles seed search_postings' titleTerms; seniority/salary are server-authoritative.
+const EVAL_PROFILE: Profile = {
+  titles: ["Backend Engineer", "Staff Engineer"],
+  seniority: "senior",
+  skills: [
+    { name: "TypeScript", source: "both" },
+    { name: "Go", source: "resume" },
+    { name: "ClickHouse", source: "github" },
+  ],
+  locations: ["Berlin"],
+  remotePref: true,
+  salaryMin: 120000,
+  yearsExp: 8,
+  domains: ["fintech"],
+  ossHighlights: ["Maintainer of a widely used OSS library"],
+  experience: [],
+};
+
+// The 030 profile-driven fit cases: the three-way routing (guest -> auth-invite, signed-in-no-profile ->
+// profile-invite, profile -> postings) plus the AC-8 framing case and the guardrail that a PROFILE note
+// must NOT make the agent over-fire search_postings on an off-topic question.
+const PROFILE_CASES: EvalCase[] = [
+  {
+    // AC-1: an explicit GUEST fit-intent -> request_profile -> the server's auth-invite (sign-in) card.
+    id: "AUTH-1",
+    question: "Can you find me a role that actually fits my experience?",
+    expect: { mode: "data", tool: "request_profile" },
+  },
+  {
+    // AC-2 routing (owned there; pinned here): SIGNED-IN, no profile -> request_profile -> profile-invite.
+    id: "INV-1",
+    question: "Which roles match my background?",
+    identity: { signedIn: true },
+    expect: { mode: "data", tool: "request_profile" },
+  },
+  {
+    // AC-7: SIGNED-IN with a profile -> search_postings; the postings card is the answer.
+    id: "SRCH-1",
+    question: "Find me a job that fits.",
+    identity: { signedIn: true, profile: EVAL_PROFILE },
+    expect: { mode: "data", tool: "search_postings" },
+  },
+  {
+    // AC-8 framing: a fit-intent with a profile still routes to search_postings - the card carries the
+    // honest count + dominance framing (proven in the postings-format unit tests); the eval pins tool+mode.
+    id: "SRCH-2",
+    question: "Show me the postings that suit me best.",
+    identity: { signedIn: true, profile: EVAL_PROFILE },
+    expect: { mode: "data", tool: "search_postings" },
+  },
+  {
+    // Guardrail: a profile is on file, but the question is OFF-TOPIC - the PROFILE note must NOT make the
+    // agent over-fire search_postings. Plain mode, no tool.
+    id: "OFF-1",
+    question: "What's the capital of France?",
+    identity: { signedIn: true, profile: EVAL_PROFILE },
+    expect: { mode: "plain", formatRules: true },
+  },
+];
 
 // Small talk / definitions / judgement calls: no chart improves the answer, so plain mode, no tool. Drawn
 // from the conversational sample (skip index 1, "is now a good time...", the most data-tempting one).
@@ -282,6 +354,7 @@ export const EVAL_SET: EvalCase[] = [
   ...CONVERSATIONAL_CASES,
   ...OFF_DOMAIN_CASES,
   ...SCOPE_CASES,
+  ...PROFILE_CASES,
 ];
 
 /** The chart-bearing sample: every case carrying a RAW chartType expectation (pinned at 12). */

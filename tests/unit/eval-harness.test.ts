@@ -35,7 +35,7 @@ describe("eval harness (offline smoke)", () => {
         },
       ],
       text: "Google leads US hiring.",
-      hasInsight: true,
+      renderedCard: true,
     };
     const scored = scoreCase(composed, observed);
     expect(scored.toolPass).toBe(true);
@@ -50,16 +50,16 @@ describe("eval harness (offline smoke)", () => {
     const plainScored = scoreCase(smalltalk, {
       toolCalls: [],
       text: "I can show you salary and hiring data from the postings.",
-      hasInsight: false,
+      renderedCard: false,
     });
     expect(plainScored.toolModePass).toBe(true);
     expect(plainScored.formatPass).toBe(true);
   });
 
-  it("pins the eval set to 35 cases with 12 chart-bearing (the AC-4 sample)", () => {
-    // +4 follow-up/fragmentation/currency cases and +1 market-wide scope case, kept
-    // non-chart-bearing so the chart sample stays at 12 (they exercise tool/mode/params, not chart).
-    expect(EVAL_SET).toHaveLength(35);
+  it("pins the eval set to 40 cases with 12 chart-bearing (the AC-4 sample)", () => {
+    // 030 added 5 profile-driven fit cases (guest-invite, signed-in-invite, two with-profile searches,
+    // and a profile+off-topic guardrail), kept non-chart-bearing so the chart sample stays at 12.
+    expect(EVAL_SET).toHaveLength(40);
     expect(CHART_BEARING).toHaveLength(12);
     // Every chart-bearing case is a query_postings case (the only path with a RAW agent pick).
     expect(CHART_BEARING.every((c) => c.expect.tool === "query_postings")).toBe(true);
@@ -161,7 +161,7 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
     const observed: Observed = {
       toolCalls: [{ name: dataCase.expect.tool!, input: dataCase.expect.params ?? {} }],
       text: "No matching postings for that filter.",
-      hasInsight: false, // e.g. an empty result - the tool ran, but no card was emitted
+      renderedCard: false, // e.g. an empty result - the tool ran, but no card was emitted
     };
     const scored = scoreCase(dataCase, observed);
     expect(scored.toolPass).toBe(true);
@@ -180,7 +180,7 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
         },
       ],
       text: "Senior roles make up about 40% of postings.",
-      hasInsight: true,
+      renderedCard: true,
     };
     const scored = scoreCase(dataCase, observed);
     expect(scored.toolPass).toBe(false); // a second data tool = a second card; the strict rule fails it
@@ -194,7 +194,7 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
         { name: "query_postings", input: { measures: ["count"], dimensions: ["company"], chartType: "bars" } }, // country dropped
       ],
       text: "Google leads US hiring.",
-      hasInsight: true,
+      renderedCard: true,
     };
     const scored = scoreCase(composed, observed);
     expect(scored.paramsChecked).toBe(true);
@@ -211,7 +211,7 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
         },
       ],
       text: "Google leads US hiring.",
-      hasInsight: true,
+      renderedCard: true,
     };
     const scored = scoreCase(composed, observed);
     expect(scored.paramsPass).toBe(false);
@@ -224,7 +224,7 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
         { name: "query_postings", input: { measures: ["count"], dimensions: ["company"], country: "United States" } }, // no chartType key
       ],
       text: "Google leads US hiring.",
-      hasInsight: true,
+      renderedCard: true,
     };
     const scored = scoreCase(composed, observed);
     expect(scored.chartBearing).toBe(true);
@@ -239,7 +239,7 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
         { name: "query_postings", input: { measures: ["median_salary"], bucket: "month", chartType: "bars" } },
       ],
       text: "Median salary rose steadily.",
-      hasInsight: true,
+      renderedCard: true,
     };
     const scored = scoreCase(composed, observed);
     expect(scored.rawChartType).toBe("bars");
@@ -247,10 +247,10 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
   });
 
   it("formatRules fires on an over-length plain answer or a banned opener - but never gates toolModePass (informational only, matching the printed report)", () => {
-    const plain = EVAL_SET.find((c) => c.id === "P2-1")!; // plain, no tool, formatRules: true
+    const plain = EVAL_SET.find((c) => c.id === "S-1")!; // plain, no tool, formatRules: true (P2 is now a fit-intent)
     const tooLong = scoreCase(plain, {
       toolCalls: [],
-      hasInsight: false,
+      renderedCard: false,
       text: "I can show hiring data. I can also show salary data. Just ask me a question.",
     });
     expect(tooLong.formatPass).toBe(false); // 3 sentences
@@ -258,7 +258,7 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
 
     const bannedOpener = scoreCase(plain, {
       toolCalls: [],
-      hasInsight: false,
+      renderedCard: false,
       text: "Great question! I can show salary data from the postings.",
     });
     expect(bannedOpener.formatPass).toBe(false); // banned opener + "!"
@@ -270,11 +270,63 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
     const observed: Observed = {
       toolCalls: [{ name: "top_companies", input: { days: 30 } }], // guessed a tool instead of answering plainly
       text: "Some companies post more during certain seasons.",
-      hasInsight: true,
+      renderedCard: true,
     };
     const scored = scoreCase(offDomain, observed);
     expect(scored.toolPass).toBe(false); // a data tool where none was expected (plain, no tool)
     expect(scored.modePass).toBe(false); // a data card where plain prose was expected
+    expect(scored.toolModePass).toBe(false);
+  });
+});
+
+// The 030 fit-tool vocabulary: request_profile + search_postings are CARD tools (an invite / postings
+// card => "data" mode), scored by the same strict single-card rule as the insight tools.
+describe("scoreCase scores the profile-driven fit tools (030 vocabulary)", () => {
+  it("a guest fit-intent scores as request_profile + data (the invite card renders)", () => {
+    const guest = EVAL_SET.find((c) => c.id === "AUTH-1")!; // expect: mode=data, tool=request_profile
+    const scored = scoreCase(guest, {
+      toolCalls: [{ name: "request_profile", input: {} }],
+      text: "",
+      renderedCard: true, // the auth-invite card
+    });
+    expect(scored.toolPass).toBe(true);
+    expect(scored.modePass).toBe(true);
+    expect(scored.toolModePass).toBe(true);
+  });
+
+  it("a with-profile fit-intent scores as search_postings + data (the postings card renders)", () => {
+    const search = EVAL_SET.find((c) => c.id === "SRCH-1")!; // expect: mode=data, tool=search_postings
+    const scored = scoreCase(search, {
+      toolCalls: [{ name: "search_postings", input: { titleTerms: ["backend"] } }],
+      text: "",
+      renderedCard: true, // the postings card
+    });
+    expect(scored.toolModePass).toBe(true);
+  });
+
+  it("search_postings called beside a second card tool FAILS (one answer, one card)", () => {
+    const search = EVAL_SET.find((c) => c.id === "SRCH-1")!;
+    const scored = scoreCase(search, {
+      toolCalls: [
+        { name: "search_postings", input: { titleTerms: ["backend"] } },
+        { name: "top_companies", input: {} }, // a second card tool = a second card
+      ],
+      text: "",
+      renderedCard: true,
+    });
+    expect(scored.toolPass).toBe(false);
+    expect(scored.toolModePass).toBe(false);
+  });
+
+  it("a profile-present OFF-TOPIC question that over-fires search_postings FAILS (must stay plain)", () => {
+    const offTopic = EVAL_SET.find((c) => c.id === "OFF-1")!; // expect: plain, NO tool
+    const scored = scoreCase(offTopic, {
+      toolCalls: [{ name: "search_postings", input: { titleTerms: ["engineer"] } }],
+      text: "",
+      renderedCard: true,
+    });
+    expect(scored.toolPass).toBe(false); // a card tool where none was expected
+    expect(scored.modePass).toBe(false);
     expect(scored.toolModePass).toBe(false);
   });
 });
