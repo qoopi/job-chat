@@ -78,6 +78,8 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     getProfile: boom,
     saveProfileInputs: boom,
     saveExtractedProfile: boom,
+    clearResumePdf: boom,
+    markExtractionFailed: boom,
     deleteProfile: boom,
     messageCounts: boom,
     ...overrides,
@@ -156,6 +158,18 @@ describe("saveProfile", () => {
     });
     expect(triggerMock).toHaveBeenCalledWith("extract-profile", { userId: ACCT, conversationId: CONV });
   });
+
+  it("returns a typed enqueue-failed (not a 500) when the task enqueue throws", async () => {
+    // The inputs were already stored; if the trigger enqueue fails, the action must not throw untyped
+    // (a client 500) - it returns a typed reason so the client can surface a retry (nit).
+    signIn();
+    const saveProfileInputs = vi.fn(async () => {});
+    fakeStore = makeStore({ saveProfileInputs });
+    triggerMock.mockRejectedValueOnce(new Error("trigger unavailable"));
+    const res = await saveProfile({ conversationId: CONV, resumeText: "Senior backend engineer" });
+    expect(res).toEqual({ ok: false, reason: "enqueue-failed" });
+    expect(saveProfileInputs).toHaveBeenCalled(); // inputs stored (the client can re-save)
+  });
 });
 
 describe("getMyProfile", () => {
@@ -174,10 +188,11 @@ describe("getMyProfile", () => {
       github_username: "octocat",
       profile: PROFILE,
       extracted_at: extractedAt,
+      extraction_failed: false,
     };
     fakeStore = makeStore({ getProfile: async () => row });
     const res = await getMyProfile();
-    expect(res).toEqual({ profile: PROFILE, githubUsername: "octocat", extractedAt: extractedAt.toISOString() });
+    expect(res).toEqual({ profile: PROFILE, githubUsername: "octocat", extractedAt: extractedAt.toISOString(), extractionFailed: false });
     expect(JSON.stringify(res)).not.toContain("resume"); // no raw text / pdf bytes in the DTO
   });
 

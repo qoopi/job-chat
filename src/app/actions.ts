@@ -253,6 +253,7 @@ export interface MyProfile {
   profile: Profile | null;
   githubUsername: string | null;
   extractedAt: string | null;
+  extractionFailed: boolean; // true = the extraction task permanently failed; the panel stops polling
 }
 
 export type SaveProfileInput = {
@@ -264,7 +265,7 @@ export type SaveProfileInput = {
 
 export type SaveProfileResult =
   | { ok: true; taskState: "queued"; runId: string }
-  | { ok: false; reason: "unauthorized" | "too-large" | "empty" };
+  | { ok: false; reason: "unauthorized" | "too-large" | "empty" | "enqueue-failed" };
 
 function trimmedOrNull(value: string | undefined): string | null {
   const t = value?.trim();
@@ -312,10 +313,19 @@ export async function saveProfile(
     githubUsername,
   });
 
-  const handle = await tasks.trigger<typeof extractProfileTask>("extract-profile", {
-    userId: identity.userId,
-    conversationId: input.conversationId,
-  });
+  // Inputs are already stored; if the enqueue fails, return a typed reason rather than throwing an untyped
+  // 500 at the client (the row sits pending - a re-save re-triggers, and saveProfileInputs clears any
+  // stale failure marker).
+  let handle: { id: string };
+  try {
+    handle = await tasks.trigger<typeof extractProfileTask>("extract-profile", {
+      userId: identity.userId,
+      conversationId: input.conversationId,
+    });
+  } catch (err) {
+    console.error("[saveProfile] extract-profile enqueue failed", err);
+    return { ok: false, reason: "enqueue-failed" };
+  }
   return { ok: true, taskState: "queued", runId: handle.id };
 }
 
@@ -330,6 +340,7 @@ export async function getMyProfile(): Promise<MyProfile | null> {
     profile: row.profile,
     githubUsername: row.github_username,
     extractedAt: row.extracted_at ? row.extracted_at.toISOString() : null,
+    extractionFailed: row.extraction_failed,
   };
 }
 
