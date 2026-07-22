@@ -1,4 +1,4 @@
-// Layer-priority seam: Esc closes the topmost layer only (order: auth dialog > account menu > LCP > thread). Boolean checks, not a framework.
+// Layer-priority seam: Esc closes the topmost layer only (order: auth dialog > account menu > detail panel > thread). Boolean checks, not a framework.
 let authDialogOpen = false;
 
 export function setAuthDialogOpen(open: boolean): void {

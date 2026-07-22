@@ -15,8 +15,8 @@ import { setAuthDialogOpen } from "@/lib/layers";
 
 // Google-ONLY sign-in (email/password removed). The lazy auth dialog opens on a Sign-in tap AND at
 // the guest cap moment, offers ONLY "Continue with Google", and every dismiss (cancel / Esc / backdrop)
-// returns to the chat untouched. Esc layering: with the REAL dialog above an open LCP, Esc closes the
-// dialog only and leaves the LCP (interaction-spec "Priority of layers"). External boundaries mocked as
+// returns to the chat untouched. Esc layering: with the REAL dialog above an open detail panel, Esc closes the
+// dialog only and leaves the detail panel (interaction-spec "Priority of layers"). External boundaries mocked as
 // chat-client.test.tsx does; here no turn streams, so the transport is inert.
 const reconnectMock = vi.fn(async () => null);
 const sendMessagesMock = vi.fn(
@@ -387,8 +387,8 @@ describe("auth dialog dismiss returns to chat untouched (AC-10)", () => {
   });
 });
 
-describe("Esc layer priority: real dialog above the LCP (AC-9)", () => {
-  test("Should_RouteEscToAuthDialog_WhenRealDialogAboveLcp", async () => {
+describe("Esc layer priority: real dialog above the detail panel (AC-9)", () => {
+  test("Should_RouteEscToAuthDialog_WhenRealDialogAboveDetailPanel", async () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -399,25 +399,25 @@ describe("Esc layer priority: real dialog above the LCP (AC-9)", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Open full table (9 rows)" }),
     );
-    expect(document.querySelector(".lcp")).toBeTruthy();
+    expect(document.querySelector(".detail-panel")).toBeTruthy();
 
-    // open the REAL dialog on top of the open LCP
+    // open the REAL dialog on top of the open detail panel
     clickSidebarSignIn();
     expect(screen.getByRole("dialog")).toBeTruthy();
 
-    // Esc closes the dialog ONLY - the LCP (below it) stays open
+    // Esc closes the dialog ONLY - the detail panel (below it) stays open
     pressEsc();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.querySelector(".lcp")).toBeTruthy();
+    expect(document.querySelector(".detail-panel")).toBeTruthy();
 
-    // with the dialog gone, Esc now closes the LCP
+    // with the dialog gone, Esc now closes the detail panel
     pressEsc();
-    expect(document.querySelector(".lcp")).toBeNull();
+    expect(document.querySelector(".detail-panel")).toBeNull();
   });
 
   test("Should_NotDisturbLowerLayer_When_DialogEscHandlerRegisteredFirst", () => {
     // Order-independence: register the dialog's Esc listener BEFORE a lower-layer window
-    // handler - the REVERSE of the app's natural mount order (where the LCP binds first). Even so, the
+    // handler - the REVERSE of the app's natural mount order (where the detail panel binds first). Even so, the
     // dialog's `stopImmediatePropagation` suppresses the lower handler, so a single Esc never falls
     // through the dialog to the layer beneath it, whichever listener happens to be registered first.
     const onClose = vi.fn();

@@ -16,7 +16,7 @@ import {
 import { Verdict } from "./Verdict";
 
 // The job-postings card (an InsightCard child). Rows are score-ordered: ORDER IS THE RANK (no percentages/badges).
-// Two surfaces: the in-chat card (capped, honesty caption, no-matches variant) and the LCP full list (PostingsPanel).
+// Two surfaces: the in-chat card (capped, honesty caption, no-matches variant) and the detail panel full list (PostingsPanel).
 
 /** The 5-column table body. A missing salary reads muted "not listed" (never blank). */
 function PostingsTable({ rows }: { rows: ScoredPostingRow[] }) {
@@ -76,9 +76,9 @@ export function PostingsCard({
   total: number;
   /** A follow-up prompt chip ("Only remote", "Include one level up"). Disabled while a turn streams. */
   onFollowup?: (text: string) => void;
-  /** "Open all N in panel" - opens the LCP full list. */
+  /** "Open all N in panel" - opens the detail panel full list. */
   onOpenPanel?: () => void;
-  /** "Edit profile" (no-matches way-out) - opens the LCP profile form. */
+  /** "Edit profile" (no-matches way-out) - opens the detail panel profile form. */
   onEdit?: () => void;
   pending?: boolean;
 }) {
@@ -156,8 +156,8 @@ export function PostingsCard({
 
 type Filter = "all" | "salary" | "remote" | "senior";
 
-/** The LCP full list: the same table uncapped, with local filter chips (All / With salary / Remote /
- *  Senior+), each labelled with its count. Rendered inside the LcpPanel body. */
+/** The detail panel full list: the same table uncapped, with local filter chips (All / With salary / Remote /
+ *  Senior+), each labelled with its count. Rendered inside the DetailPanel body. */
 export function PostingsPanel({ rows, total }: { rows: ScoredPostingRow[]; total: number }) {
   const [filter, setFilter] = useState<Filter>("all");
   const counts = useMemo(

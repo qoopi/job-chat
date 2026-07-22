@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { BarsChart } from "@/components/insight/charts/BarsChart";
 
 // The single-measure bars chart caps the visible bars at 8 and, when there are more,
-// offers a "+ N more" affordance that opens the full series as a table in the LCP. Recharts needs
+// offers a "+ N more" affordance that opens the full series as a table in the detail panel. Recharts needs
 // non-zero dimensions to render in jsdom, so shim the element-measurement APIs (as histogram-currency
 // does). The "+ N more" affordance is plain DOM (outside the SVG), so it is asserted directly.
 beforeAll(() => {

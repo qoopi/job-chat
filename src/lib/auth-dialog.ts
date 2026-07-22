@@ -4,7 +4,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { setAuthDialogOpen } from "@/lib/layers";
 
 // Single source of truth for the lazy auth dialog's open state - a module singleton ("only one dialog at a
-// time"). Opening flips setAuthDialogOpen (layers.ts) so the LCP yields Esc to the dialog first (dialog > LCP).
+// time"). Opening flips setAuthDialogOpen (layers.ts) so the detail panel yields Esc to the dialog first (dialog > detail panel).
 
 let open = false;
 const listeners = new Set<() => void>();

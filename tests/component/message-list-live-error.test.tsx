@@ -17,7 +17,7 @@ import { MessageList } from "@/components/chat/MessageList";
 
 const noop = () => {};
 const noSet = new Set<string>();
-const base = { pending: false, usedFollowups: noSet, onFollowup: noop, onOpenLcp: noop };
+const base = { pending: false, usedFollowups: noSet, onFollowup: noop, onOpenDetailPanel: noop };
 
 const userMsg = (text: string, id: string): UIMessage => ({ id, role: "user", parts: [{ type: "text", text }] });
 const errorMsg = (id: string): UIMessage => ({

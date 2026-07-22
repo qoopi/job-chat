@@ -48,26 +48,26 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
-/** The `data-*` parts of a message, each with a STABLE id (own id or `${message.id}-p${i}`); one home so MessageList + the LCP target don't drift. */
+/** The `data-*` parts of a message, each with a STABLE id (own id or `${message.id}-p${i}`); one home so MessageList + the detail panel target don't drift. */
 export function dataParts(message: UIMessage): { id: string; data: unknown }[] {
   return message.parts
     .filter((p) => typeof p.type === "string" && p.type.startsWith("data-"))
     .map((p, i) => ({ id: (p as { id?: string }).id ?? `${message.id}-p${i}`, data: (p as { data?: unknown }).data }));
 }
 
-/** The open LCP is identified by which message's which card it shows (not the payload). */
-export interface LcpTarget {
+/** The open detail panel is identified by which message's which card it shows (not the payload). */
+export interface DetailTarget {
   messageId: string;
   partId: string;
 }
 
-export type LcpContent =
+export type DetailContent =
   | { kind: "table"; insight: DataInsight }
   | { kind: "profile-card"; profile: Profile }
   | { kind: "postings"; rows: ScoredPostingRow[]; total: number };
 
-/** Resolve an LCP target to content: stored by identity, so it re-resolves from the persisted payload (resume renders the same LCP). */
-export function resolveLcpContent(messages: UIMessage[], target: LcpTarget): LcpContent | null {
+/** Resolve a detail panel target to content: stored by identity, so it re-resolves from the persisted payload (resume renders the same detail panel). */
+export function resolveDetailContent(messages: UIMessage[], target: DetailTarget): DetailContent | null {
   const message = messages.find((m) => m.id === target.messageId);
   if (!message) return null;
   const part = dataParts(message).find((p) => p.id === target.partId);

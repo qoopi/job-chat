@@ -5,7 +5,7 @@ import type { Experience, Profile, Skill } from "@shared/profile";
 import { isGithubSkipped, profileSubline, profileTitle, splitSkills } from "@/lib/profile-format";
 
 // The profile card (an InsightCard child, no tabs). Two surfaces: ProfileCard (in-chat compact) and
-// ProfileExpanded (LCP full view, READ-ONLY). Everything derives from the one `Profile` payload.
+// ProfileExpanded (detail panel full view, READ-ONLY). Everything derives from the one `Profile` payload.
 
 const MAX_SKILLS = 6; // cap the in-chat skill row (proven first)
 
@@ -80,9 +80,9 @@ export function ProfileCard({
   profile: Profile;
   /** Send a follow-up ("Find me a job that fits"). Disabled while a turn streams. */
   onFollowup?: (text: string) => void;
-  /** "Edit profile" / "Add GitHub" - opens the LCP profile form. */
+  /** "Edit profile" / "Add GitHub" - opens the detail panel profile form. */
   onEdit?: () => void;
-  /** "Open in panel →" - opens the LCP expanded profile view. */
+  /** "Open in panel →" - opens the detail panel expanded profile view. */
   onOpenPanel?: () => void;
   pending?: boolean;
 }) {

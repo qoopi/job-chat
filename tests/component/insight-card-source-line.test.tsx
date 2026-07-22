@@ -77,7 +77,7 @@ describe("InsightCard open-set source-line copy", () => {
 });
 
 // A capped bars chart's source line discloses "showing top 8" beside the real
-// total, and only on the chart view (the Table tab shows every row via preview -> LCP). The Recharts
+// total, and only on the chart view (the Table tab shows every row via preview -> detail panel). The Recharts
 // subtree is stubbed so the source-line text is what is under test.
 describe("InsightCard capped-chart source line", () => {
   function barsInsight(n: number): DataInsight {

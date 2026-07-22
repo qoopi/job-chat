@@ -47,26 +47,26 @@ test("Should_NotReRenderChartSubtree_When_ShowQueryToggled", () => {
   expect(probe.chartRenders).toBe(1);
 });
 
-// Regression guard: MessageList hands InsightCard a STABLE `onOpenLcp` plus stable message/part
+// Regression guard: MessageList hands InsightCard a STABLE `onOpenDetailPanel` plus stable message/part
 // ids and flips `pending` at each turn boundary, so a SETTLED card re-renders whenever a later turn
 // starts/ends. The chart-subtree memo must survive that: because the open-table callback is now stable
-// on `[onOpenLcp, messageId, partId]` (all ref-stable across a turn), no ref hack is needed and the
-// Recharts element is not recomputed. We reuse the same onOpenLcp/ids across re-renders, as MessageList
+// on `[onOpenDetailPanel, messageId, partId]` (all ref-stable across a turn), no ref hack is needed and the
+// Recharts element is not recomputed. We reuse the same onOpenDetailPanel/ids across re-renders, as MessageList
 // does, and flip `pending` - the counter must stay at 1.
 test("Should_NotReRenderChartSubtree_When_PendingFlipsWithStableCallback", () => {
-  const onOpenLcp = () => {};
+  const onOpenDetailPanel = () => {};
   const { rerender } = render(
-    <InsightCard insight={chartInsight} onOpenLcp={onOpenLcp} messageId="m" partId="p" pending={false} />,
+    <InsightCard insight={chartInsight} onOpenDetailPanel={onOpenDetailPanel} messageId="m" partId="p" pending={false} />,
   );
   expect(probe.chartRenders).toBe(1);
 
   // a later turn begins: pending -> true (the stable ids/callback are unchanged)
   rerender(
-    <InsightCard insight={chartInsight} onOpenLcp={onOpenLcp} messageId="m" partId="p" pending={true} />,
+    <InsightCard insight={chartInsight} onOpenDetailPanel={onOpenDetailPanel} messageId="m" partId="p" pending={true} />,
   );
   // ...and settles: pending -> false
   rerender(
-    <InsightCard insight={chartInsight} onOpenLcp={onOpenLcp} messageId="m" partId="p" pending={false} />,
+    <InsightCard insight={chartInsight} onOpenDetailPanel={onOpenDetailPanel} messageId="m" partId="p" pending={false} />,
   );
 
   // the settled card's chart subtree was memoized across both turn-boundary re-renders

@@ -5,7 +5,7 @@ import type { UIMessage } from "ai";
 import type { Conversation } from "@shared/store";
 import type { DataInsight } from "@shared/insight";
 
-// New chat starts fresh IN PLACE (clear thread, close LCP, focus composer, no bounce to the
+// New chat starts fresh IN PLACE (clear thread, close detail panel, focus composer, no bounce to the
 // landing); the first message afterwards starts a brand-new conversation (the landing handoff). Deleting
 // the OPEN conversation clears to that same fresh-chat state. Driven through the REAL ChatClient;
 // the transport + server actions are external boundaries and mocked exactly as the sibling ChatClient tests.
@@ -64,7 +64,7 @@ afterEach(() => {
 });
 
 describe("New chat in place (AC-19)", () => {
-  test("Should_StartFreshChatInPlace_When_NewChatFromChatView: thread cleared, LCP closed, composer focused, no nav to /", async () => {
+  test("Should_StartFreshChatInPlace_When_NewChatFromChatView: thread cleared, detail panel closed, composer focused, no nav to /", async () => {
     render(
       <ChatClient
         conversationId={CONVERSATION_ID}
@@ -76,16 +76,16 @@ describe("New chat in place (AC-19)", () => {
       />,
     );
 
-    // Open the LCP first, so we can prove New chat closes it.
+    // Open the detail panel first, so we can prove New chat closes it.
     fireEvent.click(await screen.findByRole("button", { name: "Open full table (9 rows)" }));
-    expect(document.querySelector(".lcp")).toBeTruthy();
+    expect(document.querySelector(".detail-panel")).toBeTruthy();
     expect(screen.getByText("Top companies?")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
 
-    // Fresh in place: thread cleared, LCP closed (canvas un-docked), composer focused, and NO navigation.
+    // Fresh in place: thread cleared, detail panel closed (canvas un-docked), composer focused, and NO navigation.
     expect(screen.queryByText("Top companies?")).toBeNull();
-    expect(document.querySelector(".lcp")).toBeNull();
+    expect(document.querySelector(".detail-panel")).toBeNull();
     expect(document.querySelector(".canvas.docked")).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(composer()));
     expect(pushMock).not.toHaveBeenCalled(); // never a bounce to "/"

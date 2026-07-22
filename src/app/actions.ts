@@ -181,7 +181,7 @@ export async function deleteConversation(
 // the Server Action body limit to 6mb for the base64-inflated payload.
 const MAX_RESUME_PDF_BYTES = Math.floor(4.5 * 1024 * 1024);
 
-/** The caller's own profile, sanitized (NEVER the transient PDF bytes), for the LCP poll: the structured
+/** The caller's own profile, sanitized (NEVER the transient PDF bytes), for the detail panel poll: the structured
  *  profile (null while pending), the github username, and extracted_at (null = pending). */
 export interface MyProfile {
   profile: Profile | null;
@@ -255,7 +255,7 @@ export async function saveProfile(
   return { ok: true, taskState: "queued", runId: handle.id };
 }
 
-/** The LCP poll read: the caller's own profile, sanitized; null for a guest or a caller with no profile row. */
+/** The detail panel poll read: the caller's own profile, sanitized; null for a guest or a caller with no profile row. */
 export async function getMyProfile(): Promise<MyProfile | null> {
   const identity = await resolveCaller();
   if (!identity || identity.kind !== "account") return null;

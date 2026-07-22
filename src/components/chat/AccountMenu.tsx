@@ -25,7 +25,7 @@ export function AccountMenu({
   const initial = name[0]?.toUpperCase() ?? "A";
   const dark = theme === "Dark";
 
-  // Publish the menu's open state to the layer seam (Esc order: dialog > menu > LCP); reset on close so it never sticks.
+  // Publish the menu's open state to the layer seam (Esc order: dialog > menu > detail panel); reset on close so it never sticks.
   useEffect(() => {
     setMenuOpen(open);
     return () => setMenuOpen(false);

@@ -52,7 +52,7 @@ afterEach(() => {
 test("Should_NotReRenderSettledInsightCard_When_LaterTurnStreams", () => {
   const first: UIMessage[] = [userTurn, settled];
   const { rerender } = render(
-    <MessageList messages={first} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
+    <MessageList messages={first} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenDetailPanel={noop} />,
   );
   expect(probe.byId.get("settled-card")).toBe(1);
 
@@ -70,7 +70,7 @@ test("Should_NotReRenderSettledInsightCard_When_LaterTurnStreams", () => {
     streaming,
   ];
   rerender(
-    <MessageList messages={second} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
+    <MessageList messages={second} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenDetailPanel={noop} />,
   );
 
   // The settled card did NOT re-render (memo bailed); only the freshly streamed card rendered.
@@ -88,7 +88,7 @@ test("Should_NotReMeasureSettledUserBubble_When_LaterTurnStreams", () => {
   // settled is a data-insight card (no Bubble), so the lone user turn is the only bubble that measures.
   const first: UIMessage[] = [userTurn, settled];
   const { rerender } = render(
-    <MessageList messages={first} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
+    <MessageList messages={first} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenDetailPanel={noop} />,
   );
   gcs.mockClear(); // ignore the mount-time measurement of the settled user bubble
 
@@ -104,7 +104,7 @@ test("Should_NotReMeasureSettledUserBubble_When_LaterTurnStreams", () => {
     streaming,
   ];
   rerender(
-    <MessageList messages={second} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenLcp={noop} />,
+    <MessageList messages={second} pending={true} usedFollowups={usedFollowups} onFollowup={noop} onRetry={noop} onOpenDetailPanel={noop} />,
   );
 
   // Only the freshly-mounted u2 bubble measured; the settled user bubble did not re-run its reflow.

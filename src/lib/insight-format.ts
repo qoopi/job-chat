@@ -5,7 +5,7 @@ export type { ErrorKind, RefusalReason };
 
 export { labelKeyOf };
 
-// Cap visible bars: many long near-unique titles smear into an unreadable stack; beyond this, top N + a "+ N more" LCP affordance.
+// Cap visible bars: many long near-unique titles smear into an unreadable stack; beyond this, top N + a "+ N more" detail panel affordance.
 export const BARS_CAP = 8;
 
 /** Truncate a long category label for the chart axis (the full label rides in the data + tooltip). */

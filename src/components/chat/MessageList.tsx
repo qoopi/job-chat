@@ -35,7 +35,7 @@ const AssistantMessage = memo(function AssistantMessage({
   usedFollowups,
   onFollowup,
   onRetry,
-  onOpenLcp,
+  onOpenDetailPanel,
   onSignIn,
   onEditProfile,
   onAuthInvite,
@@ -46,7 +46,7 @@ const AssistantMessage = memo(function AssistantMessage({
   usedFollowups: Set<string>;
   onFollowup: (cardId: string, text: string) => void;
   onRetry: () => void;
-  onOpenLcp: (messageId: string, partId: string) => void;
+  onOpenDetailPanel: (messageId: string, partId: string) => void;
   onSignIn?: () => void;
   onEditProfile?: () => void;
   onAuthInvite?: () => void;
@@ -82,7 +82,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 insight={cls.insight}
                 usedFollowups={used}
                 onFollowup={(text) => onFollowup(cls.insight.id, text)}
-                onOpenLcp={onOpenLcp}
+                onOpenDetailPanel={onOpenDetailPanel}
                 messageId={message.id}
                 partId={id}
                 pending={pending}
@@ -115,7 +115,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 profile={cls.profile}
                 onFollowup={(text) => onFollowup(id, text)}
                 onEdit={onEditProfile}
-                onOpenPanel={() => onOpenLcp(message.id, id)}
+                onOpenPanel={() => onOpenDetailPanel(message.id, id)}
                 pending={pending}
               />
             </div>
@@ -128,7 +128,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 rows={cls.rows}
                 total={cls.total}
                 onFollowup={(text) => onFollowup(id, text)}
-                onOpenPanel={() => onOpenLcp(message.id, id)}
+                onOpenPanel={() => onOpenDetailPanel(message.id, id)}
                 onEdit={onEditProfile}
                 pending={pending}
               />
@@ -172,7 +172,7 @@ export function MessageList({
   usedFollowups,
   onFollowup,
   onRetry,
-  onOpenLcp,
+  onOpenDetailPanel,
   onSignIn,
   onEditProfile,
   onAuthInvite,
@@ -183,7 +183,7 @@ export function MessageList({
   usedFollowups: Set<string>;
   onFollowup: (cardId: string, text: string) => void;
   onRetry: () => void;
-  onOpenLcp: (messageId: string, partId: string) => void;
+  onOpenDetailPanel: (messageId: string, partId: string) => void;
   onSignIn?: () => void;
   onEditProfile?: () => void;
   onAuthInvite?: () => void;
@@ -210,7 +210,7 @@ export function MessageList({
             usedFollowups={usedFollowups}
             onFollowup={onFollowup}
             onRetry={onRetry}
-            onOpenLcp={onOpenLcp}
+            onOpenDetailPanel={onOpenDetailPanel}
             onSignIn={onSignIn}
             onEditProfile={onEditProfile}
             onAuthInvite={onAuthInvite}

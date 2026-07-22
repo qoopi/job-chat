@@ -16,7 +16,7 @@ export function InsightChart({
   chartType: ChartType;
   series: DataPoint[];
   currency?: string;
-  /** A capped bars chart's "+ N more" opens the full series as a table in the LCP. */
+  /** A capped bars chart's "+ N more" opens the full series as a table in the detail panel. */
   onShowAll?: () => void;
 }) {
   switch (chartType) {

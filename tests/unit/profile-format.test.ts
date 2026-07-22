@@ -10,7 +10,7 @@ import {
 } from "@/lib/profile-format";
 
 // The profile presentation contracts - the identity verdict, the skill split, the github-skipped
-// signal, and the saved-summary counts - shared by the in-chat card, the LCP expanded view, and the
+// signal, and the saved-summary counts - shared by the in-chat card, the detail panel expanded view, and the
 // form. Pinned here so the three surfaces never derive them differently.
 
 const full: Profile = {

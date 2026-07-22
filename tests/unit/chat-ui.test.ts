@@ -8,7 +8,7 @@ import {
   messageText,
   proseSpans,
   reconcileMessagesById,
-  resolveLcpContent,
+  resolveDetailContent,
   storeToUiMessages,
   type StoredMessage,
 } from "@/lib/chat-ui";
@@ -113,9 +113,9 @@ describe("classifyCardData", () => {
   });
 });
 
-// The LCP superset resolver: a card-backed panel is a table, the expanded profile, or the full postings
+// The detail panel superset resolver: a card-backed panel is a table, the expanded profile, or the full postings
 // list, re-resolved from the immutable part payload (identical resume semantics to the table path).
-describe("resolveLcpContent", () => {
+describe("resolveDetailContent", () => {
   const profile: Profile = {
     titles: ["Senior Backend Engineer"],
     seniority: "senior",
@@ -148,21 +148,21 @@ describe("resolveLcpContent", () => {
   ];
 
   it("resolves an insight part to a table", () => {
-    const c = resolveLcpContent(messages, { messageId: "a1", partId: "a1-c0" });
+    const c = resolveDetailContent(messages, { messageId: "a1", partId: "a1-c0" });
     expect(c?.kind).toBe("table");
   });
   it("resolves a profile-card part to the profile", () => {
-    const c = resolveLcpContent(messages, { messageId: "a2", partId: "a2-c0" });
+    const c = resolveDetailContent(messages, { messageId: "a2", partId: "a2-c0" });
     expect(c?.kind).toBe("profile-card");
     if (c?.kind === "profile-card") expect(c.profile.titles).toEqual(["Senior Backend Engineer"]);
   });
   it("resolves a postings part to the rows + total", () => {
-    const c = resolveLcpContent(messages, { messageId: "a3", partId: "a3-c0" });
+    const c = resolveDetailContent(messages, { messageId: "a3", partId: "a3-c0" });
     expect(c?.kind).toBe("postings");
     if (c?.kind === "postings") expect(c.total).toBe(23);
   });
   it("returns null for a missing target", () => {
-    expect(resolveLcpContent(messages, { messageId: "zzz", partId: "a1-c0" })).toBeNull();
+    expect(resolveDetailContent(messages, { messageId: "zzz", partId: "a1-c0" })).toBeNull();
   });
 });
 
