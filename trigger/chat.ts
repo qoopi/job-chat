@@ -6,7 +6,9 @@ import postgres from "postgres";
 import { createReadOnlyClient } from "@shared/clickhouse";
 import { createAnalytics, type Analytics } from "@shared/analytics";
 import { createStore, type Store } from "@shared/store";
+import type { Profile } from "@shared/profile";
 import { getAgentLimits, getGuardConfig } from "@shared/env";
+import type { CallerKind } from "./guard";
 import { AGENT_ID } from "./agent-id";
 import { ADVISER_V2 } from "./prompts/adviser-v2";
 import { buildCatalogTools, type EmitPart } from "./tools";
@@ -53,6 +55,22 @@ async function withStore<T>(fn: (store: Store) => Promise<T>): Promise<T> {
   }
 }
 
+// The per-turn fit context resolved from the conversation OWNER (guard.ts's rule): the identity kind
+// (guest vs signed-in account, from auth_user_id nullity) that request_profile branches on, and the
+// owner's STRUCTURED profile that search_postings merges against + the PROFILE note is built from. Two
+// tiny indexed reads; resolved fresh each turn so a save mid-session takes effect on the next turn.
+async function resolveOwnerContext(
+  chatId: string,
+): Promise<{ callerKind: CallerKind; profile: Profile | null }> {
+  return withStore(async (store) => {
+    const owner = await store.getConversationOwner(chatId);
+    if (!owner) return { callerKind: "guest", profile: null };
+    const callerKind: CallerKind = owner.auth_user_id === null ? "guest" : "account";
+    const profile = (await store.getProfile(owner.user_id))?.profile ?? null;
+    return { callerKind, profile };
+  });
+}
+
 // Mark the system block as a Bedrock prompt-cache point so repeat turns read it from cache (no
 // behavior change). The toStreamTextOptions `systemProviderOptions` route
 // silently no-ops here (the SDK builds a system block only after chat.prompt.set(), which we never
@@ -91,6 +109,8 @@ const chatRun = createChatRun({
   // The corpus shape for the DATA SCOPE prompt note, memoized on the analytics singleton
   // so it costs one ClickHouse query per process, not per turn.
   coverageProfile: () => analytics().coverageProfile(),
+  // The owner's structured profile for the per-turn PROFILE note (resolved fresh each turn).
+  profile: (chatId) => resolveOwnerContext(chatId).then((c) => c.profile),
   streamModel,
 });
 
@@ -102,7 +122,13 @@ export const generateMessageId = (): string => crypto.randomUUID();
 export const jobChatAgent = chat.agent({
   id: AGENT_ID,
   maxTurns: AGENT_LIMITS.maxTurns,
-  tools: () => buildCatalogTools({ analytics: analytics(), emit }),
+  // Per-turn tools: the fit tools depend on the conversation identity + the owner's profile, so resolve
+  // them here (the SDK threads the result onto the run payload's `tools`). request_profile reads
+  // callerKind; search_postings merges the model's terms against `profile`.
+  tools: async ({ chatId }) => {
+    const { callerKind, profile } = await resolveOwnerContext(chatId);
+    return buildCatalogTools({ analytics: analytics(), emit, callerKind, profile });
+  },
   run: (payload) => chatRun(payload),
   // Mint uuid response ids so responseMessage.id is a uuid the store can key the assistant row on.
   uiMessageStreamOptions: { generateMessageId },

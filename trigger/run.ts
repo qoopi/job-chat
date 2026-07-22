@@ -2,6 +2,7 @@ import type { ToolSet } from "ai";
 import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
 import type { CoverageProfile } from "@shared/analytics";
+import type { Profile } from "@shared/profile";
 import { isProfileCardPayload, type RefusalReason } from "@shared/insight";
 import { checkConversationGuards } from "./guard";
 import { buildModelHistory, refusalPart, type ModelMessage } from "./parts";
@@ -52,6 +53,13 @@ export interface ChatRunDeps<R> {
   /** The corpus shape, memoized at the source. When present, a one-line DATA SCOPE note
    *  is appended to the system prompt so the agent can qualify whole-market questions to the real sample. */
   coverageProfile?: () => Promise<CoverageProfile>;
+  /**
+   * The conversation OWNER's structured profile, resolved PER TURN (never memoized - a save mid-session
+   * must take effect on the very next turn). When it resolves non-null, a PROFILE note is appended to the
+   * system prompt so the agent routes a fit-intent to search_postings (not request_profile). Only the
+   * STRUCTURED profile reaches the model - the raw resume never does. A failure never blocks the turn.
+   */
+  profile?: (chatId: string) => Promise<Profile | null>;
   streamModel: StreamModel<R>;
 }
 
@@ -59,6 +67,28 @@ type Gate =
   | { kind: "refuse"; reason: RefusalReason }
   | { kind: "skip" }
   | { kind: "run"; history: ModelMessage[] };
+
+/**
+ * The PROFILE note appended to the system prompt when the conversation owner has a profile. Carries the
+ * STRUCTURED profile only (never the raw resume) so the agent routes a fit-intent to search_postings and
+ * draws its titleTerms from the real titles; the authoritative filters (seniority, salary floor) stay
+ * server-side. Null scalar fields are simply omitted (an omitted line = unknown).
+ */
+function profileNote(p: Profile): string {
+  const lines = [
+    "PROFILE: this signed-in user has a saved profile - route a personal fit-intent to search_postings, NEVER request_profile.",
+  ];
+  if (p.titles.length) lines.push(`Titles: ${p.titles.join(", ")}.`);
+  if (p.seniority) lines.push(`Seniority: ${p.seniority}.`);
+  if (p.skills.length) lines.push(`Top skills: ${p.skills.slice(0, 8).map((s) => s.name).join(", ")}.`);
+  if (p.locations.length) lines.push(`Locations: ${p.locations.join(", ")}.`);
+  if (p.remotePref !== null) lines.push(`Open to remote: ${p.remotePref ? "yes" : "no"}.`);
+  if (p.salaryMin !== null) lines.push(`Salary floor: ${p.salaryMin}.`);
+  lines.push(
+    "Draw search_postings titleTerms from these titles; the server applies the seniority and salary floor itself. The postings card is the whole answer - add no prose.",
+  );
+  return lines.join(" ");
+}
 
 /** The one-line DATA SCOPE note appended to the system prompt from the corpus profile. */
 function dataScopeNote(p: CoverageProfile): string {
@@ -140,9 +170,21 @@ export function createChatRun<R>(deps: ChatRunDeps<R>) {
     let system = deps.system;
     if (deps.coverageProfile) {
       try {
-        system = `${deps.system}\n\n${dataScopeNote(await deps.coverageProfile())}`;
+        system = `${system}\n\n${dataScopeNote(await deps.coverageProfile())}`;
       } catch {
         // keep the base prompt
+      }
+    }
+
+    // The PROFILE note (per turn, owner-keyed): a saved profile flips fit-intent routing to
+    // search_postings. Resolved fresh each turn - never memoized - so a save mid-session takes effect on
+    // the next turn. A resolution failure must never block the turn (keep the prompt as-is).
+    if (deps.profile) {
+      try {
+        const prof = await deps.profile(chatId);
+        if (prof) system = `${system}\n\n${profileNote(prof)}`;
+      } catch {
+        // keep the prompt as-is
       }
     }
 

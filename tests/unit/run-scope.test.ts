@@ -9,6 +9,7 @@ import {
 import type { Message, Store } from "@shared/store";
 
 import type { CoverageProfile } from "@shared/analytics";
+import type { Profile } from "@shared/profile";
 
 // createChatRun appends a one-line DATA SCOPE note (from the corpus profile) to the system
 // prompt so the agent can qualify whole-market questions to the real sample. A minimal store stub lets
@@ -113,6 +114,92 @@ describe("createChatRun DATA SCOPE injection (018 strand 5)", () => {
     });
     await run(args());
     expect(capturedSystem).toBe("BASE PROMPT");
+  });
+});
+
+// createChatRun appends a PROFILE note (structured profile only, owner-keyed) PER TURN when the
+// conversation owner has a profile, so the agent routes a fit-intent to search_postings. Resolved fresh
+// each turn (never memoized) and never allowed to block the turn.
+const OWNER_PROFILE: Profile = {
+  titles: ["Senior Backend Engineer", "Staff Engineer"],
+  seniority: "senior",
+  skills: [{ name: "TypeScript", source: "both" }, { name: "ClickHouse", source: "github" }],
+  locations: ["Berlin"],
+  remotePref: true,
+  salaryMin: 120000,
+  yearsExp: 8,
+  domains: ["fintech"],
+  ossHighlights: [],
+  experience: [],
+};
+
+describe("createChatRun PROFILE note injection (030)", () => {
+  it("appends the structured PROFILE note (owner-keyed) so fit-intents route to search_postings", async () => {
+    let capturedSystem = "";
+    const run = createChatRun({
+      ...base,
+      profile: async () => OWNER_PROFILE,
+      streamModel: ({ system }) => {
+        capturedSystem = system;
+        return "ok" as const;
+      },
+    });
+    await run(args());
+    expect(capturedSystem).toContain("BASE PROMPT"); // base prompt preserved
+    expect(capturedSystem).toContain("PROFILE:");
+    expect(capturedSystem).toContain("search_postings");
+    expect(capturedSystem).toContain("Senior Backend Engineer, Staff Engineer"); // the titles the model draws terms from
+    expect(capturedSystem).toContain("Seniority: senior");
+    expect(capturedSystem).toContain("Salary floor: 120000");
+    // The raw resume must NEVER reach the model - only the structured shape.
+    expect(capturedSystem).not.toContain("resume");
+  });
+
+  it("resolves the profile PER TURN (never memoized) and passes the conversation id", async () => {
+    const seen: string[] = [];
+    const run = createChatRun({
+      ...base,
+      profile: async (chatId) => {
+        seen.push(chatId);
+        return OWNER_PROFILE;
+      },
+      streamModel: () => "ok" as const,
+    });
+    await run(args());
+    await run(args());
+    expect(seen).toEqual(["c1", "c1"]); // resolved fresh on each turn, keyed by the chat id
+  });
+
+  it("omits the note when the owner has no profile (the request_profile path stays)", async () => {
+    let capturedSystem = "";
+    const run = createChatRun({
+      ...base,
+      profile: async () => null,
+      streamModel: ({ system }) => {
+        capturedSystem = system;
+        return "ok" as const;
+      },
+    });
+    await run(args());
+    expect(capturedSystem).toBe("BASE PROMPT");
+    expect(capturedSystem).not.toContain("PROFILE:");
+  });
+
+  it("never blocks the turn if the profile resolution fails", async () => {
+    let capturedSystem = "";
+    const run = createChatRun({
+      ...base,
+      profile: async () => {
+        throw new Error("postgres unreachable");
+      },
+      streamModel: ({ system }) => {
+        capturedSystem = system;
+        return "ok" as const;
+      },
+    });
+    const res = await run(args());
+    expect(res).toBe("ok");
+    expect(capturedSystem).toBe("BASE PROMPT"); // the prompt is intact, the turn ran
   });
 });
 
