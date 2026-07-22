@@ -36,7 +36,7 @@ export type LocationKind = "onsite" | "remote" | "hybrid";
 
 /**
  * searchnapply's enricher classifies every location with an integer `kind`.
- * Full-corpus probe (3483 postings, 2026-07-18): kind in {0: 5441, 1: 134, 2: 48}.
+ * Full-corpus probe (3483 postings): kind in {0: 5441, 1: 134, 2: 48}.
  * Pinned mapping 0->onsite, 1->remote, 2->hybrid; unknown kinds fall back to onsite
  * (the dominant category) so one odd row never fails a batch.
  */
@@ -71,7 +71,7 @@ function toChDateTime(input: string | Date): string {
 }
 
 export function mapPostingToRow(posting: Posting, ingestedAt: Date): PostingRow {
-  // Single location columns per the epic schema: keep the first, drop the rest.
+  // Single location columns: keep the first, drop the rest.
   const loc = posting.locations[0];
   const salary = posting.salary;
   return {

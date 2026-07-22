@@ -4,8 +4,7 @@ import type { ClickHouseClient } from "@clickhouse/client";
 // The analytics catalog: the ONLY path from the agent to ClickHouse. Six parameterized SQL templates
 // (one per launch-question shape), each validated with Zod, read dedup-correct via FINAL, and bounded
 // by a row LIMIT + max_execution_time. runQuery returns { sql, rows, meta } where `sql` is the exact
-// statement executed - "Show query" reveals it verbatim (honesty = rubric depth, feasibility must-fix
-// 4). See the query-catalog key decision in the epic technical design.
+// statement executed - "Show query" reveals it verbatim.
 //
 // SQL-injection note: the usual rule is query_params, never string interpolation. Here the product
 // requirement is the opposite - the reveal must show the REAL interpolated SQL, so meta.sql IS what
@@ -65,7 +64,7 @@ function trendWindow(table: string, days: number): string {
 }
 
 /**
- * The open-set predicate (AC-3): keep only rows from the latest ingest snapshot. Sound because every
+ * The open-set predicate: keep only rows from the latest ingest snapshot. Sound because every
  * row of an ingest run is stamped with one shared `ingested_at` (shared/ingest.ts), so the max is that
  * run's timestamp and equality selects exactly the current-state postings. No FINAL in the subquery:
  * max(ingested_at) is dedup-invariant (a superseded row always has an OLDER version), so FINAL would
@@ -103,7 +102,7 @@ const LatestPostingsParams = z
   })
   .strict();
 
-// Exported so task 004 wires the agent's tool input schemas from the one home (DRY).
+// Exported so the agent's tool input schemas wire from the one home (DRY).
 export const TEMPLATE_PARAM_SCHEMAS = {
   salary_distribution: SalaryDistributionParams,
   salary_compare: SalaryCompareParams,
@@ -130,7 +129,7 @@ export interface BuiltQuery {
 }
 
 /**
- * The dominant-currency predicate (018 strand 3): keep only rows whose salary_currency is the most
+ * The dominant-currency predicate: keep only rows whose salary_currency is the most
  * common one among the salaried rows matching the SAME base filters, so a median/percentile is never
  * computed across mixed currencies. An `IN (... LIMIT 1)` (not `=`) so an empty salaried set yields no
  * rows gracefully rather than throwing on an empty scalar subquery.
@@ -291,7 +290,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
 }
 
 // ---- Composable query builder (the everything-else path beside the six templates) ---------------
-// query_postings' data layer (AC-1/AC-2): a whitelisted aggregate over the postings schema. Same
+// query_postings' data layer: a whitelisted aggregate over the postings schema. Same
 // safety contract as the templates - Zod validates every param, enums map to fixed column names, and
 // chStr/likeEscape escape every free-text value; nothing here is a raw interpolated identifier.
 
@@ -315,7 +314,7 @@ type TimeBucket = (typeof TIME_BUCKETS)[number];
 const isUnique = (values: readonly string[]): boolean => new Set(values).size === values.length;
 
 /**
- * The query_postings input schema, exported like TEMPLATE_PARAM_SCHEMAS so 009 wires the tool input
+ * The query_postings input schema, exported like TEMPLATE_PARAM_SCHEMAS so the tool input wires
  * from the one home (DRY). Structural validation only (kept a strict ZodObject); the cross-field sort
  * check lives in buildComposedSql (still before any query runs).
  */
@@ -336,10 +335,10 @@ export const ComposedQueryParams = z
     company: z.string().min(1).optional(),
     city: z.string().min(1).optional(),
     // A multi-city filter for "openings in LA or NYC" (one number over both). Each value is
-    // chStr-escaped into an IN-list; kept alongside single `city` for compat (018 strand 4). Bounded so
+    // chStr-escaped into an IN-list; kept alongside single `city` for compat. Bounded so
     // the interpolated list stays small. SEMANTICS when both are set: `cities` WINS and the single `city`
     // is ignored (the FOLLOW-UP INHERITANCE rule replaces a filter, never AND-s it into a possibly-empty
-    // intersection - see buildComposedSql, 018 review-fix).
+    // intersection - see buildComposedSql).
     cities: z.array(z.string().min(1)).min(1).max(20).optional(),
     region: z.string().min(1).optional(),
     country: z.string().min(1).optional(),
@@ -433,7 +432,7 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   // `cities` (the multi-city IN-list) WINS over a coexisting single `city`: the FOLLOW-UP INHERITANCE rule
   // REPLACES a filter rather than AND-ing it, so a coexisting pair is a refinement to the list, not an
   // intersection (which could be empty). Smallest correct semantics: prefer cities, drop the single city
-  // (018 review-fix; documented on ComposedQueryParams.cities).
+  // (documented on ComposedQueryParams.cities).
   if (p.cities) filters.push(`city IN (${p.cities.map((c) => chStr(c)).join(", ")})`);
   else if (p.city) filters.push(`city = ${chStr(p.city)}`);
   if (p.region) filters.push(`region = ${chStr(p.region)}`);
@@ -447,7 +446,7 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   if (openSet) filters.push(openSetFilter(table));
   else filters.push(trendWindow(table, p.days!));
   // Salary measures aggregate within the dominant currency only - never a mixed-currency median (added
-  // last so its subquery scopes over the salaried + user + open-set/window filters, 018 strand 3).
+  // last so its subquery scopes over the salaried + user + open-set/window filters).
   if (isSalary) filters.push(dominantCurrencyFilter(table, filters));
   const where = whereClause(filters);
 
@@ -483,14 +482,14 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
 export interface QueryResult {
   sql: string;
   rows: Record<string, unknown>[];
-  // `openSet` is present (true) only on a current-state read; absent = full history (AC-3). `currency`
+  // `openSet` is present (true) only on a current-state read; absent = full history. `currency`
   // is present only on a salary aggregate (the dominant currency it was filtered to). Both optional so
-  // every persisted P1 payload stays valid and neither is default-injected.
+  // every persisted payload stays valid and neither is default-injected.
   meta: { sampleN: number; freshestAt: string; openSet?: boolean; currency?: string };
 }
 
 /**
- * The corpus shape (018 strand 5): what the product is actually answering from, so the agent can be
+ * The corpus shape: what the product is actually answering from, so the agent can be
  * honest about scope. Computed over the current open set (one snapshot). Shares (0..1) are fractions.
  */
 export interface CoverageProfile {
@@ -504,14 +503,14 @@ export interface CoverageProfile {
 
 export interface Analytics {
   runQuery(name: TemplateName, params: unknown): Promise<QueryResult>;
-  // The execution seam for query_postings (009's tool calls this). Tools receive Analytics, never a raw
+  // The execution seam for query_postings (the query_postings tool calls this). Tools receive Analytics, never a raw
   // client, so the composed path must live on the interface too.
   runComposedQuery(params: unknown): Promise<QueryResult>;
   /**
-   * The corpus shape for the DATA SCOPE prompt note (018 strand 5). ONE cheap query, memoized on the
+   * The corpus shape for the DATA SCOPE prompt note. ONE cheap query, memoized on the
    * analytics instance - which is a per-process singleton (trigger/chat.ts), so it runs once per PROCESS
    * (isolate lifetime), never per turn. Only a fulfilled result is cached; a transient failure is retried
-   * on the next call (018 review-fix S5).
+   * on the next call.
    */
   coverageProfile(): Promise<CoverageProfile>;
 }
@@ -568,11 +567,11 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
   // Memoized on the instance: the first call runs the query, later callers reuse the same promise. The
   // analytics instance is a module-level singleton (trigger/chat.ts), so this cache lives for the PROCESS
   // (the warm Trigger isolate serves many conversations), NOT a single run - it is computed once per
-  // isolate lifetime, never per turn (018 strand 5). Accepted staleness: after a re-ingest a warm isolate
+  // isolate lifetime, never per turn. Accepted staleness: after a re-ingest a warm isolate
   // serves the prior corpus's DATA SCOPE note until it recycles; harmless for the static demo corpus, and
   // the note is advisory (it only shapes scope-qualification prose, never a query). A REJECTED promise is
   // NOT cached (see coverageProfile below): one transient ClickHouse error must not poison the memo for the
-  // whole isolate life and silently drop the scope note on every later turn (018 review-fix S5).
+  // whole isolate life and silently drop the scope note on every later turn.
   let coverageCache: Promise<CoverageProfile> | undefined;
   async function computeCoverage(): Promise<CoverageProfile> {
     const openSet = openSetFilter(table);
@@ -611,7 +610,7 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     runQuery: (name, params) => executeBuilt(buildTemplateSql(name, params, table)),
     runComposedQuery: (params) => executeBuilt(buildComposedSql(params, table)),
     // Cache only a FULFILLED result: on rejection, clear the memo so the next call retries (never a
-    // permanently-poisoned rejected promise, 018 review-fix S5).
+    // permanently-poisoned rejected promise).
     coverageProfile: () =>
       (coverageCache ??= computeCoverage().catch((err) => {
         coverageCache = undefined;

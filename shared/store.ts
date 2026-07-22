@@ -1,7 +1,7 @@
 import type { Sql } from "postgres";
 
-// The OLTP chat store: raw `postgres` + .sql migrations (no ORM, no repository layer - operator
-// ruling). A deep module - callers get user/conversation/message persistence behind five methods;
+// The OLTP chat store: raw `postgres` + .sql migrations (no ORM, no repository layer). A deep module
+// - callers get user/conversation/message persistence behind five methods;
 // `null` always means "not found". The store mints/owns ids (guest id is the caller's cookie uuid;
 // conversation/message ids default in Postgres). Accepts its `sql` client (testability), never
 // creates one.
@@ -10,7 +10,7 @@ export type MessageRole = "user" | "assistant";
 
 // Canonical UUID shape (8-4-4-4-12 hex). Postgres rejects a non-UUID id with a raw
 // `invalid input syntax for type uuid`, which would break `getConversation`'s "null = not found"
-// contract at the trust boundary (006 feeds it an untrusted `/chat/[id]` param). Guard before the
+// contract at the trust boundary (`/chat/[id]` feeds it an untrusted route param). Guard before the
 // query so a malformed id reads as "not found" - without swallowing real DB errors on a valid one.
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -42,7 +42,7 @@ export interface Conversation {
   created_at: Date;
 }
 
-/** A sidebar history row: the conversation's identity + a first-user-message preview (refresh #2 s5),
+/** A sidebar history row: the conversation's identity + a first-user-message preview,
  *  which distinguishes rows that share a title. */
 export type ConversationSummary = Pick<
   Conversation,
@@ -108,11 +108,11 @@ export interface Store {
    * belongs to a DIFFERENT account (a forged guest cookie must not steal a signed-in user's chats).
    */
   adoptGuest(canonicalUserId: string, guestUserId: string): Promise<void>;
-  /** A user's conversations, newest first (the signed-in sidebar history, AC-12), each with a
-   *  first-user-message preview (refresh #2 s5). */
+  /** A user's conversations, newest first (the signed-in sidebar history), each with a
+   *  first-user-message preview. */
   listConversations(userId: string): Promise<ConversationSummary[]>;
   /**
-   * Delete a conversation and its messages (AC-21). Messages are removed first (the FK has no ON DELETE
+   * Delete a conversation and its messages. Messages are removed first (the FK has no ON DELETE
    * CASCADE), both in one transaction so a conversation never outlives a partial message delete. A
    * malformed id is a no-op (the "null = not found" contract). Ownership is enforced by the CALLER (the
    * action layer resolves the caller's Identity and refuses a non-owner as not_found) - this primitive
@@ -129,7 +129,7 @@ export interface Store {
    * regenerate pop (it trims trailing assistant messages from its in-memory accumulator until the tail
    * is a user turn, then re-runs). Called ONLY on the regenerate path, before the retry's answer
    * persists, so a superseded error card (or a prior answer) never survives alongside the new reply
-   * (I4: exactly one assistant reply per user turn). A conversation with no user turn, or whose tail is
+   * (exactly one assistant reply per user turn). A conversation with no user turn, or whose tail is
    * already a user row, is a no-op; a malformed id is a no-op (the "null = not found" contract).
    */
   deleteTrailingAssistant(conversationId: string): Promise<void>;
@@ -137,7 +137,7 @@ export interface Store {
 
 /**
  * Derive a conversation title from the first user question: whitespace-collapsed, trimmed to 60
- * chars on a word boundary, never null/empty (falls back to "New chat" for blank input). AC-14.
+ * chars on a word boundary, never null/empty (falls back to "New chat" for blank input).
  */
 export function deriveTitle(firstQuestion: string): string {
   const normalized = firstQuestion.trim().replace(/\s+/g, " ");
@@ -256,7 +256,7 @@ export function createStore(sql: Sql): Store {
     },
 
     async listConversations(userId) {
-      // The preview is the conversation's first user message (refresh #2 s5) - a correlated subquery so
+      // The preview is the conversation's first user message - a correlated subquery so
       // the row set stays one-per-conversation; COALESCE guards a conversation with no user turn yet.
       const rows = await sql<ConversationSummary[]>`
         SELECT c.id, c.title, c.created_at,

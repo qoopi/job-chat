@@ -2,9 +2,9 @@ import { z } from "zod";
 import { ClickhouseEnvSchema, ClickhouseRoEnvSchema } from "./clickhouse";
 import { SearchnapplyEnvSchema } from "./searchnapply";
 
-// The full env schema, composed from the per-domain slices (decision log 2026-07-18) rather than
+// The full env schema, composed from the per-domain slices rather than
 // re-listing every key here: ClickHouse (writer + read-only) and searchnapply own their own shapes.
-// This file adds the vars no domain owns - Trigger, Postgres, Bedrock/AWS - plus the 004 runtime
+// This file adds the vars no domain owns - Trigger, Postgres, Bedrock/AWS - plus the runtime
 // guards. Required at runtime use, never validated at build/import time (the build must pass with no
 // .env).
 const BaseEnvSchema = z.object({
@@ -22,7 +22,7 @@ const BedrockEnvSchema = z.object({
 });
 
 // The session guards (guest cap, signed-in cap, global daily budget). Env-tunable, conservative
-// defaults until prod traffic is understood (epic AC-13/AC-15/AC-20). Coerced because process.env
+// defaults until prod traffic is understood. Coerced because process.env
 // values are strings. SIGNED_IN_MESSAGE_CAP is the higher per-user cap for accounts; auth never runs
 // in the agent, but the run() backstop's cap check does, so mirror it in Trigger too.
 const GuardsEnvSchema = z.object({
@@ -31,7 +31,7 @@ const GuardsEnvSchema = z.object({
   DAILY_MESSAGE_BUDGET: z.coerce.number().int().positive().default(200),
 });
 
-// The agent loop ceilings (AC-17). Same coercion + conservative defaults.
+// The agent loop ceilings. Same coercion + conservative defaults.
 const AgentLimitsEnvSchema = z.object({
   AGENT_MAX_TURNS: z.coerce.number().int().positive().default(10),
   AGENT_MAX_STEPS: z.coerce.number().int().positive().default(8),
@@ -74,7 +74,7 @@ export function resetEnvCache(): void {
 export interface GuardConfig {
   guestCap: number;
   /**
-   * The higher per-user cap for signed-in accounts (AC-13). Optional here only so terse test guard
+   * The higher per-user cap for signed-in accounts. Optional here only so terse test guard
    * literals that exercise the guest path stay uncluttered; `getGuardConfig` ALWAYS sets it in
    * production. When unset, cap selection falls back to `guestCap` (fail-safe - the lower cap).
    */
@@ -103,8 +103,8 @@ export interface AgentLimits {
 }
 
 /**
- * The agent loop ceilings (AC-17), validating only their own env slice. Unset vars fall back to the
- * epic's defaults (maxTurns 10, maxSteps 8).
+ * The agent loop ceilings, validating only their own env slice. Unset vars fall back to the
+ * defaults (maxTurns 10, maxSteps 8).
  */
 export function getAgentLimits(
   source: Record<string, string | undefined> = process.env,
