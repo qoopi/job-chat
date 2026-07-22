@@ -1,23 +1,17 @@
 import type { Sql } from "postgres";
 import type { Profile } from "./profile";
 
-// The OLTP chat store: raw `postgres` + .sql migrations (no ORM, no repository layer). A deep module
-// - callers get user/conversation/message persistence behind five methods;
-// `null` always means "not found". The store mints/owns ids (guest id is the caller's cookie uuid;
-// conversation/message ids default in Postgres). Accepts its `sql` client (testability), never
-// creates one.
+// OLTP chat store (raw postgres, no ORM). Contract: `null` always means "not found".
 
 export type MessageRole = "user" | "assistant";
 
-// Canonical UUID shape (8-4-4-4-12 hex). Postgres rejects a non-UUID id with a raw
-// `invalid input syntax for type uuid`, which would break `getConversation`'s "null = not found"
-// contract at the trust boundary (`/chat/[id]` feeds it an untrusted route param). Guard before the
-// query so a malformed id reads as "not found" - without swallowing real DB errors on a valid one.
+// Postgres raises `invalid input syntax for type uuid` on a non-UUID id; guard untrusted ids so a
+// malformed one reads as "not found" (the store's contract), never a 500.
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Postgres unique_violation SQLSTATE. porsager/postgres surfaces the server's SQLSTATE as `err.code`
-// on a PostgresError; `linkAuthUser` uses it to turn the auth_user_id UNIQUE race into a typed refusal.
+// Postgres unique_violation SQLSTATE, surfaced by porsager/postgres as `err.code`; linkAuthUser turns
+// the auth_user_id UNIQUE race into a typed refusal.
 const PG_UNIQUE_VIOLATION = "23505";
 function isUniqueViolation(e: unknown): boolean {
   return (
@@ -27,13 +21,13 @@ function isUniqueViolation(e: unknown): boolean {
   );
 }
 
-/** A persisted JSON payload (the insight-card parts). Opaque here; validated by `insight.ts`. */
+/** Opaque JSON payload; validated by `insight.ts`, not here. */
 export type Json = unknown;
 
 export interface User {
   user_id: string;
   created_at: Date;
-  auth_user_id: string | null; // Better Auth's user id once signed in (adoption stamps it); null for guests
+  auth_user_id: string | null; // Better Auth id once signed in; null = guest
 }
 
 export interface Conversation {
@@ -43,8 +37,6 @@ export interface Conversation {
   created_at: Date;
 }
 
-/** A sidebar history row: the conversation's identity + a first-user-message preview,
- *  which distinguishes rows that share a title. */
 export type ConversationSummary = Pick<
   Conversation,
   "id" | "title" | "created_at"
@@ -57,17 +49,12 @@ export interface Message {
   conversation_id: string;
   role: MessageRole;
   content: string;
-  parts: Json | null; // null for user messages; the insight payload for assistant messages
+  parts: Json | null; // null for user messages; insight payload for assistant
   created_at: Date;
 }
 
-/**
- * A profiles row: the raw inputs the save action stored plus (once the extraction task runs) the
- * structured profile. `extracted_at IS NOT NULL` is the DONE marker the poll read waits on;
- * `extraction_failed` is the terminal-FAILURE marker (the poll's other exit). `resume_pdf` is transient -
- * present only between the save and the task, then NULLed once the extraction TERMINATES. Postgres-only
- * (AC-13).
- */
+/** `extracted_at IS NOT NULL` = extraction done, `extraction_failed` = terminal failure; `resume_pdf`
+ *  is transient PII, present only between save and task then NULLed once extraction terminates. */
 export interface ProfileRow {
   user_id: string;
   raw_resume_text: string | null;
@@ -75,10 +62,10 @@ export interface ProfileRow {
   github_username: string | null;
   profile: Profile | null; // null until the extraction task writes it
   extracted_at: Date | null; // null = extraction pending (or failed - see extraction_failed)
-  extraction_failed: boolean; // true only after a PERMANENT extraction failure (all task retries spent)
+  extraction_failed: boolean; // true only after a permanent extraction failure
 }
 
-/** The raw inputs the save action stores (the pre-extraction write). A null field clears that input. */
+/** Raw profile inputs (pre-extraction write); a null field clears that input. */
 export interface ProfileInputs {
   userId: string;
   rawResumeText: string | null;
@@ -92,12 +79,8 @@ export interface Store {
     userId: string,
     firstQuestion: string,
   ): Promise<Conversation>;
-  /**
-   * Append a message. `id` is optional: when supplied the insert is idempotent - re-persisting the
-   * SAME id (a replayed or re-executed completion reaching persistence twice) inserts exactly once
-   * (`ON CONFLICT (id) DO NOTHING`, first write wins). Omit it to let Postgres mint a fresh uuid (the
-   * row can then never conflict).
-   */
+  /** Append a message. A supplied `id` makes the insert idempotent (`ON CONFLICT (id) DO NOTHING`, first
+   *  write wins) - load-bearing for crash-redispatch dedup; omit it to always insert. */
   appendMessage(
     conversationId: string,
     role: MessageRole,
@@ -108,132 +91,66 @@ export interface Store {
   getConversation(
     conversationId: string,
   ): Promise<{ conversation: Conversation; messages: Message[] } | null>;
-  /**
-   * The conversation's owner (user_id + the owner's auth_user_id), or `null` for an unknown/malformed
-   * id. A lightweight authorization + guard lookup - conversations JOIN users, both PK/UNIQUE-indexed,
-   * no message history (contrast `getConversation`, which loads the full, unbounded thread). The
-   * auth_user_id (null = guest, set = signed-in) lets the run() backstop pick the cap by identity kind.
-   */
+  /** Owner (user_id + auth_user_id), or `null` for unknown/malformed id; auth_user_id null=guest picks the cap. */
   getConversationOwner(
     conversationId: string,
   ): Promise<{ user_id: string; auth_user_id: string | null } | null>;
-  /** The users row linked to a Better Auth id, or `null` when unmapped. One indexed lookup. */
   findUserByAuthId(authUserId: string): Promise<User | null>;
-  /**
-   * Stamp a Better Auth id onto a users row (first sign-in; conversations follow for free). SECURITY:
-   * stamps ONLY an unlinked guest row (auth_user_id IS NULL) - never overwrites another account's
-   * binding. Returns whether it stamped: `false` when the row already carries a DIFFERENT auth_user_id
-   * (0-row match) OR the auth_user_id UNIQUE race lost to a concurrent first sign-in (caught, not
-   * thrown). On `false` the caller re-reads `findUserByAuthId` for the canonical row.
-   */
+  /** SECURITY: stamps a Better Auth id ONLY onto an unlinked guest row (auth_user_id IS NULL) - never
+   *  overwrites another account's binding. Returns `false` if already linked or the UNIQUE race lost. */
   linkAuthUser(userId: string, authUserId: string): Promise<boolean>;
-  /**
-   * Adopt a guest's conversations into the canonical (account) row on sign-in: one UPDATE of
-   * conversations.user_id, no message copying. Idempotent (a re-run moves nothing). SECURITY: moves
-   * only FROM a genuine guest row (source auth_user_id IS NULL) - never adopts from a row that already
-   * belongs to a DIFFERENT account (a forged guest cookie must not steal a signed-in user's chats).
-   */
+  /** SECURITY: adopt a guest's conversations into the account row (one UPDATE, idempotent) only FROM a
+   *  genuine guest row (auth_user_id IS NULL) - a forged guest cookie must not steal a user's chats. */
   adoptGuest(canonicalUserId: string, guestUserId: string): Promise<void>;
-  /** A user's conversations, newest first (the signed-in sidebar history), each with a
-   *  first-user-message preview. */
   listConversations(userId: string): Promise<ConversationSummary[]>;
-  /**
-   * Delete a conversation and its messages. Messages are removed first (the FK has no ON DELETE
-   * CASCADE), both in one transaction so a conversation never outlives a partial message delete. A
-   * malformed id is a no-op (the "null = not found" contract). Ownership is enforced by the CALLER (the
-   * action layer resolves the caller's Identity and refuses a non-owner as not_found) - this primitive
-   * deletes by id.
-   */
+  /** Delete a conversation and its messages in one transaction. Ownership is enforced by the CALLER. */
   deleteConversation(conversationId: string): Promise<void>;
   /** Count user-turn messages since `sinceUtcMidnight`. No `userId` => global (the daily budget). */
   messageCounts(args: {
     userId?: string;
     sinceUtcMidnight: Date;
   }): Promise<number>;
-  /**
-   * Delete the assistant row(s) trailing the last user message - the durable mirror of the SDK's
-   * regenerate pop (it trims trailing assistant messages from its in-memory accumulator until the tail
-   * is a user turn, then re-runs). Called ONLY on the regenerate path, before the retry's answer
-   * persists, so a superseded error card (or a prior answer) never survives alongside the new reply
-   * (exactly one assistant reply per user turn). A conversation with no user turn, or whose tail is
-   * already a user row, is a no-op; a malformed id is a no-op (the "null = not found" contract).
-   */
+  /** Delete the assistant row(s) trailing the last user turn - the durable mirror of the SDK's regenerate
+   *  pop. Regenerate path only; enforces exactly one assistant reply per user turn. No-op on a user-less
+   *  or user-tailed conversation, or a malformed id. */
   deleteTrailingAssistant(conversationId: string): Promise<void>;
-  /**
-   * Append the out-of-band profile-card assistant message with REPLACE semantics: the caller mints a
-   * DETERMINISTIC id (one per conversation), so a re-save UPDATES the one card in place and a double-save
-   * can never duplicate it (`ON CONFLICT (id) DO UPDATE` - distinct from `appendMessage`'s first-write-wins
-   * `DO NOTHING`, which is load-bearing for the crash-redispatch dedup and must NOT change). `created_at` is
-   * left untouched on update, so the card keeps its original thread position. Content is "" - the card IS
-   * the surface, and buildModelHistory drops an empty-model-facing row so the model never sees it.
-   */
+  /** REPLACE semantics via `ON CONFLICT (id) DO UPDATE` (contrast appendMessage's `DO NOTHING`): a
+   *  deterministic id means a re-save updates the one card and can't duplicate it; `created_at` untouched
+   *  keeps its thread position. Empty content - buildModelHistory drops the empty model-facing row. */
   appendProfileCard(
     conversationId: string,
     id: string,
     parts: Json,
   ): Promise<void>;
-  /** The caller's profile row, or `null` when they have none (the AC-2 invite path). Returns the raw
-   *  inputs (for the extraction task) plus the structured profile + extracted_at (for the poll read). */
   getProfile(userId: string): Promise<ProfileRow | null>;
-  /**
-   * Store the raw profile inputs (the save action's pre-extraction write): upsert the resume text / PDF
-   * bytes / github username. Leaves `profile` and `extracted_at` UNTOUCHED, so a re-save keeps the
-   * previous extracted profile in place until the task overwrites it - a failed re-extraction never
-   * destroys the working profile (AC: "error keeps the previous profile untouched"). Clears
-   * `extraction_failed` (a re-save starts a fresh attempt, so any prior terminal-failure marker is stale).
-   */
+  /** Upsert raw inputs only; leaves profile/extracted_at UNTOUCHED (a failed re-extraction keeps the
+   *  working profile) and clears extraction_failed (a re-save is a fresh attempt). */
   saveProfileInputs(inputs: ProfileInputs): Promise<void>;
-  /**
-   * Write the extracted structured profile (the extraction task's post-extraction write): set `profile`
-   * + `extracted_at = now()`. Does NOT touch `resume_pdf` - the transient PII is cleared by
-   * `clearResumePdf` only AFTER the card append succeeds (so a mid-task retry can still re-extract a
-   * PDF-only resume). Returns whether it updated a row: `false` when the profile was deleted
-   * mid-extraction (UPDATE ... WHERE user_id matched nothing), so the caller skips appending an orphan
-   * card. Full replace of the profile - a re-extraction overwrites the prior one.
-   */
+  /** Write the extracted profile (`profile` + `extracted_at`); does NOT clear `resume_pdf`. Returns
+   *  `false` if the row was deleted mid-extraction (caller then skips the orphan card). */
   saveExtractedProfile(userId: string, profile: Profile): Promise<boolean>;
-  /**
-   * Clear the transient resume PDF after a SUCCESSFUL extraction (the terminal PII clear-point, run only
-   * after the profile write + card append both succeed). A no-op if the row is already gone.
-   */
+  /** Clear the transient resume PDF - the terminal PII clear-point on the success path. */
   clearResumePdf(userId: string): Promise<void>;
-  /**
-   * Stamp the terminal-FAILURE marker after a PERMANENT extraction failure (the task's onFailure hook,
-   * fired once all retries are exhausted): NULL the transient `resume_pdf` (it must never linger as
-   * long-term PII) and set `extraction_failed` true - but ONLY when no profile was produced
-   * (`extracted_at IS NULL`), so a run that saved a profile yet failed a later step is not mismarked as
-   * failed. A no-op if the row is already gone.
-   */
+  /** onFailure (all retries spent): NULL `resume_pdf` (transient PII must never linger) and set
+   *  `extraction_failed`, but ONLY when no profile was produced (`extracted_at IS NULL`). */
   markExtractionFailed(userId: string): Promise<void>;
-  /** Remove the caller's profile (raw inputs + structured profile). Idempotent - deleting a
-   *  non-existent profile is a no-op; subsequent fit-intents then behave as the no-profile path (AC-10). */
   deleteProfile(userId: string): Promise<void>;
-  /** Delete one message by id within a conversation (idempotent; a no-op if absent or malformed). The
-   *  card-on-delete rule uses it to remove the profile card from the ACTIVE conversation when the profile
-   *  is deleted - the deterministic card id makes it one DELETE. Orphan cards in OTHER conversations stay
-   *  as plain history (acceptable). */
   deleteMessage(conversationId: string, id: string): Promise<void>;
 }
 
-/**
- * Derive a conversation title from the first user question: whitespace-collapsed, trimmed to 60
- * chars on a word boundary, never null/empty (falls back to "New chat" for blank input).
- */
 export function deriveTitle(firstQuestion: string): string {
   const normalized = firstQuestion.trim().replace(/\s+/g, " ");
   if (normalized.length === 0) return "New chat";
   if (normalized.length <= 60) return normalized;
   const head = normalized.slice(0, 60);
   const lastSpace = head.lastIndexOf(" ");
-  // Prefer the last word boundary; a single >60-char token has none, so hard-cut at 60.
   return (lastSpace > 0 ? head.slice(0, lastSpace) : head).trimEnd();
 }
 
 export function createStore(sql: Sql): Store {
   return {
     async getOrCreateUser(guestId) {
-      // DO UPDATE (a no-op reassignment) rather than DO NOTHING so RETURNING yields the row on
-      // both insert and conflict; created_at is left untouched for an existing user.
+      // DO UPDATE (no-op reassignment), not DO NOTHING, so RETURNING yields the row on conflict too.
       const rows = await sql<User[]>`
         INSERT INTO users (user_id) VALUES (${guestId})
         ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
@@ -251,10 +168,6 @@ export function createStore(sql: Sql): Store {
 
     async appendMessage(conversationId, role, content, parts, id) {
       const partsValue = parts === null ? null : sql.json(parts as never);
-      // A caller-supplied id makes the write idempotent: ON CONFLICT (id) DO NOTHING inserts once for a
-      // replayed/re-executed completion. RETURNING then yields nothing on a conflict (the silent no-op);
-      // the only id-supplying caller (assistant-turn persist) ignores the return. With no id the DB mints
-      // a fresh uuid, so the row can never conflict and RETURNING always yields it.
       const rows =
         id === undefined
           ? await sql<Message[]>`
@@ -270,7 +183,6 @@ export function createStore(sql: Sql): Store {
     },
 
     async getConversation(conversationId) {
-      // A malformed id is "not found" from the caller's view (contract: null = not found).
       if (!UUID_RE.test(conversationId)) return null;
       const conversations = await sql<Conversation[]>`
         SELECT id, user_id, title, created_at
@@ -284,9 +196,6 @@ export function createStore(sql: Sql): Store {
     },
 
     async getConversationOwner(conversationId) {
-      // Same "null = not found" contract as getConversation (malformed id reads as not found). One
-      // JOIN of two indexed rows (conversations PK + users PK) - the auth_user_id rides along so the
-      // guard picks the cap by kind - and still no message history.
       if (!UUID_RE.test(conversationId)) return null;
       const rows = await sql<
         { user_id: string; auth_user_id: string | null }[]
@@ -306,12 +215,7 @@ export function createStore(sql: Sql): Store {
     },
 
     async linkAuthUser(userId, authUserId) {
-      // Stamp only an unlinked guest row: the `auth_user_id IS NULL` guard refuses to overwrite a row
-      // already bound to a DIFFERENT account (a forged/stale guest cookie must not take it over). A
-      // 0-row match => already linked => `false`. The guard passes for the row's OWN NULL, but the SET
-      // can still collide with the auth_user_id UNIQUE index when a concurrent first sign-in stamped
-      // this id onto another row first - catch that race and report `false` (never an untyped 500); the
-      // caller re-reads findUserByAuthId for the canonical winner.
+      // Catch the auth_user_id UNIQUE-race loss (concurrent sign-in) as `false`, not a 500.
       try {
         const rows = await sql`
           UPDATE users SET auth_user_id = ${authUserId}
@@ -325,10 +229,7 @@ export function createStore(sql: Sql): Store {
     },
 
     async adoptGuest(canonicalUserId, guestUserId) {
-      // Re-point the guest's conversations to the canonical row (messages ride along via
-      // conversation_id - none are copied). Idempotent: a re-run matches zero rows. SECURITY: the
-      // EXISTS guard moves conversations only when the SOURCE row is a genuine guest (auth_user_id IS
-      // NULL) - never adopts FROM a row already bound to a DIFFERENT account (forged guest cookie).
+      // SECURITY: the EXISTS guard moves conversations only from a genuine guest row (auth_user_id IS NULL).
       await sql`
         UPDATE conversations SET user_id = ${canonicalUserId}
         WHERE user_id = ${guestUserId}
@@ -336,8 +237,6 @@ export function createStore(sql: Sql): Store {
     },
 
     async listConversations(userId) {
-      // The preview is the conversation's first user message - a correlated subquery so
-      // the row set stays one-per-conversation; COALESCE guards a conversation with no user turn yet.
       const rows = await sql<ConversationSummary[]>`
         SELECT c.id, c.title, c.created_at,
           COALESCE((
@@ -353,9 +252,8 @@ export function createStore(sql: Sql): Store {
     },
 
     async deleteConversation(conversationId) {
-      // Malformed id: no-op (contract parity with getConversation - never surface a raw uuid cast error).
       if (!UUID_RE.test(conversationId)) return;
-      // One transaction: messages first (no ON DELETE CASCADE on the FK), then the conversation row.
+      // messages first: the FK has no ON DELETE CASCADE.
       await sql.begin(async (tx) => {
         await tx`DELETE FROM messages WHERE conversation_id = ${conversationId}`;
         await tx`DELETE FROM conversations WHERE id = ${conversationId}`;
@@ -363,18 +261,10 @@ export function createStore(sql: Sql): Store {
     },
 
     async deleteTrailingAssistant(conversationId) {
-      // Malformed id: no-op (contract parity with getConversation - never surface a raw uuid cast error).
       if (!UUID_RE.test(conversationId)) return;
-      // Delete the assistant rows that TRAIL the last user turn: an assistant row trails it iff NO user
-      // row sorts at-or-after it, by the SAME (created_at, id) composite order getConversation reads by -
-      // so "trailing" here means exactly what the reload shows. An assistant BETWEEN two user turns has a
-      // later user (kept); only the tail after the last user is removed. The EXISTS guard keeps a
-      // user-less conversation a no-op (never nukes stray assistant rows) - defense; a real conversation
-      // always opens with a user turn.
-      // A profile-card row is out-of-band (appended by the save flow, not a turn) and INVISIBLE to the
-      // turn machinery: exclude it so a Retry after a save can never destroy the card. `IS DISTINCT FROM`
-      // keeps a null-parts assistant row eligible (NULL ->> 'kind' is NULL, which IS DISTINCT FROM the
-      // literal, so it still deletes) - only a genuine profile-card row is spared.
+      // "Trailing" = no user row sorts at-or-after it, by the same (created_at, id) order getConversation
+      // reads. Exclude the out-of-band profile-card row (`IS DISTINCT FROM` keeps null-parts rows eligible)
+      // so a Retry after a save never destroys the card.
       await sql`
         DELETE FROM messages a
         WHERE a.conversation_id = ${conversationId}
@@ -392,9 +282,6 @@ export function createStore(sql: Sql): Store {
     },
 
     async appendProfileCard(conversationId, id, parts) {
-      // REPLACE semantics via DO UPDATE (contrast appendMessage's DO NOTHING): the deterministic id means
-      // a re-save updates the single card and a double-save cannot duplicate it. created_at is untouched,
-      // so the card holds its thread position across re-saves.
       await sql`
         INSERT INTO messages (id, conversation_id, role, content, parts)
         VALUES (${id}, ${conversationId}, 'assistant', '', ${sql.json(parts as never)})
@@ -410,10 +297,6 @@ export function createStore(sql: Sql): Store {
     },
 
     async saveProfileInputs({ userId, rawResumeText, resumePdf, githubUsername }) {
-      // Upsert the raw inputs only; profile / extracted_at are left as-is on conflict (a re-save keeps the
-      // prior extracted profile until the task overwrites it - a failed re-extraction loses nothing). But
-      // clear extraction_failed: a re-save queues a FRESH attempt, so a prior terminal-failure marker is
-      // stale (else the poll would read the new pending attempt as already-failed).
       await sql`
         INSERT INTO profiles (user_id, raw_resume_text, resume_pdf, github_username)
         VALUES (${userId}, ${rawResumeText}, ${resumePdf}, ${githubUsername})
@@ -425,10 +308,6 @@ export function createStore(sql: Sql): Store {
     },
 
     async saveExtractedProfile(userId, profile) {
-      // Post-extraction write: set the structured profile + stamp extracted_at, and clear any stale
-      // failure marker. Does NOT null resume_pdf - clearResumePdf does that only after the card append
-      // succeeds (so a mid-task retry still has the PDF). UPDATE-only: a row deleted mid-extraction matches
-      // zero rows (count 0), so the caller skips the card append rather than orphaning one.
       const result = await sql`
         UPDATE profiles
         SET profile = ${sql.json(profile as never)}, extracted_at = now(), extraction_failed = FALSE
@@ -437,14 +316,10 @@ export function createStore(sql: Sql): Store {
     },
 
     async clearResumePdf(userId) {
-      // The terminal transient-PII clear on the SUCCESS path (after the profile write + card append).
       await sql`UPDATE profiles SET resume_pdf = NULL WHERE user_id = ${userId}`;
     },
 
     async markExtractionFailed(userId) {
-      // The terminal transient-PII clear + failure stamp on the PERMANENT-FAILURE path (onFailure). Always
-      // null resume_pdf (never leave PII at rest), but flag failed ONLY when no profile was produced -
-      // `extraction_failed = (extracted_at IS NULL)` - so a run that did save a profile is not mismarked.
       await sql`
         UPDATE profiles
         SET resume_pdf = NULL, extraction_failed = (extracted_at IS NULL)
@@ -456,8 +331,6 @@ export function createStore(sql: Sql): Store {
     },
 
     async deleteMessage(conversationId, id) {
-      // Both ids feed a uuid column; guard so a malformed id reads as "no such row" (the store's
-      // null-is-not-found contract) rather than raising `invalid input syntax for type uuid`.
       if (!UUID_RE.test(conversationId) || !UUID_RE.test(id)) return;
       await sql`DELETE FROM messages WHERE id = ${id} AND conversation_id = ${conversationId}`;
     },

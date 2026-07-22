@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { PostingSchema } from "./postings";
 
-// searchnapply is two services: auth (login -> Bearer, ~1h) and jobs (postings).
-// Their base URLs are separate env vars (SEARCHNAPPLY_AUTH_URL / SEARCHNAPPLY_API_URL).
+// searchnapply is two services: auth (login -> Bearer, ~1h) and jobs (postings), with separate base URLs.
 export interface SearchnapplyConfig {
   authUrl: string;
   jobsUrl: string;
@@ -32,10 +31,7 @@ export interface SearchnapplyClient {
   fetchPostingsPage(page: number, pageSize: number): Promise<PostingsPage>;
 }
 
-// Build the config from env. Validated here (not via the full getEnv()) so the
-// ingestion path stays decoupled from AWS/Bedrock creds it never uses (ISP).
-// Exported so shared/env.ts composes the full env schema from the per-domain slices instead of
-// duplicating these keys.
+// Validated here, not via getEnv(), so ingestion stays decoupled from AWS/Bedrock creds (ISP).
 export const SearchnapplyEnvSchema = z.object({
   SEARCHNAPPLY_AUTH_URL: z.string().min(1),
   SEARCHNAPPLY_API_URL: z.string().min(1),

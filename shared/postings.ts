@@ -1,7 +1,6 @@
 import { z } from "zod";
 
-// The jobs-api item boundary (searchnapply GET /api/jobs/postings). Only the fields
-// the postings table needs are declared; Zod strips the rest (descriptionHtml, urls, ...).
+// jobs-api item boundary (searchnapply GET /api/jobs/postings); Zod strips the fields the table doesn't need.
 export const SalarySchema = z.object({
   normalizedMin: z.number().nullish(),
   normalizedMax: z.number().nullish(),
@@ -24,9 +23,8 @@ export const PostingSchema = z.object({
   experienceLevel: z.string().nullish(),
   salary: SalarySchema.nullish(),
   locations: z.array(LocationSchema).default([]),
-  // Require an explicit UTC (`Z`) or numeric offset: a timezone-less string would be
-  // read as local time by new Date() and shift; a malformed one would throw in
-  // toChDateTime mid-batch. Reject both at the boundary (offsets normalize to UTC there).
+  // Require an explicit UTC (`Z`)/offset: a timezone-less string is read as LOCAL by new Date() and shifts;
+  // reject it at the boundary (offsets normalize to UTC).
   publishedAt: z.string().datetime({ offset: true }),
 });
 
@@ -34,20 +32,15 @@ export type Posting = z.infer<typeof PostingSchema>;
 
 export type LocationKind = "onsite" | "remote" | "hybrid";
 
-/**
- * searchnapply's enricher classifies every location with an integer `kind`.
- * Full-corpus probe (3483 postings): kind in {0: 5441, 1: 134, 2: 48}.
- * Pinned mapping 0->onsite, 1->remote, 2->hybrid; unknown kinds fall back to onsite
- * (the dominant category) so one odd row never fails a batch.
- */
+/** searchnapply classifies each location with an integer `kind`: 0->onsite, 1->remote, 2->hybrid. Unknown
+ *  kinds fall back to onsite (the dominant category) so one odd row never fails a batch. */
 export function locationKindLabel(kind: number): LocationKind {
   if (kind === 1) return "remote";
   if (kind === 2) return "hybrid";
   return "onsite";
 }
 
-// A postings-table row. DateTimes are pre-formatted to ClickHouse's text form
-// ('YYYY-MM-DD HH:MM:SS', UTC) so JSONEachRow inserts need no special settings.
+// A postings-table row; DateTimes are pre-formatted to ClickHouse text form (UTC) so JSONEachRow needs no settings.
 export interface PostingRow {
   source: string;
   external_id: string;

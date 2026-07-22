@@ -2,36 +2,28 @@ import { z } from "zod";
 import { ClickhouseEnvSchema, ClickhouseRoEnvSchema } from "./clickhouse";
 import { SearchnapplyEnvSchema } from "./searchnapply";
 
-// The full env schema, composed from the per-domain slices rather than
-// re-listing every key here: ClickHouse (writer + read-only) and searchnapply own their own shapes.
-// This file adds the vars no domain owns - Trigger, Postgres, Bedrock/AWS - plus the runtime
-// guards. Required at runtime use, never validated at build/import time (the build must pass with no
-// .env).
+// Composed from per-domain slices (each owns its keys). Validated at runtime USE, never at build/import
+// time - the build must pass with no .env.
 const BaseEnvSchema = z.object({
   TRIGGER_SECRET_KEY: z.string().min(1),
   DATABASE_URL: z.string().min(1),
 });
 
-// Bedrock invokes the eu. Claude inference profile. Locally the keys are empty and creds come from
-// the AWS default profile chain (the agent uses fromNodeProviderChain), so getEnv() - which requires
-// them - is the strict all-present validator, not the agent's credential path.
+// Bedrock uses the eu Claude inference profile. Locally these keys are empty (creds come from the AWS
+// profile chain via fromNodeProviderChain); getEnv() is the strict validator, not the agent's cred path.
 const BedrockEnvSchema = z.object({
   AWS_REGION: z.string().min(1),
   AWS_ACCESS_KEY_ID: z.string().min(1),
   AWS_SECRET_ACCESS_KEY: z.string().min(1),
 });
 
-// The session guards (guest cap, signed-in cap, global daily budget). Env-tunable, conservative
-// defaults until prod traffic is understood. Coerced because process.env
-// values are strings. SIGNED_IN_MESSAGE_CAP is the higher per-user cap for accounts; auth never runs
-// in the agent, but the run() backstop's cap check does, so mirror it in Trigger too.
+// Session guards; coerced (process.env is strings). SIGNED_IN cap must be mirrored in Trigger - the run() backstop checks it there.
 const GuardsEnvSchema = z.object({
   GUEST_MESSAGE_CAP: z.coerce.number().int().positive().default(10),
   SIGNED_IN_MESSAGE_CAP: z.coerce.number().int().positive().default(30),
   DAILY_MESSAGE_BUDGET: z.coerce.number().int().positive().default(200),
 });
 
-// The agent loop ceilings. Same coercion + conservative defaults.
 const AgentLimitsEnvSchema = z.object({
   AGENT_MAX_TURNS: z.coerce.number().int().positive().default(10),
   AGENT_MAX_STEPS: z.coerce.number().int().positive().default(8),
@@ -73,19 +65,13 @@ export function resetEnvCache(): void {
 
 export interface GuardConfig {
   guestCap: number;
-  /**
-   * The higher per-user cap for signed-in accounts. Optional here only so terse test guard
-   * literals that exercise the guest path stay uncluttered; `getGuardConfig` ALWAYS sets it in
-   * production. When unset, cap selection falls back to `guestCap` (fail-safe - the lower cap).
-   */
+  /** Higher per-user cap for accounts; optional so test literals stay terse. Unset => falls back to
+   *  `guestCap` (fail-safe, the lower cap); getGuardConfig always sets it in production. */
   signedInCap?: number;
   dailyBudget: number;
 }
 
-/**
- * The session guards, validating only their own env slice (ISP) so callers need no ClickHouse/AWS
- * creds. Unset vars fall back to the epic's conservative defaults.
- */
+/** Validates only the guards env slice (ISP) - callers need no ClickHouse/AWS creds. */
 export function getGuardConfig(
   source: Record<string, string | undefined> = process.env,
 ): GuardConfig {
@@ -102,10 +88,6 @@ export interface AgentLimits {
   maxSteps: number;
 }
 
-/**
- * The agent loop ceilings, validating only their own env slice. Unset vars fall back to the
- * defaults (maxTurns 10, maxSteps 8).
- */
 export function getAgentLimits(
   source: Record<string, string | undefined> = process.env,
 ): AgentLimits {
