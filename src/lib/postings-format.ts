@@ -1,4 +1,5 @@
 import type { ScoredPostingRow } from "@shared/insight";
+import { isSeniorPlusBand } from "@shared/analytics";
 import { formatMoney } from "@/lib/insight-format";
 
 export const POSTINGS_INCHAT_CAP = 8;
@@ -21,7 +22,7 @@ export function hasSalary(row: Pick<ScoredPostingRow, "salaryMin" | "salaryMax">
 }
 
 export function isSeniorPlus(row: Pick<ScoredPostingRow, "experience">): boolean {
-  return /senior|staff|lead|principal|director/i.test(row.experience);
+  return isSeniorPlusBand(row.experience);
 }
 
 export function shownCount(rows: ScoredPostingRow[]): number {

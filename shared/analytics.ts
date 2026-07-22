@@ -459,6 +459,13 @@ export function seniorityBand(text: string): SeniorityBand | "" {
   return "";
 }
 
+/** Senior+ = the senior or lead band, from BAND_KEYWORDS' one home (the shortlist "Senior+" filter,
+ *  matching what the scorer counts - so executive/head/director qualify). */
+export function isSeniorPlusBand(text: string): boolean {
+  const band = seniorityBand(text);
+  return band === "senior" || band === "lead";
+}
+
 /** SQL band expression: a multiIf mirroring seniorityBand (ILIKE, case-insensitive); unmatched -> "". */
 function seniorityBandSql(column: string): string {
   const clauses = BAND_KEYWORDS.map(({ band, keywords }) => {
