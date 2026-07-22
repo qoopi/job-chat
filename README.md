@@ -118,9 +118,9 @@ How the entry maps to the rubric:
 - **Trigger.dev depth** - `chat.agent()` IS the product: one durable run per conversation
   orchestrates Bedrock and the tool catalog and streams structured data parts to the UI via Trigger
   Realtime. Resume profile extraction and scheduled ingestion are Trigger tasks too.
-- **OLTP + OLAP bonus path** - ClickHouse Managed Postgres (transactional: users, conversations,
-  messages, profiles) runs alongside ClickHouse (analytics), with the `users` table mirrored into
-  ClickHouse through the built-in CDC ClickPipe.
+- **OLTP + OLAP bonus path** - ClickHouse Managed Postgres (transactional: `users`, `conversations`,
+  `messages`, `profiles`) runs alongside ClickHouse (analytics), with the `users` table mirrored into
+  ClickHouse via the built-in CDC ClickPipe.
 
 ## Run it
 
