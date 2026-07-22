@@ -27,6 +27,7 @@ describe("buildCatalogTools", () => {
       })),
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
+      searchPostings: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.top_companies.execute!({}, opts);
@@ -49,6 +50,7 @@ describe("buildCatalogTools", () => {
       })),
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
+      searchPostings: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.salary_distribution.execute!({ city: "SF" }, opts);
@@ -70,6 +72,7 @@ describe("buildCatalogTools", () => {
       }),
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
+      searchPostings: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
     const out = await tools.salary_distribution.execute!({ city: "SF" }, opts);
@@ -86,6 +89,7 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
     return {
       runQuery: vi.fn(),
       coverageProfile: vi.fn(),
+      searchPostings: vi.fn(),
       runComposedQuery: vi.fn(async () =>({
         sql: "SELECT company, count() AS count FROM postings FINAL WHERE country = 'United States'",
         rows,
@@ -166,6 +170,7 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
     const analytics: Analytics = {
       runQuery: vi.fn(),
       coverageProfile: vi.fn(),
+      searchPostings: vi.fn(),
       runComposedQuery: vi.fn(async () =>{
         throw new Error("ClickHouse unreachable");
       }),
