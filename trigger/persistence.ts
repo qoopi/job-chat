@@ -1,5 +1,5 @@
 import type { UIMessage } from "ai";
-import { DataInsightSchema } from "@shared/insight";
+import { DataInsightSchema, ProfileCardSchema } from "@shared/insight";
 import type { Store, MessageRole } from "@shared/store";
 import { MAX_INPUT_CHARS } from "./guard";
 
@@ -16,6 +16,7 @@ type MessageLike = { id?: string; parts?: MessagePartLike[] };
 // failed/refused turn never resumes as a stuck spinner.
 function isPersistablePayload(data: unknown): boolean {
   if (DataInsightSchema.safeParse(data).success) return true;
+  if (ProfileCardSchema.safeParse(data).success) return true; // the out-of-band profile card
   if (typeof data !== "object" || data === null) return false;
   const d = data as Record<string, unknown>;
   if (d.kind === "system" || d.kind === "unanswerable") return true; // error marker
@@ -50,7 +51,12 @@ export function extractAssistantPersistence(message: MessageLike): {
   const byId = new Map<string, unknown>();
   let anon = 0;
   for (const p of parts) {
-    if (p.type === "data-insight" || p.type === "data-error" || p.type === "data-refusal") {
+    if (
+      p.type === "data-insight" ||
+      p.type === "data-error" ||
+      p.type === "data-refusal" ||
+      p.type === "data-profile-card"
+    ) {
       byId.set(p.id ?? `#${anon++}`, p.data);
     }
   }
