@@ -31,7 +31,7 @@ export interface SearchnapplyClient {
   fetchPostingsPage(page: number, pageSize: number): Promise<PostingsPage>;
 }
 
-// Validated here, not via getEnv(), so ingestion stays decoupled from AWS/Bedrock creds (ISP).
+// Validated as its own slice, so ingestion stays decoupled from AWS/Bedrock creds (ISP).
 export const SearchnapplyEnvSchema = z.object({
   SEARCHNAPPLY_AUTH_URL: z.string().min(1),
   SEARCHNAPPLY_API_URL: z.string().min(1),

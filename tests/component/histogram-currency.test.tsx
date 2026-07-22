@@ -4,7 +4,7 @@ import { cleanup, render } from "@testing-library/react";
 import { HistogramChart } from "@/components/insight/charts/HistogramChart";
 
 // The salary histogram is the ONE surface that used to hardcode a `$`
-// (formatUsd) for the axis, the tooltip, and the median marker. A Berlin/EUR salary distribution set
+// for the axis, the tooltip, and the median marker. A Berlin/EUR salary distribution set
 // carries `meta.currency: "EUR"`; the source line + Table tab already disclose it, so the chart must too
 // (chart and source line must AGREE). This renders the real component with an EUR fixture and
 // asserts the money labels read `€`, never `$`. Recharts needs non-zero dimensions to render its <text>
