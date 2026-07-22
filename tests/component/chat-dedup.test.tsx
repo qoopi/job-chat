@@ -7,7 +7,7 @@ import type { DataInsight } from "@shared/insight";
 // Regression for the operator's live-walk duplicate-key error ("Encountered two children with the same
 // key" at MessageList, AssistantMessage key={m.id}). Root cause, verified at source: an existing
 // conversation is hydrated into `useChat` from the store (storeToUiMessages -> initialMessages), then a
-// follow-up send delivers + watches via the transport's `sendMessages` (mechanism a, 004 round 3). That
+// follow-up send delivers + watches via the transport's `sendMessages`. That
 // subscribe opens `.out` with no `lastEventId` cursor (the server-rendered page has none), so the server
 // replays the session's `.out` tail from the start - re-emitting the ALREADY-HYDRATED assistant turn
 // under its original id. The AI SDK's write then `pushMessage`s that replayed turn (its id != the
@@ -40,7 +40,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: 
 import { ChatClient } from "@/components/chat/ChatClient";
 
 const CONVERSATION_ID = "22222222-2222-4222-8222-222222222222";
-const ASSISTANT_ID = "EKzSTGN9VNktoFTr"; // the id the operator saw duplicated
+const ASSISTANT_ID = "EKzSTGN9VNktoFTr"; // a realistic SDK-shaped id
 
 const insight: DataInsight = {
   id: "card-x",
@@ -71,7 +71,7 @@ test("a follow-up that replays the hydrated tail renders the existing card exact
   // The follow-up's `sendMessages` subscribe replays the session `.out` tail from the start: the SAME
   // assistant turn (id = ASSISTANT_ID) that is already hydrated, plus a marker text so the test can await
   // the replay having been fully processed.
-  // The replayed card turn carries NO prose (018 strand 2: a card is the whole answer, model prose is
+  // The replayed card turn carries NO prose (a card is the whole answer - model prose is
   // suppressed), so a trailing text marker on it would not render. Instead the replay re-emits the card
   // with a DISTINCT verdict; reconcile replaces the hydrated turn in place, so waiting for that verdict
   // to appear confirms the replay was fully consumed - and the count then proves it landed exactly once.

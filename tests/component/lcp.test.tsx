@@ -11,7 +11,7 @@ import type { UIMessage } from "ai";
 import type { DataInsight } from "@shared/insight";
 import { setAuthDialogOpen } from "@/lib/layers";
 
-// AC-8/AC-9: the table Left Chat Part, driven through the REAL ChatClient (its lcpTarget state, the
+// The table Left Chat Part, driven through the REAL ChatClient (its lcpTarget state, the
 // dock, and the close paths are what is under test). The transport + server action are external
 // boundaries and mocked exactly as chat-client.test.tsx does; here no turn is sent, so they are inert.
 const reconnectMock = vi.fn(async () => null);
@@ -169,8 +169,8 @@ describe("table LCP close paths (AC-9)", () => {
     await openLcp(9);
     expect(document.querySelector(".lcp")).toBeTruthy();
 
-    // The dialog-open flag is the seam until 013's real auth dialog exists: with it forced true, the
-    // dialog is topmost and consumes Esc, so the LCP stays open (interaction-spec layer priority).
+    // With the dialog-open flag forced true, the dialog is topmost and consumes Esc, so the LCP stays
+    // open (interaction-spec layer priority).
     setAuthDialogOpen(true);
     pressEsc();
     expect(document.querySelector(".lcp")).toBeTruthy();
@@ -182,7 +182,7 @@ describe("table LCP close paths (AC-9)", () => {
   });
 });
 
-// refresh #2 s7: the account menu's "Your profile" opens the profile empty state in the LCP (docking the
+// The account menu's "Your profile" opens the profile empty state in the LCP (docking the
 // chat), and it closes on the LCP close paths just like a table.
 describe("profile LCP (refresh #2 s7)", () => {
   test("'Your profile' opens the profile empty state in the LCP; Esc closes it", () => {
@@ -248,8 +248,8 @@ describe("profile LCP (refresh #2 s7)", () => {
     expect(document.querySelector(".lcp")).toBeTruthy();
   });
 
-  // Audit (05-testing): the mutual-exclusion pair above only exercised profile-then-table. Ruling 3 (one
-  // panel, one at a time) must hold in the OTHER direction too - opening the profile while a table LCP is
+  // The mutual-exclusion pair above only exercised profile-then-table. One panel at a time
+  // must hold in the OTHER direction too - opening the profile while a table LCP is
   // already open must replace it, not stack a second panel.
   test("opening the profile replaces an open table LCP (reverse direction, one at a time)", () => {
     render(
@@ -275,8 +275,8 @@ describe("profile LCP (refresh #2 s7)", () => {
   });
 });
 
-// Audit (05-testing, ruling 4): "the account menu is a transient - Esc/outside-click closes the MENU
-// first when open (menu > LCP; dialog > menu)". Both the LCP's table view and the profile view dock the
+// The account menu is a transient - Esc/outside-click closes the MENU
+// first when open (menu > LCP; dialog > menu). Both the LCP's table view and the profile view dock the
 // canvas but the TitleBar (and its account menu) stay mounted throughout, so a user CAN have the menu open
 // above an open LCP. A single Esc must close only the topmost layer (the menu), leaving the LCP for a
 // second Esc - exactly like the dialog-above-LCP case already covered in auth-dialog.test.tsx.

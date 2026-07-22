@@ -1,8 +1,8 @@
 "use client";
 
-// refresh #2 s7: the account's profile in the Left Chat Part, opened from the account menu's "Your
-// profile". This is the DESIGNED empty state (prototype `lcpProfileEmpty`): a "No profile yet" heading,
-// a resume dropzone, and GitHub/LinkedIn fields. The resume-parse / profile backend is P2, so the
+// The account's profile in the Left Chat Part, opened from the account menu's "Your
+// profile". This is the DESIGNED empty state: a "No profile yet" heading,
+// a resume dropzone, and GitHub/LinkedIn fields. The resume-parse / profile backend is deferred, so the
 // dropzone is a quiet "coming soon" affordance (accepts no upload yet) and the fields are not persisted;
 // the menu item + this LCP view ship now, and it will fill in place once parsing lands.
 export function LcpProfile({ onClose }: { onClose: () => void }) {

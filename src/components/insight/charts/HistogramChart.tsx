@@ -16,7 +16,7 @@ import { CHART_HEIGHT, TOOLTIP_STYLE, axisTickStyle } from "./chart-style";
 // Salary histogram (salary_distribution: {bucket, count, median}). Bars are the bucket counts; the
 // amber dashed vertical marker sits at the nearest bucket to the median and carries the money label.
 // The money labels use the insight's REAL currency (meta.currency, threaded from InsightChart) so a
-// non-USD salary set never mislabels its axis/median with a "$" it is not in (018 review-fix S3); it
+// non-USD salary set never mislabels its axis/median with a "$" it is not in; it
 // defaults to USD so any caller without a currency is unchanged.
 export function HistogramChart({ series, currency = "USD" }: { series: DataPoint[]; currency?: string }) {
   const median = Number(series[0]?.median);

@@ -4,7 +4,7 @@ import { scoreCase } from "../evals/scorer";
 import { CHART_BEARING, EVAL_SET, type EvalCase } from "../evals/eval-set";
 import type { ModelMessage } from "../../trigger/parts";
 
-// AC-6 offline smoke for the eval harness (dev tooling - deliberately minimal; AC-7 is the real, live
+// Offline smoke for the eval harness (dev tooling - deliberately minimal; the live run is the real
 // gate). Two behaviours, both offline (no Bedrock): the runner REFUSES without JOBCHAT_EVAL=1, and its
 // deterministic scorer scores a scripted transcript exactly as expected. The eval SET itself sits outside
 // the vitest globs (tests/evals/), so this is the one place it is exercised in the suite.
@@ -57,16 +57,16 @@ describe("eval harness (offline smoke)", () => {
   });
 
   it("pins the eval set to 35 cases with 12 chart-bearing (the AC-4 sample)", () => {
-    // 018 strand 4/5: +4 follow-up/fragmentation/currency cases and +1 market-wide scope case, kept
-    // non-chart-bearing so the AC-4 chart sample stays at 12 (they exercise tool/mode/params, not chart).
+    // +4 follow-up/fragmentation/currency cases and +1 market-wide scope case, kept
+    // non-chart-bearing so the chart sample stays at 12 (they exercise tool/mode/params, not chart).
     expect(EVAL_SET).toHaveLength(35);
     expect(CHART_BEARING).toHaveLength(12);
-    // Every chart-bearing case is a query_postings case (the only path with a RAW agent pick, AC-4).
+    // Every chart-bearing case is a query_postings case (the only path with a RAW agent pick).
     expect(CHART_BEARING.every((c) => c.expect.tool === "query_postings")).toBe(true);
   });
 });
 
-// 027: the JOBCHAT_EVAL_IDS subset filter (fixes the dead env 022's testing flagged). A real id-subset
+// The JOBCHAT_EVAL_IDS subset filter (fixes the dead env earlier testing flagged). A real id-subset
 // filter so the spot-check the env name always promised actually works: match on case ids, report the
 // skipped count (no silent caps), unset = the full exam. Pure function, so covered offline.
 describe("selectEvalCases (JOBCHAT_EVAL_IDS subset filter)", () => {
@@ -84,7 +84,7 @@ describe("selectEvalCases (JOBCHAT_EVAL_IDS subset filter)", () => {
     expect(skipped).toBe(EVAL_SET.length - 2);
   });
 
-  // 05-testing audit (2026-07-21): a repeated id must select its case ONCE, not run it twice - and must
+  // A repeated id must select its case ONCE, not run it twice - and must
   // count as ONE skip toward "the rest", not deflate the skipped count by the duplicate.
   it("dedupes a repeated id: selects it once, skipped counts every OTHER case exactly once", () => {
     const { cases, skipped } = selectEvalCases(EVAL_SET, "Q1,Q1,C1");
@@ -111,7 +111,7 @@ describe("selectEvalCases (JOBCHAT_EVAL_IDS subset filter)", () => {
   });
 });
 
-// 018 review-fix R2: the eval's context-turn replay loop (runCase) had no offline coverage - its model
+// The eval's context-turn replay loop (runCase) had no offline coverage - its model
 // seam was hard-wired to Bedrock. The seam is now injectable, so a FAKE model drives a 2-turn case
 // (context Q1 -> scored Q2) with zero network. The point being proven: a follow-up inherits the prior
 // turn through the STORE (persistAssistantTurn -> buildModelHistory rebuild), not an SDK cross-turn replay.
@@ -151,13 +151,10 @@ describe("runCase context-turn replay (offline, fake model - 018 review-fix R2)"
   });
 });
 
-// Adversarial audit (05-testing, 2026-07-20): hand-built WRONG transcripts, checking that scoreCase
-// actually fails them rather than silently passing. Confirms the reported 90%/100% gates mean something
-// for tool identity + mode + raw chart pick, and pins two things that are informational-only by design
-// (params-subset, formatRules never gate toolModePass). The extra-tool case below asserts the STRICT rule
-// (010 review round): the tool check is an exact single-call match - the expected data tool called once,
-// with no other data tool - so the saved v1 Q5 double-call (share_split + query_postings) FAILS, not
-// passes (that leniency is now closed). See the Test Report + review-fixes doc for the full writeup.
+// Adversarial probes: hand-built WRONG transcripts, checking scoreCase actually FAILS them - so the
+// reported gates mean something for tool identity + mode + raw chart pick. Pins the STRICT tool rule
+// (exact single-call match: the expected data tool called once, no other data tool - a double-call
+// fails) and that params-subset + formatRules stay informational (never gate toolModePass).
 describe("scoreCase adversarial probes (is the reported gate strict enough?)", () => {
   it("right tool, but no insight rendered (mode mismatch) fails toolModePass - a correct tool never masks a mode miss", () => {
     const dataCase = EVAL_SET.find((c) => c.id === "Q1")!; // expect: mode=data, tool=salary_distribution
@@ -257,7 +254,7 @@ describe("scoreCase adversarial probes (is the reported gate strict enough?)", (
       text: "I can show hiring data. I can also show salary data. Just ask me a question.",
     });
     expect(tooLong.formatPass).toBe(false); // 3 sentences
-    expect(tooLong.toolModePass).toBe(true); // format never gates the AC-7 unit
+    expect(tooLong.toolModePass).toBe(true); // format never gates the tool+mode unit
 
     const bannedOpener = scoreCase(plain, {
       toolCalls: [],

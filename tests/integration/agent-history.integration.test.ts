@@ -6,7 +6,7 @@ import { buildInsight, type ModelMessage } from "../../trigger/parts";
 import { persistAssistantTurn } from "../../trigger/persistence";
 import { createChatRun } from "../../trigger/run";
 
-// 004 round 4 root-cause guard. In production every turn re-answered ALL prior questions: the model
+// Root-cause guard: in production every turn re-answered ALL prior questions - the model
 // input the SDK reconstructs across a continuation boot carried the prior USER messages but NOT their
 // ASSISTANT answers, so the model saw a pile of unanswered questions and answered them all again.
 //
@@ -135,12 +135,10 @@ describe.skipIf(!hasCreds)("agent history reconstruction against real Postgres",
     ]);
   });
 
-  // 05-testing audit gap fill (018 strand 2): the turn-3 test above proves role-alternation rebuild with
-  // SYNTHETIC assistant content ("a1"/"a2"); it never exercises a REAL card turn's persisted content. The
-  // Completion Report's deviation (1) states strand 2 persists the honest VERDICT (not empty content)
-  // specifically so history stays role-alternating for Bedrock - this drives that claim end to end: seed
-  // turn 1 as a genuine data-insight card via persistAssistantTurn (the exact site strand 2 changed), then
-  // rebuild for turn 2 and assert the assistant slot is the verdict (non-empty), never dropped.
+  // The turn-3 test proves alternation rebuild with SYNTHETIC assistant content; this drives a REAL
+  // card turn: seed turn 1 as a genuine data-insight card via persistAssistantTurn (the exact persist
+  // site), rebuild for turn 2, and assert the assistant slot is the non-empty VERDICT - never dropped,
+  // which would collapse into two consecutive user messages and break Bedrock's strict alternation.
   it("rebuilds a card turn's persisted VERDICT as the assistant slot, preserving alternation for turn 2", async () => {
     const userId = freshGuestId();
     await store.getOrCreateUser(userId);
@@ -157,7 +155,7 @@ describe.skipIf(!hasCreds)("agent history reconstruction against real Postgres",
         meta: { sampleN: 10, freshestAt: "2026-07-18 06:00:00" },
       },
     });
-    // The exact strand-2 persist site: a turn with fabricated-sounding prose alongside a card persists
+    // The persist site under test: a turn with fabricated-sounding prose alongside a card persists
     // the CODE-derived verdict, never the prose.
     const responseMessage = {
       role: "assistant",

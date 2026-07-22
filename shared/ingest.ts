@@ -29,7 +29,7 @@ export interface IngestResult {
  * Page the jobs-api and insert one JSONEachRow batch per page into `table`.
  * Idempotent by design: ReplacingMergeTree keyed (source, external_id) collapses
  * re-pulls. A mid-run page/insert failure propagates (the Trigger.dev run fails
- * and retries), leaving already-inserted batches intact (AC-2).
+ * and retries), leaving already-inserted batches intact.
  */
 export async function ingestPostings(deps: IngestDeps): Promise<IngestResult> {
   const table = deps.table ?? "postings";

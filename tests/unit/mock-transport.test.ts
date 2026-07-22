@@ -2,12 +2,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { MockChatTransport } from "../e2e/mock-transport";
 
-// AC-9 (stop keeps partial) depends entirely on the E2E mock transport honoring the abort signal: the
+// Stop-keeps-partial depends entirely on the E2E mock transport honoring the abort signal: the
 // "ai" package's consumeStream() just loops `reader.read()` until the stream itself closes/errors - it
 // never independently cancels the reader on abort (checked in node_modules/ai/dist/index.js: stop() only
 // calls `abortController.abort()`; the read loop has no signal listener of its own). So if this mock's
 // ReadableStream ignored the signal, clicking Stop would leave the composer disabled until the NEXT
-// chunk's delay elapsed regardless. The e2e spec (live-chat-loop.spec.ts AC-9) only proves this
+// chunk's delay elapsed regardless. The e2e spec (live-chat-loop) only proves this
 // indirectly, by racing Playwright's default 5s assertion timeout against a 10s hang chunk - this test
 // proves it directly and fast: read past the abort point and confirm the stream closes WITHOUT ever
 // enqueueing the chunk that was scheduled after it.
@@ -58,7 +58,7 @@ describe("MockChatTransport - honors the caller's AbortSignal (AC-9)", () => {
   });
 });
 
-// R1/R4: after the manual cursor threading is gone, the mock's reconnect models the SDK's persisted-
+// After the manual cursor threading is gone, the mock's reconnect models the SDK's persisted-
 // session behavior, hydrated at construction (mirroring the real transport's `sessions` option read from
 // sessionStorage) - a settled turn no-ops on reload (no replay), a still-streaming turn resumes.
 describe("MockChatTransport - reconnectToStream honors the persisted session (R1)", () => {

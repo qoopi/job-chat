@@ -5,13 +5,13 @@ import { storeToUiMessages } from "../../src/lib/chat-ui";
 import { classifyCardData } from "../../src/lib/chat-ui";
 import type { Message, Store } from "@shared/store";
 
-// R3 must-fix (022 review; master ruling 2026-07-21, binding, from I4): a successful regenerate
+// A successful regenerate
 // SUPERSEDES the persisted error row - exactly ONE assistant reply per user turn. The durable store
 // mirrors the SDK's trailing-assistant pop (ai.js:3977-3980 trims trailing assistant messages from the
 // accumulator until the tail is a user, then re-runs): on a regenerate the run gate deletes the trailing
 // assistant row(s) after the last user turn BEFORE the retry's answer persists. So a reload never renders
-// the stale error card above the retry's answer (AC-6), and a regenerate never duplicates a prior answer
-// (AC-8). The bug this pins: `[user, error-card]` + a successful regenerate used to end `[user, error,
+// the stale error card above the retry's answer, and a regenerate never duplicates a prior answer.
+// The bug this pins: `[user, error-card]` + a successful regenerate used to end `[user, error,
 // answer]` - two assistant rows, the error card resurfacing on resume.
 
 /**
@@ -123,7 +123,7 @@ describe("a successful regenerate supersedes the persisted error row (R3 must-fi
 
   it("Should_NotDuplicateAnswer_When_RegenerateOverSuccessfulAnswer (AC-8): the prior answer is superseded, not duplicated", async () => {
     // The sibling path: a regenerate over an already-successful answer must replace it, never append a
-    // second answer row (AC-8 "without duplicating any prior answer").
+    // second answer row ("without duplicating any prior answer").
     const { store, messages } = memoryStore([
       { role: "user", content: "Who is hiring the most?" },
       { role: "assistant", content: "Google leads with 4 of 10 postings." },

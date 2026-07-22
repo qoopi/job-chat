@@ -4,7 +4,7 @@ import type { PostingRow } from "@shared/postings";
 import { createWriterClient } from "@shared/clickhouse";
 import { createAnalytics, type Analytics } from "@shared/analytics";
 
-// AC-3 integration: two ingest snapshots stamped with different `ingested_at`, seeded into a private
+// Two ingest snapshots stamped with different `ingested_at`, seeded into a private
 // table. A current-state read (open-set predicate) counts ONLY the latest snapshot; a trend read keeps
 // the full history. Distinct external_ids per snapshot, so FINAL keeps all rows and the predicate - not
 // dedup - is what excludes the stale snapshot. Skipped without creds.

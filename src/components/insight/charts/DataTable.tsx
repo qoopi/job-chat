@@ -5,15 +5,15 @@ import type { DataPoint } from "@shared/insight";
 import { formatMoney } from "@/lib/insight-format";
 
 // The fifth primitive: a sortable data table (kind:"table", and the Table tab of any chart insight).
-// Header click cycles none -> desc -> asc (element-states board). No apply/save link cells (scope note).
+// Header click cycles none -> desc -> asc (element-states board). No apply/save link cells.
 type Dir = "none" | "desc" | "asc";
 
 function humanize(key: string): string {
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// `bucket` is the salary-histogram bucket floor (a numeric currency amount) - format it as money too
-// (018 strand 3). A composed time bucket is a date STRING, so it never reaches the numeric money branch.
+// `bucket` is the salary-histogram bucket floor (a numeric currency amount) - format it as money too.
+// A composed time bucket is a date STRING, so it never reaches the numeric money branch.
 function isMoneyKey(key: string): boolean {
   return /salary|median|pay|target|bucket/i.test(key);
 }

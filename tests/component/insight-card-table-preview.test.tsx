@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { DataInsight } from "@shared/insight";
 
-// AC-8 (preview slice) + Ruling 27 (2026-07-21): the >8-row preview->LCP rule applies to EVERY table
+// The >8-row preview->LCP rule applies to EVERY table
 // view - a table insight AND a chart card's Table tab. Over the 8-row threshold renders a 5-row preview
 // plus an "Open full table (N rows)" affordance; at/under the threshold renders every row inline with no
 // affordance. The Recharts subtree is stubbed - this test is about the table body, not the chart.
@@ -40,7 +40,7 @@ describe("InsightCard table preview (AC-8)", () => {
 
     const affordance = screen.getByRole("button", { name: "Open full table (9 rows)" });
     fireEvent.click(affordance);
-    // F13: the card opens the LCP by its stable message + part id, not a closure.
+    // The card opens the LCP by its stable message + part id, not a closure.
     expect(onOpenLcp).toHaveBeenCalledWith("m1", "p1");
   });
 

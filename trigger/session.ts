@@ -5,8 +5,8 @@ import { checkMessageGuards, MAX_INPUT_CHARS, type CallerKind } from "./guard";
 
 // The session core: the guard + landing-handoff logic the "use server" actions wrap. Injectable
 // (store, guards, mintToken, now) so it is testable against a real store without the
-// Next.js request context. Business outcomes are TYPED refusals, never thrown (engineering.md
-// fail-fast-typed) - the UI branches on `reason`. Untrusted input is bounded and the caller's
+// Next.js request context. Business outcomes are TYPED refusals, never thrown - the UI branches
+// on `reason`. Untrusted input is bounded and the caller's
 // ownership is confirmed BEFORE any persist or trigger; the cap/budget are the early UX refusal
 // (the hard backstop lives in the agent, trigger/chat.ts, on the write-token's real path).
 
@@ -47,7 +47,7 @@ export type SendResult = SendOk | { ok: false; reason: ActionRefusalReason };
 
 export type MintResult = { ok: true; token: string } | { ok: false; reason: "not_found" };
 
-/** A delete's outcome (AC-21): the row is gone, or the caller does not own it (treated as not_found). */
+/** A delete's outcome: the row is gone, or the caller does not own it (treated as not_found). */
 export type DeleteResult = { ok: true } | { ok: false; reason: "not_found" };
 
 // Input bounds at the trust boundary (before any store write or trigger): a bounded question/text
@@ -69,7 +69,7 @@ export function chatTokenScopes(conversationId: string) {
 
 export interface SessionService {
   /**
-   * Landing handoff (AC-11): validate + guard + create conversation + persist user message #1, then
+   * Landing handoff: validate + guard + create conversation + persist user message #1, then
    * return the conversation id AND the persisted message's id. It does NOT trigger a run - turn 1 rides
    * the client's public send path, where the transport lazily starts the session on the first
    * `sendMessage` and streams it live (same path as every follow-up). The cap is picked by the caller's
@@ -77,7 +77,7 @@ export interface SessionService {
    */
   startConversation(userId: string, question: string, kind?: CallerKind): Promise<SessionResult>;
   /**
-   * Follow-up send GATE (mechanism a): bound input, confirm the caller owns the conversation, and apply
+   * Follow-up send GATE: bound input, confirm the caller owns the conversation, and apply
    * the cap/budget early refusal (cap by Identity `kind`). It does NOT persist, trigger, or mint - the
    * client transport's `sendMessages` delivers the turn to `.in` (triggering the run) and subscribes with
    * wait (the only SDK path that streams a freshly-triggered follow-up live), and the agent's `run()`
@@ -87,7 +87,7 @@ export interface SessionService {
   /** Mint a session-scoped token, but only for the caller's own conversation (defense in depth). */
   mintChatToken(conversationId: string, callerUserId: string): Promise<MintResult>;
   /**
-   * Delete a conversation (AC-21), but only the caller's OWN (same ownership check as sendMessage /
+   * Delete a conversation, but only the caller's OWN (same ownership check as sendMessage /
    * mintChatToken - a non-owner, guest or account, reads as not_found so no one deletes another's
    * thread). Messages cascade in the store.
    */
@@ -171,7 +171,7 @@ export function createSessionService(deps: SessionDeps): SessionService {
       const refusal = await checkMessageGuards({ store, guards, now }, callerUserId, kind);
       if (refusal) return { ok: false, reason: refusal };
 
-      // Mechanism (a): a pure gate. Do NOT persist, trigger, or mint here. The client transport's
+      // A pure gate. Do NOT persist, trigger, or mint here. The client transport's
       // `sendMessages` delivers this turn to `.in` (triggering the run) AND subscribes with wait - the
       // only SDK path that streams a freshly-triggered follow-up live - and refreshes its own token via
       // the `accessToken` callback. `run()` persists the user turn before the backstop counts it

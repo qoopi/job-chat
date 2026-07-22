@@ -1,7 +1,7 @@
-// The AC-11 expected-values case table: the 7 launch questions mapped to the analytics tool, the
+// The expected-values case table: the 7 launch questions mapped to the analytics tool, the
 // designated visual (Q5 pinned to donut), and the expected verdict value/label computed by hand from
-// the fixture (tests/fixtures/postings.fixture.ts). Produced by task 003; consumed by task 004's
-// agent test, which asserts the agent picks this tool + chartType and lands this verdict number.
+// the fixture (tests/fixtures/postings.fixture.ts). Consumed by the agent tests, which assert
+// the agent picks this tool + chartType and lands this verdict number.
 // `chartType` is the design visual: "bars" covers both sorted (Q4) and grouped (Q2) bars.
 
 export interface LaunchQuestionCase {

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// AC-18 no-FOUC: <html data-theme> must come from the server render of the `theme` cookie, not a
+// No-FOUC: <html data-theme> must come from the server render of the `theme` cookie, not a
 // client-side toggle after hydration. Proof: disable JS entirely in the browser context - with no
 // script able to run, whatever value lands on <html> can only have come from the HTML the server sent.
 test.describe("theme cookie - server-rendered, no flash of unstyled/wrong theme", () => {

@@ -4,7 +4,7 @@ import { cleanup, render } from "@testing-library/react";
 import type { UIMessage } from "ai";
 import type { DataInsight } from "@shared/insight";
 
-// P2 render-count probe (companion to insight-card-memo): a SETTLED assistant turn must NOT re-render
+// Render-count probe (companion to insight-card-memo): a SETTLED assistant turn must NOT re-render
 // when a later turn streams in. `useChat` fires a messages-changed callback per data-* delta and
 // MessageList re-maps the whole thread each time; without memoizing the per-message component, every
 // prior InsightCard (Recharts, heavy) re-renders on every streamed chunk. We stub InsightCard with a

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { generateMessageId } from "../../trigger/chat";
 
-// Conformance correction 2: responseMessage.id defaults to the AI SDK's 16-char generateId, NOT a
+// responseMessage.id defaults to the AI SDK's 16-char generateId, NOT a
 // uuid. The agent overrides it via uiMessageStreamOptions.generateMessageId so assistant-row ids fit
 // the existing uuid messages.id column (no migration). This pins that the wired generator yields
 // uuid-shaped ids.

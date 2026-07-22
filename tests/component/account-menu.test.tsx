@@ -11,7 +11,7 @@ import { AccountMenu } from "@/components/chat/AccountMenu";
 import { TitleBar } from "@/components/chat/TitleBar";
 import { setAuthDialogOpen } from "@/lib/layers";
 
-// refresh #2 s4: the signed-in auth affordance lives in the title bar - an account chip that opens a
+// The signed-in auth affordance lives in the title bar - an account chip that opens a
 // menu (email header, Your profile, Dark-mode toggle, Sign out). The guest sees an obvious Sign in
 // button instead. The dark-mode toggle persists via the `theme` cookie (works guest + signed-in).
 const pressEsc = () =>

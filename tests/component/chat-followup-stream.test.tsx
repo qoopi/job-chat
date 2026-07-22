@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { UIMessage, UIMessageChunk } from "ai";
 
-// Reproduces the operator's live-walk #2/#3 (routed to 004): a follow-up in an ONGOING chat is
+// Reproduces the operator's live-walk report: a follow-up in an ONGOING chat is
 // DELIVERED but never STREAMS live. Root, verified in the SDK source (dist/esm/v3/chat.js):
 // `reconnectToStream` (what `useChat.resumeStream()` drives) hardcodes `peekSettled:true` (line ~556) -
 // the reload-resume shortcut. Attaching to a run triggered milliseconds earlier, it re-reads the

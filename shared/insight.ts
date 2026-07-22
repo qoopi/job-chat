@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // The `data-insight` part: the single payload the agent streams (writer), the web renders
-// (renderer), and the store persists (AC-13 resume source). One part type with two kinds - a chart
+// (renderer), and the store persists (the resume source). One part type with two kinds - a chart
 // (one of four primitives + a series) or a table (rows). Modeled as a discriminated union on `kind`
 // so the invalid states (a chart without a chartType, a table with a series) cannot be represented;
 // the skeleton state is the ABSENCE of the part, not a variant here.
@@ -34,10 +34,10 @@ const MetaSchema = z
     sampleN: z.number(),
     updatedAt: z.string(), // data freshness (max ingested_at), CH text form
     // Present (true) only on a current-state read (open-set predicate applied) - the source line then
-    // reads "N open postings" (AC-3). OPTIONAL so every P1-persisted payload stays valid under strict;
+    // reads "N open postings". OPTIONAL so every persisted payload stays valid under strict;
     // absent = full history. Never default-inject it.
     openSet: z.boolean().optional(),
-    // The currency a salary aggregate was filtered to (018 strand 3) - the source line discloses the
+    // The currency a salary aggregate was filtered to - the source line discloses the
     // base and the money formatter uses it. OPTIONAL (only salary insights carry it); never injected.
     currency: z.string().optional(),
   })

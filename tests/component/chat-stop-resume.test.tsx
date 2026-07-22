@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import type { UIMessage, UIMessageChunk } from "ai";
 
-// R1 Stop rider (conformance correction 6): after a RESUMED mount, `useChat.stop()` alone does NOT
+// After a RESUMED mount, `useChat.stop()` alone does NOT
 // reach the backend - the AI SDK does not thread an abort through `reconnectToStream`, so Bedrock keeps
 // generating. Stop must pair `transport.stopGeneration(chatId)` (posts {kind:"stop"} on `.in`) with the
 // AI SDK stop. This drives the real `useChat` down the resume path (a persisted mid-stream session ->

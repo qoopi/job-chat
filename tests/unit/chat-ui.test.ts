@@ -13,7 +13,7 @@ import {
 } from "@/lib/chat-ui";
 
 // The client's reading of a chat turn: classify a card payload (live part or resumed store payload)
-// and hydrate persisted messages into the `useChat` initial shape. Both are the AC-13 resume path and
+// and hydrate persisted messages into the `useChat` initial shape. Both are the resume path and
 // the live-stream reconciliation path, so they are locked with a unit test.
 
 const insight: DataInsight = {
@@ -61,7 +61,7 @@ describe("classifyCardData", () => {
   });
 });
 
-// AC-8: the LCP target is an identity `{ messageId, partId }` (epic-pinned); the panel body is
+// The LCP target is an identity `{ messageId, partId }`; the panel body is
 // re-resolved from the (immutable) messages so a resumed conversation shows the same LCP. The resolver
 // walks to the message, matches the data part by the SAME id convention MessageList keys its cards on,
 // and returns the insight (null for a missing message/part or a non-insight part).
@@ -120,7 +120,7 @@ describe("messageText", () => {
   });
 
   it("preserves the sentence boundary between adjacent text parts (live-walk #4b)", () => {
-    // The operator saw two prose parts glued: "...across the market.The market has seen...".
+    // Regression: two prose parts glued: "...across the market.The market has seen...".
     expect(
       messageText({
         parts: [

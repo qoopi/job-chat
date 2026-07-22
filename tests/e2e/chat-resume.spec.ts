@@ -4,7 +4,7 @@ import type { ScriptStep } from "./chat-mock";
 const CHAT_ID = "00000000-0000-4000-8000-000000000000";
 const CHAT = `/chat/${CHAT_ID}`;
 
-// AC-13: a returning/reloading guest gets their conversation restored from the message store - every
+// A returning/reloading guest gets their conversation restored from the message store - every
 // insight card rendered (verdict, chart, table, SQL intact) with NO re-run of analytics. In E2E the
 // resume source is the fixture thread (no Postgres); the invariant under test is that the cards come
 // from server-rendered stored state, and nothing hits ClickHouse to redraw them.
@@ -31,7 +31,7 @@ test("Should_RestoreCardsFromStore_When_GuestReturns", async ({ page }) => {
   expect(analyticsCalls, `unexpected analytics calls:\n${analyticsCalls.join("\n")}`).toEqual([]);
 });
 
-// AC-1: reloading a SETTLED conversation renders each message and each card EXACTLY once. R1's gate: a
+// Reloading a SETTLED conversation renders each message and each card EXACTLY once. A
 // settled persisted session (isStreaming:false) makes `resume` false, so useChat never calls
 // `reconnectToStream` - nothing replays the already-hydrated turns. This seeds that settled session AND
 // arms a distinctive `__CHAT_REPLAY__` tail, then asserts the tail NEVER streams: that is what bites the
@@ -78,9 +78,9 @@ test("Should_RenderEachMessageOnce_When_ReloadedSettled", async ({ page }) => {
   }
 });
 
-// AC-3: reloading MID-STREAM resumes the in-flight turn and completes it without duplicating any
+// Reloading MID-STREAM resumes the in-flight turn and completes it without duplicating any
 // earlier content. The shared FIXTURE_ID thread always ends settled (reused verbatim by other specs), so
-// this uses the second, additive fixture id (src/lib/chat-fixtures.ts MIDSTREAM_FIXTURE_ID) whose thread
+// this uses the second, additive fixture id (tests/e2e/chat-fixtures.ts MIDSTREAM_FIXTURE_ID) whose thread
 // ends in a lone user question with no assistant reply yet - the state a genuine mid-stream reload
 // leaves behind. `resumeStream` seeds from that last message. The persisted session is seeded straight
 // into sessionStorage via addInitScript (exactly what the real transport's `onSessionChange` would have
@@ -125,8 +125,8 @@ test("Should_ResumeStreamWithoutDuplicating_When_ReloadedMidStream", async ({ pa
   await expect(page.locator(".bubble.user", { hasText: "And remote roles?" })).toHaveCount(1);
 });
 
-// AC-2: the first follow-up after a reload streams ONLY the new turn - no earlier turn is re-rendered,
-// and the new answer appears exactly once. After R1/R2 the transport owns the cursor, so `sendMessages`
+// The first follow-up after a reload streams ONLY the new turn - no earlier turn is re-rendered,
+// and the new answer appears exactly once. The transport owns the cursor, so `sendMessages`
 // subscribes from the right point and the mock never prepends a prior tail.
 test("Should_StreamOnlyNewTurn_When_FollowUpAfterReload", async ({ page }) => {
   const newAnswer: ScriptStep[] = [

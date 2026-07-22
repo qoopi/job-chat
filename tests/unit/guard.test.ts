@@ -2,13 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { Store } from "@shared/store";
 import { checkConversationGuards, checkMessageGuards } from "../../trigger/guard";
 
-// Cap-by-kind selection (AC-13), unit-tested with a fake store (no DB) - this is pure selection logic
-// over GuardConfig + CallerKind, so a real Postgres round trip buys nothing. The dev made `kind`
-// default to "guest" and `signedInCap` optional as a fail-safe (review note in 012's Completion
-// Report); these tests prove the fallback direction only ever DEGRADES (a signed-in caller reading
-// the lower guest cap - a safe annoyance) and never ELEVATES (a guest reading the higher signed-in
-// cap - a cap bypass). Both guard-layer entry points are covered: the action layer's `kind` param
-// (checkMessageGuards) and the run() backstop's owner-derived kind (checkConversationGuards).
+// Cap-by-kind selection, unit-tested with a fake store (pure selection logic - a real Postgres round
+// trip buys nothing). `kind` defaults to "guest" and `signedInCap` is optional as a fail-safe; these
+// prove the fallback direction only ever DEGRADES (a signed-in caller reading the lower guest cap -
+// a safe annoyance) and never ELEVATES (a guest reading the higher signed-in cap - a cap bypass).
+// Both guard-layer entry points are covered: the action layer's `kind` param (checkMessageGuards) and
+// the run() backstop's owner-derived kind (checkConversationGuards).
 
 const now = () => new Date();
 

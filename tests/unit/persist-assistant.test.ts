@@ -3,7 +3,7 @@ import type { Message, Store } from "@shared/store";
 import { persistAssistantTurn } from "../../trigger/persistence";
 import { buildInsight } from "../../trigger/parts";
 
-// AC-6/7 (R3): a turn that fails is a TURN - it persists its assistant row with the error card, so a
+// A turn that fails is a TURN - it persists its assistant row with the error card, so a
 // reload renders the card with Retry rather than a bare unanswered question. The load-bearing correction
 // (chat-agent conformance #3): an errored turn fires onTurnComplete with `error` set and the response
 // message UNDEFINED-or-partial, so persistence must branch on `error`, not bail on a missing response.

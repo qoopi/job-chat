@@ -25,9 +25,9 @@ import {
 // The agent's tool catalog: one tool per question shape, each a thin wrapper over analytics.runQuery
 // (the ONLY path to ClickHouse). On call a tool emits the loading skeleton, runs the parameterized
 // query, emits the filled data-insight part (same id -> the UI reconciles in place), and hands the
-// model a compact view. A failure is caught and taxonomized as a `system` error part (AC-10) rather
-// than thrown, so the agent keeps control. There is NO scope escape-hatch tool: the 2026-07-21 vision
-// refinement retired report_unanswerable - the agent answers anything in plain prose then steers back
+// model a compact view. A failure is caught and taxonomized as a `system` error part rather
+// than thrown, so the agent keeps control. There is NO scope escape-hatch tool: report_unanswerable
+// is retired - the agent answers anything in plain prose then steers back
 // to jobs (prompt behavior), so the red error card is reserved for genuine SYSTEM failures.
 
 export const CATALOG_TOOL_NAMES = [
@@ -90,7 +90,7 @@ function catalogTool(name: TemplateName, deps: CatalogDeps) {
         deps.emit({ type: "data-insight", id, data: insight });
         return toModelOutput(insight);
       } catch (err) {
-        // Never leak the raw error to the model or the user (AC-10) - tag it `system` and move on.
+        // Never leak the raw error to the model or the user - tag it `system` and move on.
         // But DO log it server-side (Trigger.dev captures console.error) so a prod failure is not
         // invisible when the user only ever sees the taxonomized card.
         console.error(`[catalog:${name}] query failed`, err);
@@ -101,7 +101,7 @@ function catalogTool(name: TemplateName, deps: CatalogDeps) {
   });
 }
 
-// The seventh tool: query_postings composes a whitelisted aggregate (008's buildComposedSql) for any
+// The seventh tool: query_postings composes a whitelisted aggregate (buildComposedSql) for any
 // question the six fixed templates do not fit, and lets the agent pick the chart type behind the
 // deterministic chartTypeForShape fallback. Its own parallel parts path - it is NOT a TemplateName.
 const COMPOSED_DESCRIPTION =
@@ -112,7 +112,7 @@ const COMPOSED_DESCRIPTION =
   "employment_type, location_kind, days, min_salary, max_salary), and choose a chartType. Use for questions like 'top companies in the US', " +
   "'median salary by experience level in Berlin', or 'which roles are hiring most'.";
 
-// The composed tool input: the shared strict composed schema (008) plus the agent's chartType pick.
+// The composed tool input: the shared strict composed schema plus the agent's chartType pick.
 const ComposedToolInput = ComposedQueryParams.extend({
   chartType: ChartTypeSchema.or(z.literal("table")),
 });
@@ -133,7 +133,7 @@ function composedTool(deps: CatalogDeps) {
       // place under the same id once the served (shape-fit) type is known from the actual rows.
       deps.emit({ type: "data-insight", id, data: buildComposedSkeleton(id, rawPick) });
       try {
-        // Re-validate + apply the schema defaults (dimensions/limit), then run the 008 composed path (the
+        // Re-validate + apply the schema defaults (dimensions/limit), then run the composed path (the
         // ONLY route to ClickHouse for query_postings). The composed schema is strict, so chartType was
         // stripped above; runComposedQuery re-parses too (idempotent).
         const params = ComposedQueryParams.parse(queryParams);
@@ -142,15 +142,15 @@ function composedTool(deps: CatalogDeps) {
           deps.emit(emptyPart(id));
           return { ...emptyModelOutput("query_postings"), rawChartType: rawPick };
         }
-        // Pass the slice sum + sample so a donut is served only for a TRUE whole (018 strand 3).
+        // Pass the slice sum + sample so a donut is served only for a TRUE whole.
         const served = chartTypeForShape(params, rawPick, result.rows.length, {
           sliceSum: sumCount(result.rows),
           sampleN: result.meta.sampleN,
         });
         const insight = buildComposedInsight({ id, params, chartType: served, result });
         deps.emit({ type: "data-insight", id, data: insight });
-        // Record the RAW chartType pick on the tool result: AC-4 scores the pick BEFORE any fallback (the
-        // 010 harness reads it here); the served chart may differ where the fallback corrected an unfit pick.
+        // Record the RAW chartType pick on the tool result: the eval harness scores the pick BEFORE any
+        // fallback (it reads it here); the served chart may differ where the fallback corrected an unfit pick.
         return { ...toModelOutput(insight), rawChartType: rawPick };
       } catch (err) {
         console.error(`[catalog:query_postings] query failed`, err);

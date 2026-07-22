@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-// 027 review-fix (fixtures seam) - symmetric with chat-transport.test.ts. The chat shell
+// The fixtures seam, symmetric with chat-transport.test.ts. The chat shell
 // (chat/[id]/page.tsx) statically imports `e2eFixtureThread` from the production stub
 // `src/lib/e2e-fixtures.ts`, whose body throws unconditionally ("e2eFixtureThread is available only in an
 // E2E build"). The stub is safe only because page.tsx calls it behind the `e2e` flag (isE2E(), always

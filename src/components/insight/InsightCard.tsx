@@ -13,10 +13,9 @@ import { InsightChart } from "./charts/InsightChart";
 import { DataTable } from "./charts/DataTable";
 import { CodeBlock } from "./CodeBlock";
 
-// The hero component (AC-4/AC-6/AC-6b): verdict with the number in <b>, Chart|Table tabs, one visual,
-// follow-up chips, and a source line whose "Show query" reveals the executed SQL. Fed a DataInsight
-// (shared/insight.ts) so 006 swaps the data source, not this component. Chips/tabs are interactive but
-// chip *sending* is inert here - 006 wires it.
+// The hero component: verdict with the number in <b>, Chart|Table tabs, one visual, follow-up chips,
+// and a source line whose "Show query" reveals the executed SQL. Fed a DataInsight (shared/insight.ts)
+// so the data source can swap without touching this component.
 type Tab = "chart" | "table";
 
 function Verdict({ text }: { text: string }) {
@@ -44,7 +43,7 @@ export function InsightCard({
   insight: DataInsight;
   usedFollowups?: string[];
   onFollowup?: (text: string) => void;
-  /** AC-8: open this card's full table in the LCP, keyed by its STABLE message + part id (F13). The
+  /** Open this card's full table in the LCP, keyed by its STABLE message + part id. The
    *  caller passes the ids, not a fresh closure per render, so the chart-subtree memo stays stable
    *  without a ref hack. Fired from the over-threshold preview affordance and the capped bars "+ N more". */
   onOpenLcp?: (messageId: string, partId: string) => void;
@@ -55,14 +54,14 @@ export function InsightCard({
   pending?: boolean;
 }) {
   const isChart = insight.kind === "chart";
-  // AC-18: a single-scalar answer renders as the verdict sentence alone - no one-cell table body, no
+  // A single-scalar answer renders as the verdict sentence alone - no one-cell table body, no
   // Chart|Table tabs. Chips and Show query stay (handled in the foot / body below).
   const scalar = isSingleScalar(insight);
   const [tab, setTab] = useState<Tab>(isChart ? "chart" : "table");
   const [sqlOpen, setSqlOpen] = useState(false);
 
   const rows = isChart ? insight.series : insight.rows;
-  // AC-8 + Ruling 27: any table VIEW over the row threshold renders as a 5-row preview + an "Open full
+  // Any table VIEW over the row threshold renders as a 5-row preview + an "Open full
   // table" affordance that opens the full body in the LCP - a table insight AND a chart card's Table tab
   // (one rule for every table view). A chart's Chart tab is unaffected (it renders the chart, not rows).
   const previewTable = tab === "table" && tablePlacement(rows) === "lcp";
@@ -70,13 +69,13 @@ export function InsightCard({
   // A real answer always has sampleN > 0; this is defensive - an empty result now renders no card at all.
   const showSource = insight.meta.sampleN > 0;
   const rel = freshnessLabel(insight.meta.updatedAt);
-  // refresh #2 s3-consistency: when the chart caps its bars at the top N, the source line discloses
+  // When the chart caps its bars at the top N, the source line discloses
   // "showing top N" so the visible slice never poses as the whole market (the real total, sampleN, is
   // still shown alongside). Only on the chart view - the Table tab shows every row (preview -> LCP).
   const topN = barsChartCapsAt(insight);
   const showTopN = isChart && tab === "chart" && topN !== null;
 
-  // F13: the caller passes stable ids, so `openTable` is stable on `[onOpenLcp, messageId, partId]` (all
+  // The caller passes stable ids, so `openTable` is stable on `[onOpenLcp, messageId, partId]` (all
   // ref-stable across a turn) - the chartEl memo below can depend on it without recomputing the Recharts
   // subtree at each turn boundary, and no ref indirection is needed. Fires only from user events.
   const openTable = useCallback(() => {
@@ -190,11 +189,11 @@ export function InsightCard({
             {insight.meta.sampleN.toLocaleString()}{" "}
             {insight.meta.openSet ? "open postings" : "postings"}
             {/* Salary aggregates are filtered to one currency; disclose the base so a mixed-currency
-               corpus never reads as if the median spanned everything (018 strand 3). */}
+               corpus never reads as if the median spanned everything. */}
             {insight.meta.currency
               ? ` · salaries in ${insight.meta.currency}`
               : ""}
-            {/* refresh #2 s3-consistency: the chart is a top-N slice - say so beside the real total. */}
+            {/* the chart is a top-N slice - say so beside the real total. */}
             {showTopN ? ` · showing top ${topN}` : ""}
             {/* freshness is Date.now()-relative, so a server/client render straddling a minute boundary
                would mismatch on hydration - suppress the (benign) warning on just this text. */}

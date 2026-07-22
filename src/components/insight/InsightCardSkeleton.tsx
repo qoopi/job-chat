@@ -1,5 +1,5 @@
-// The streaming state (AC-8): verdict shimmers and the chart block draws as data arrives - never a
-// spinner-only state. Same structure as the filled card so it reconciles in place. Built here for 006.
+// The streaming state: verdict shimmers and the chart block draws as data arrives - never a
+// spinner-only state. Same structure as the filled card so it reconciles in place.
 export function InsightCardSkeleton() {
   return (
     <div className="insight">

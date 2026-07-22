@@ -9,7 +9,7 @@ import {
 import { auth as authServer } from "@/lib/auth";
 import { GUEST_COOKIE } from "@/lib/guest-cookie";
 
-// Server-only Postgres access for the chat page's resume render (AC-13). A lazy singleton pool (no
+// Server-only Postgres access for the chat page's resume render. A lazy singleton pool (no
 // connection until first query, so the build passes with no .env), mirroring the actions layer. Kept
 // out of "use server" so a Server Component can await it directly during render; `server-only` makes a
 // stray client import a build error.
@@ -30,7 +30,7 @@ export type Viewer = {
   ownerIds: string[];
   accountUserId: string | null;
   accountName: string | null;
-  /** The signed-in email, for the account-menu header (refresh #2 s4); null for a guest. */
+  /** The signed-in email, for the account-menu header; null for a guest. */
   accountEmail: string | null;
 };
 
@@ -40,7 +40,7 @@ export function loadConversation(conversationId: string) {
 }
 
 /**
- * Resolve the caller for the resume render (ruling 2): the guest cookie plus any verified Better Auth
+ * Resolve the caller for the resume render: the guest cookie plus any verified Better Auth
  * session mapped to its chat-user row. Read-only - adoption never runs during render. A signed-in
  * account's own conversation (its `user_id` matches `accountUserId`) hydrates on any device; a
  * non-owner falls through to an empty thread (fail-closed). Auth misconfig / no session degrades to
@@ -75,7 +75,7 @@ export async function resolveViewer(): Promise<Viewer> {
   return { signedIn, ownerIds, accountUserId, accountName, accountEmail };
 }
 
-/** AC-12 (initial SSR list): the account's conversations, newest first, for the sidebar history. */
+/** The account's conversations, newest first, for the sidebar history. */
 export function listOwnerConversations(
   accountUserId: string,
 ): Promise<ConversationSummary[]> {

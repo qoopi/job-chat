@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { DataInsight } from "@shared/insight";
 
-// P2 render-count probe: toggling "Show query" flips only sqlOpen, so the Recharts subtree must NOT
+// Render-count probe: toggling "Show query" flips only sqlOpen, so the Recharts subtree must NOT
 // re-render. We stub InsightChart with a render counter; InsightCard memoizes the chart element keyed
 // on the insight, so React reuses the same element and bails out of re-rendering it. Without that
 // memo the chart element is recreated on every card render and this counter would climb past 1.
@@ -47,7 +47,7 @@ test("Should_NotReRenderChartSubtree_When_ShowQueryToggled", () => {
   expect(probe.chartRenders).toBe(1);
 });
 
-// F13 regression guard: MessageList hands InsightCard a STABLE `onOpenLcp` plus stable message/part
+// Regression guard: MessageList hands InsightCard a STABLE `onOpenLcp` plus stable message/part
 // ids and flips `pending` at each turn boundary, so a SETTLED card re-renders whenever a later turn
 // starts/ends. The chart-subtree memo must survive that: because the open-table callback is now stable
 // on `[onOpenLcp, messageId, partId]` (all ref-stable across a turn), no ref hack is needed and the

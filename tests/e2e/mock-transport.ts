@@ -48,7 +48,7 @@ function replay(script: ScriptStep[], signal: AbortSignal | undefined): Readable
   return new ReadableStream<UIMessageChunk>({
     async start(controller) {
       for (const step of script) {
-        if (signal?.aborted) break; // stop() aborts: leave the partial answer already enqueued (AC-9)
+        if (signal?.aborted) break; // stop() aborts: leave the partial answer already enqueued
         if (step.delayMs) await abortableSleep(step.delayMs, signal);
         if (signal?.aborted) break;
         controller.enqueue(step.chunk);
@@ -82,7 +82,7 @@ export class MockChatTransport implements ChatTransport<UIMessage> {
   sendMessages = async (
     options: { abortSignal?: AbortSignal; chatId?: string },
   ): Promise<ReadableStream<UIMessageChunk>> => {
-    // The transport owns the `.out` cursor internally now (R1/F1), so a follow-up subscribes from the
+    // The transport owns the `.out` cursor internally now, so a follow-up subscribes from the
     // right point with no app-level threading: the mock just streams this turn's scripted chunks.
     return replay(this.next(), options.abortSignal);
   };

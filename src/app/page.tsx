@@ -6,9 +6,9 @@ import { isE2E } from "@/lib/e2e";
 import { listOwnerConversations, resolveViewer } from "@/lib/server-store";
 
 // Landing (mock 4b) - product in one shell-colored screen. The ask box + chips (LandingComposer) submit
-// the first message and hand off to the chat with the stream already attached (AC-3). AC-19: credit
-// links live here - the hackathon credit in the header, GitHub + searchnapply in the footer.
-// refresh #2 s10: the header is session-aware - the session is read server-side (resolveViewer) and seeds
+// the first message and hand off to the chat with the stream already attached. Credit
+// links live here: the hackathon credit in the header, GitHub + searchnapply in the footer.
+// The header is session-aware - the session is read server-side (resolveViewer) and seeds
 // LandingSignIn (signed-in shows "Open your chats" -> the most recent conversation + the account chip/menu;
 // guest shows Sign in), and a signed-in visitor gets a "Welcome back" sub-line. Skipped under E2E (no
 // Postgres/auth session there), where the landing is always the guest surface.

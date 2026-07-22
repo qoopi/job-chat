@@ -5,7 +5,7 @@ import {
   writePersistedSession,
 } from "@/lib/chat-session-store";
 
-// R1: this module is imported into client components that ALSO render on the server, where `window` is
+// This module is imported into client components that ALSO render on the server, where `window` is
 // undefined - every accessor must no-op / return a safe default there instead of throwing, or a chat
 // page render would crash on the server (the module's own SSR-guard comment; task requirement 1). This
 // file runs in vitest's DEFAULT "node" environment (no jsdom docblock), so `window` is genuinely absent

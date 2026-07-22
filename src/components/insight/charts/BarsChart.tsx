@@ -29,7 +29,7 @@ import {
 //  - one measure  -> sorted horizontal bars (top_companies, salary_compare): the leader accent-filled,
 //    the rest neutral, value labels at the bar end.
 //  - many measures -> grouped vertical bars: one group per row, one accent/amber bar per measure.
-// refresh #2 s2 (single-measure branch): cap the visible bars at BARS_CAP, truncate long category labels
+// Single-measure branch: cap the visible bars at BARS_CAP, truncate long category labels
 // so they never smear, keep the FULL label in the tooltip, and offer "+ N more" into the LCP table.
 export function BarsChart({
   series,

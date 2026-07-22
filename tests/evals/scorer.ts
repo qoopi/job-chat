@@ -7,8 +7,8 @@ import type { EvalCase, EvalExpect, EvalMode } from "./eval-set";
 import type { Observed } from "./runner";
 
 // The pure, deterministic scorer: it judges the agent's CHOICES (tool, mode, raw chart pick, params,
-// format, scope) against a case's pinned expectations, and aggregates them into the AC-4/AC-7 gates.
-// Verbatim from the pre-relocation evals/run.ts (no timestamps, fixed order - reproducible).
+// format, scope) against a case's pinned expectations, and aggregates them into the pass gates.
+// No timestamps, fixed order - reproducible.
 
 export interface ScoredCase {
   id: string;
@@ -17,9 +17,9 @@ export interface ScoredCase {
   rawChartType?: string;
   toolPass: boolean;
   modePass: boolean;
-  toolModePass: boolean; // the AC-7 unit
+  toolModePass: boolean; // the tool+mode unit
   chartBearing: boolean;
-  chartPass?: boolean; // chart-bearing cases only (AC-4)
+  chartPass?: boolean; // chart-bearing cases only
   paramsChecked: boolean;
   paramsPass?: boolean;
   formatChecked: boolean;
@@ -59,7 +59,7 @@ function paramsSubsetMatch(
 // data-tool expectation must be met by EXACTLY that tool, called once, with no other data tool alongside.
 const DATA_TOOLS = new Set<string>([...CATALOG_TOOL_NAMES, "query_postings"]);
 
-// AC-7 asks the agent to "select THE expected tool and mode" (definite article, singular). For a data tool
+// The tool+mode gate asks the agent to "select THE expected tool and mode" (definite article, singular). For a data tool
 // that means the expected tool called EXACTLY once and NO other data tool: a right tool called beside an
 // extra data tool emits a second card - a defect, not a pass (the saved v1 Q5 hit this: share_split +
 // query_postings). The pure-plain (no-tool) and report_unanswerable cases are excepted - plain expects
@@ -82,7 +82,7 @@ function formatOk(text: string): boolean {
   );
 }
 
-// 018 strand 5 (informational): a scope-qualified answer names the sample / its dominance rather than
+// Informational: a scope-qualified answer names the sample / its dominance rather than
 // presenting the corpus as the whole market. Heuristic over the answer text - never gates a run.
 function scopeQualifiedOk(text: string): boolean {
   return /\bsample\b|\bmostly\b|\bgoogle\b|\balphabet\b|dominat|one (company|employer)|not.*(representative|whole|entire|full)/i.test(

@@ -2,9 +2,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-// AC-25b: the landing composer submits on Enter (Shift+Enter inserts a newline), mirroring the chat
-// composer, so a visitor can send their first question without reaching for the mouse (AC-23 research
-// note flagged Enter not submitting on the P1 landing). External boundaries are mocked.
+// The landing composer submits on Enter (Shift+Enter inserts a newline), mirroring the chat
+// composer, so a visitor can send their first question without reaching for the mouse. External
+// boundaries are mocked.
 const startConversationMock = vi.fn();
 vi.mock("@/app/actions", () => ({
   startConversation: (t: string) => startConversationMock(t),

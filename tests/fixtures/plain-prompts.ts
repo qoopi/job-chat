@@ -1,12 +1,12 @@
 import { LAUNCH_QUESTIONS } from "./launch-questions";
 
-// The AC-5 conformance sample: 19 prompts = the 7 launch questions (data/chart mode) + 5 conversational
+// The plain-tone conformance sample: 19 prompts = the 7 launch questions (data/chart mode) + 5 conversational
 // prompts (plain mode) + 1 city-abbreviation phrasing (alias normalization) + 6 P2-intent phrasings
 // (find-me-a-job / what-fits-me class - the adviser clarifies in plain mode, no card). The metric: every
 // PLAIN-mode answer holds the contract tone - at most two sentences, no "!", no opener from the
 // banned-filler list below. Run live in the dev round trip against Bedrock; the fixture + countSentences +
 // startsWithBannedOpener are the shared harness, exercised deterministically in unit tests. This fixture
-// is the ONE home for the sample and the banned-opener list - the 010 eval-set imports both.
+// is the ONE home for the sample and the banned-opener list - the eval-set imports both.
 
 export const CONVERSATIONAL_PROMPTS: string[] = [
   "Hey, what can you help me with?",
@@ -42,8 +42,8 @@ export const SAMPLE_PROMPTS: string[] = [
   ...P2_INTENT_PROMPTS,
 ];
 
-// The banned-filler openers (AC-5) - phrases a plain/clarify reply must NOT open with. Enumerated here
-// as the ONE home; prompt v2 mirrors the rule and the 010 eval-set imports this list for its format
+// The banned-filler openers - phrases a plain/clarify reply must NOT open with. Enumerated here
+// as the ONE home; prompt v2 mirrors the rule and the eval-set imports this list for its format
 // scoring. Stored lowercased, without trailing punctuation - matched at a word boundary.
 export const BANNED_OPENERS: string[] = [
   "great question",
@@ -64,7 +64,7 @@ export const BANNED_OPENERS: string[] = [
   "thanks for asking",
 ];
 
-/** Count sentences by terminal punctuation - the AC-5 conformance metric (plain answers <= 2). */
+/** Count sentences by terminal punctuation (plain answers <= 2). */
 export function countSentences(text: string): number {
   return text
     .split(/[.!?]+/)
@@ -73,7 +73,7 @@ export function countSentences(text: string): number {
 }
 
 /**
- * AC-5 tone check: does a reply open with a banned filler phrase? Matched case-insensitively at the very
+ * Tone check: does a reply open with a banned filler phrase? Matched case-insensitively at the very
  * start, at a word boundary so an opener never trips a longer real word ("great" flags "Great question",
  * not "Greater Boston"; "so" flags "So, ..." not "Software roles").
  */

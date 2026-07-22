@@ -11,12 +11,12 @@ import {
 
 // The live chat loop, driven by the E2E mock transport (scripted UIMessageChunks - no Trigger.dev /
 // Bedrock). Each test arms a script, sends, and asserts the client behavior the interaction-spec pins:
-// the answering indicator (006 ruling), insight card, stop, retry, and the polite limit notice.
+// the answering indicator, insight card, stop, retry, and the polite limit notice.
 
 const freshChat = () => `/chat/${randomUUID()}`;
 const composer = "Ask a follow-up";
 
-// AC-11 (canonical arrival spec): turn 1 from the landing rides the SAME public send path as every
+// Canonical arrival spec: turn 1 from the landing rides the SAME public send path as every
 // follow-up (no server-side envelope). The landing carries the question in ?q=; the chat page delivers it
 // via useChat.sendMessage on arrival. Prove it streams live end-to-end: message #1 shown, the answering
 // indicator up through the run-wake gap, and the answer streams to completion.
@@ -32,7 +32,7 @@ test("AC-11 Should_DeliverTurnOneViaSendPath_When_ConversationStarts", async ({
   await page.getByRole("button", { name: "Send" }).click();
 
   // Handoff: navigated into a chat carrying ?q=, message #1 shown, the answering indicator up on arrival
-  // (006 ruling: an animated waiting indicator, never a hollow skeleton card, until real content streams).
+  // (an animated waiting indicator, never a hollow skeleton card, until real content streams).
   await expect(page).toHaveURL(/\/chat\/[0-9a-f-]+/);
   await expect(page.locator(".bubble.user")).toHaveText(
     "Top companies hiring right now",
@@ -64,7 +64,7 @@ test("AC-4/AC-6 Should_RenderInsightCard_When_DataAnswerStreams", async ({
   await expect(card.locator(".chip").first()).toBeVisible(); // follow-up chips
   await expect(card.locator(".src")).toContainText("3,483 postings"); // source line + count
 
-  // AC-6: Show query reveals the exact executed SQL from the streamed part
+  // Show query reveals the exact executed SQL from the streamed part
   await card.getByRole("button", { name: "Show query" }).click();
   await expect(card.locator(".codeblock")).toContainText("FROM postings FINAL");
 });
@@ -79,7 +79,7 @@ test("AC-8 Should_ShowAnsweringIndicatorAndDisableComposer_While_Streaming", asy
   await box.fill("Top companies?");
   await box.press("Enter");
 
-  // 006 ruling: streaming shows the animated answering indicator (not a hollow skeleton card) + a
+  // Streaming shows the animated answering indicator (not a hollow skeleton card) + a
   // disabled composer + the Stop control.
   await expect(page.locator(".answering").first()).toBeVisible();
   await expect(page.getByRole("textbox", { name: composer })).toBeDisabled();
@@ -191,7 +191,7 @@ test("AC-7 Should_SendAndDisableChip_When_FollowupTapped", async ({ page }) => {
 });
 
 test("Should_Return404_When_ChatIdIsMalformed", async ({ page }) => {
-  // A non-UUID :id is a bad route, not a blank new-chat shell (epic decision 2026-07-19, 006 review):
+  // A non-UUID :id is a bad route, not a blank new-chat shell:
   // the page Zod-validates the param at the trust boundary and calls notFound().
   const res = await page.goto("/chat/not-a-uuid");
   expect(res?.status()).toBe(404);

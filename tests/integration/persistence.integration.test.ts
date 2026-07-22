@@ -4,7 +4,7 @@ import { createStore, type Store } from "@shared/store";
 import { buildInsight } from "../../trigger/parts";
 import { extractAssistantPersistence, persistAssistantTurn } from "../../trigger/persistence";
 
-// AC-13: when a turn completes the agent persists the assistant message + full card payload, so a
+// When a turn completes the agent persists the assistant message + full card payload, so a
 // returning guest's conversation restores from the store without re-running queries. Integration
 // against real Postgres (the agent's onTurnComplete uses this exact path). Skipped without creds.
 const hasCreds = Boolean(process.env.DATABASE_URL);
@@ -65,7 +65,7 @@ describe.skipIf(!hasCreds)("assistant-turn persistence against real Postgres", (
     const reloaded = await store.getConversation(conv.id);
     expect(reloaded).not.toBeNull();
     const assistant = reloaded!.messages.find((m) => m.role === "assistant");
-    // F8: persistence stores the model's prose VERBATIM ("Google is out in front."), not the verdict - the
+    // Persistence stores the model's prose VERBATIM ("Google is out in front."), not the verdict - the
     // render layer suppresses it and buildModelHistory substitutes the verdict, so Postgres stays faithful.
     expect(assistant?.content).toBe("Google is out in front.");
     // The full card payload survives verbatim - verdict, chart series, SQL, meta - the single answer surface.

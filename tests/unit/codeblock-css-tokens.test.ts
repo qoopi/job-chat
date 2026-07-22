@@ -2,13 +2,9 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-// Audit focus (019 testing pass, AC-D1/D2/D4/D5): the Completion Report claims the shipped `.codeblock`/
-// `.copy-btn` CSS is "the mirror verbatim" and calls D1/D2/D4/D5 pure visual gates - but the AC derivation
-// (019-ac-derivation) names a deterministic UNIT test for each of D1/D4/D5 (D2's dark palette is the
-// render-level gate, deferred). No such test existed: codeblock.test.tsx only covers the tokenizer
-// (AC-D3), never the CSS values. This is that missing deterministic slice: parse each ruleset's
-// declarations from both the shipped globals.css and the design mirror and diff them, so a future edit
-// reverting to shell tokens or a hand-typed hex fails here instead of only on an operator's visual gate.
+// Deterministic slice of the visual gate: parse each ruleset's declarations from the shipped
+// globals.css AND the design mirror and diff them, so a future edit reverting to shell tokens or a
+// hand-typed hex fails here instead of only on a visual review.
 const GLOBALS_PATH = resolve(process.cwd(), "src/app/globals.css");
 const MIRROR_PATH = resolve(
   process.cwd(),

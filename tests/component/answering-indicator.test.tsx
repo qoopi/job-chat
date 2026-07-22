@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-// The answering indicator (006 ruling: instant send feedback). It is the animated typing-dots bubble
+// The answering indicator (instant send feedback). It is the animated typing-dots bubble
 // that stands in for a pending answer through the run-wake gap. It must read as an adviser (ai) bubble -
 // same shape tokens as a real answer - carry the animated dots, and announce itself to assistive tech.
 import { AnsweringIndicator } from "@/components/chat/AnsweringIndicator";

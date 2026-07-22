@@ -11,7 +11,7 @@ import type { UIMessage } from "ai";
 import type { Conversation } from "@shared/store";
 import { closeAuthDialog } from "@/lib/auth-dialog";
 
-// 017 strand 3: Sign out must land the user on the landing as a GUEST with no stale thread. onSignOut
+// Sign out must land the user on the landing as a GUEST with no stale thread. onSignOut
 // drops the Better Auth session, clears the guest cookie (rotate), clears the open thread + sidebar
 // history, and redirects to "/". External boundaries mocked; ChatClient's own sign-out wiring is tested.
 const reconnectMock = vi.fn(async () => null);
@@ -90,7 +90,7 @@ describe("sign-out lands on the landing as a guest (017 strand 3)", () => {
       />,
     );
 
-    // signed-in: the thread is present, and Sign out lives in the title-bar account menu (refresh #2 s4)
+    // signed-in: the thread is present, and Sign out lives in the title-bar account menu
     expect(screen.getByText("unique-thread-body")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Account: Ada/ })); // open the account menu
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));

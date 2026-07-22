@@ -13,18 +13,17 @@ import { persistAssistantTurn } from "../../trigger/persistence";
 import type { EvalCase } from "./eval-set";
 import { createMemoryStore, fakeAnalytics, fakeCoverageProfile } from "./fakes";
 
-// The flag-gated live eval runner (AC-6/AC-7/AC-4). It drives every case's question through the REAL
+// The flag-gated live eval runner. It drives every case's question through the REAL
 // prompt + Bedrock model via createChatRun (the same durable-run seam production uses, trigger/run.ts),
 // capturing the agent's CHOICES - tool, mode, raw chart pick, params, format - for the scorer. Two seams
-// are faked per the epic ruling so the ONLY network the run touches is Bedrock: an IN-MEMORY Store and a
+// are faked so the ONLY network the run touches is Bedrock: an IN-MEMORY Store and a
 // fixture-derived Analytics (see ./fakes). NOT a vitest test (tests/evals/ sits outside the vitest globs);
 // run with `JOBCHAT_EVAL=1 bun run eval`.
 
 // The shipped model - kept in step with trigger/chat.ts (the production seam). Redefined here rather than
 // imported because importing trigger/chat.ts would register the chat.agent() task outside the Trigger
 // runtime; this string is the only coupling. DRIFT RISK: if chat.ts's MODEL_ID changes and this does not,
-// the eval silently scores a DIFFERENT model than prod and the gate loses meaning (backlog:
-// eval-model-id-shared-const - a shared leaf-module const both import, a product-code change out of scope).
+// the eval silently scores a DIFFERENT model than prod and the gate loses meaning.
 export const MODEL_ID = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0";
 
 export function buildModel() {
@@ -54,7 +53,7 @@ export function assertEvalEnabled(
   // CAUTION: Bun auto-loads Job.Chat/.env into child processes, so `env -u AWS_REGION ...` (or any shell
   // cred-stripping) CANNOT prove this missing-creds refusal live - .env repopulates AWS_* before the guard
   // runs. This branch is covered offline (tests/unit/eval-harness.test.ts); do NOT re-probe it live (it
-  // spends real credits on a full run - see the 010 Test Report credits incident).
+  // spends real credits on a full run).
   const hasKeys = Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY);
   const hasProfile = Boolean(env.AWS_PROFILE);
   if (!env.AWS_REGION || (!hasKeys && !hasProfile)) {
@@ -129,9 +128,8 @@ export function bedrockStreamModel(model: EvalModel): EvalStreamModel {
 /**
  * Drive a case through createChatRun with the injected model seam, capturing tool calls, text, and parts.
  * A case with `context` runs those prior user turns first (persisting each answer so the scored follow-up
- * inherits their filters via the rebuilt history, 018 strand 4); only the LAST turn is scored. The model
- * seam is a DEPENDENCY (not hard-wired to Bedrock) so the replay mechanism is testable offline (018
- * review-fix R2).
+ * inherits their filters via the rebuilt history); only the LAST turn is scored. The model
+ * seam is a DEPENDENCY (not hard-wired to Bedrock) so the replay mechanism is testable offline.
  */
 export async function runCase(
   streamModel: EvalStreamModel,
@@ -157,7 +155,7 @@ export async function runCase(
       emit,
       now: () => new Date(),
       system,
-      coverageProfile: fakeCoverageProfile, // 018 strand 5: inject the DATA SCOPE note, as production does
+      coverageProfile: fakeCoverageProfile, // inject the DATA SCOPE note, as production does
       streamModel,
     });
 

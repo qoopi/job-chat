@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Store, User } from "@shared/store";
 
-// Audit focus (013 testing pass): the sign-in TRANSITION's cookie-clear MUST be sequenced strictly
+// The sign-in TRANSITION's cookie-clear MUST be sequenced strictly
 // after a successful adoption - a failed `resolveIdentity` must neither clear the guest cookie nor
 // swallow the error. Under Google-only sign-in this transition runs server-side from the
-// `/auth/complete` route (017): the route catches the rejection and bounces back with `?error` while
+// `/auth/complete` route: the route catches the rejection and bounces back with `?error` while
 // the guest cookie survives, so the per-request path can still resolve the guest's conversations. This
 // exercises the REAL `completeSignIn` +
 // `resolveIdentity` (trigger/session.ts) against a fake in-memory Store, mocking only the framework

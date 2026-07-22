@@ -14,7 +14,7 @@ import type { EmitPart } from "./tools";
 // the input-size backstop; (2) applies the cap/budget backstop on the write-token's real path to the
 // model; (3) REBUILDS the model input from the store (Postgres, source of truth) so the model always
 // sees the full alternating user+assistant history - NOT the SDK's cross-turn replay, which drops the
-// assistant answers and made every turn re-answer all prior questions (004 round 4); (4) hands that
+// assistant answers and made every turn re-answer all prior questions; (4) hands that
 // history to the injected model seam. A refusal streams a taxonomized part and returns WITHOUT calling
 // the model, so a guest can never drive the model past the cap/budget or with an unbounded payload.
 
@@ -49,7 +49,7 @@ export interface ChatRunDeps<R> {
   emit: (part: EmitPart) => void;
   now: () => Date;
   system: string;
-  /** The corpus shape, memoized at the source (018 strand 5). When present, a one-line DATA SCOPE note
+  /** The corpus shape, memoized at the source. When present, a one-line DATA SCOPE note
    *  is appended to the system prompt so the agent can qualify whole-market questions to the real sample. */
   coverageProfile?: () => Promise<CoverageProfile>;
   streamModel: StreamModel<R>;
@@ -60,7 +60,7 @@ type Gate =
   | { kind: "skip" }
   | { kind: "run"; history: ModelMessage[] };
 
-/** The one-line DATA SCOPE note appended to the system prompt from the corpus profile (018 strand 5). */
+/** The one-line DATA SCOPE note appended to the system prompt from the corpus profile. */
 function dataScopeNote(p: CoverageProfile): string {
   const sharePct = Math.round(p.topCompanyShare * 100);
   const salaryPct = Math.round(p.salaryCoverage * 100);
@@ -102,14 +102,14 @@ export function createChatRun<R>(deps: ChatRunDeps<R>) {
       // (it trims trailing assistant messages from its accumulator until the tail is a user, then
       // re-runs) in the DURABLE store, BEFORE the read below - so the superseded error card (or a prior
       // answer) is gone, and both the rebuilt history and a later reload show exactly ONE assistant reply
-      // per user turn (I4/AC-6/AC-8). A no-op on submit (nothing trails the just-persisted user turn).
+      // per user turn. A no-op on submit (nothing trails the just-persisted user turn).
       if (trigger === "regenerate-message") await store.deleteTrailingAssistant(chatId);
 
       const loaded = await store.getConversation(chatId);
       const persisted = loaded?.messages ?? [];
 
       // The LOAD-BEARING dedup. Crash-continuation re-dispatch re-EXECUTES a turn with a NEW assistant id
-      // (the 021 upsert only stops SAME-id replays), so only this gate stops that duplicate. A regenerate
+      // (the upsert only stops SAME-id replays), so only this gate stops that duplicate. A regenerate
       // (Retry) always runs (its superseded tail was popped above). A submit whose turn is already
       // answered (a non-user tail) is a redelivery - skip.
       const tail = persisted[persisted.length - 1];

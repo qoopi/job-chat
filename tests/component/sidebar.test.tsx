@@ -22,10 +22,10 @@ vi.mock("next/link", () => ({
 
 import { Sidebar } from "@/components/chat/Sidebar";
 
-// AC-12 (UI slice): the signed-in sidebar is a real history - newest first, title + relative date,
+// The signed-in sidebar is a real history - newest first, title + relative date,
 // active highlight on the current route, each row loads its conversation, New chat starts a fresh one,
 // and an empty account reads "No conversations yet". Guests keep the teaser + Sign in (unchanged). The
-// order itself is 012's store test; here we assert the sidebar renders what it is given, in order.
+// order itself is the store's own test; here we assert the sidebar renders what it is given, in order.
 
 const ago = (ms: number) => new Date(Date.now() - ms);
 const convs: Pick<Conversation, "id" | "title" | "created_at">[] = [
@@ -76,8 +76,8 @@ describe("signed-in history (AC-12)", () => {
     ).toBe(`/chat/${convs[1].id}`);
   });
 
-  // AC-19: New chat starts fresh IN PLACE - it is a button that calls onNewChat, NOT a link that bounces
-  // to the landing (the old signed-in `<Link href="/">` was the conformance bug).
+  // New chat starts fresh IN PLACE - it is a button that calls onNewChat, NOT a link that bounces
+  // to the landing.
   test("New chat is an in-place button, not a landing link (AC-19)", () => {
     const onNewChat = vi.fn();
     render(
@@ -100,7 +100,7 @@ describe("signed-in history (AC-12)", () => {
     expect(document.querySelector(".sb-item")).toBeNull();
   });
 
-  // refresh #2 s5: each row gains a muted first-message preview between the title and the date, so two
+  // Each row gains a muted first-message preview between the title and the date, so two
   // conversations that share a title are still distinguishable.
   test("rows render a first-message preview line that distinguishes duplicate titles", () => {
     const dupTitles = [
@@ -130,7 +130,7 @@ describe("signed-in history (AC-12)", () => {
   });
 });
 
-// refresh #2 s5: identity/auth moved to the title bar, so the sidebar foot (avatar + Sign in/Sign out
+// Identity/auth moved to the title bar, so the sidebar foot (avatar + Sign in/Sign out
 // links) is gone in BOTH states.
 describe("sidebar foot removed (refresh #2 s5)", () => {
   test("no sb-foot, and no Sign out anywhere in the sidebar", () => {
@@ -145,16 +145,15 @@ describe("sidebar foot removed (refresh #2 s5)", () => {
     expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
   });
 
-  // AC-D20 is explicit ("neither guest nor signed-in") - the above only covered signed-in.
+  // The rule is "neither guest nor signed-in" - the test above only covered signed-in.
   test("no sb-foot in the guest render either", () => {
     const { container } = render(<Sidebar signedIn={false} />);
     expect(container.querySelector(".sb-foot")).toBeNull();
     expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
   });
 
-  // Corrected premise (task 019, s6 delta): "the collapsed-rail avatar goes with the foot - it does, per
-  // 'identity only in the TitleBar'". Collapse the sidebar and check the rail for a leftover avatar chip
-  // in both auth states.
+  // The collapsed-rail avatar goes with the foot - it does, per 'identity only in the TitleBar'.
+  // Collapse the sidebar and check the rail for a leftover avatar chip in both auth states.
   test("the collapsed rail has no avatar (identity lives only in the TitleBar) - signed-in", () => {
     const { container } = render(
       <Sidebar
@@ -174,7 +173,7 @@ describe("sidebar foot removed (refresh #2 s5)", () => {
   });
 });
 
-// AC-20: the wordmark is a way home.
+// The wordmark is a way home.
 describe("logo (AC-20)", () => {
   test("the jobchat.dev wordmark links to the landing", () => {
     render(<Sidebar signedIn conversations={convs} activeId={convs[0].id} />);
@@ -184,7 +183,7 @@ describe("logo (AC-20)", () => {
   });
 });
 
-// AC-21: signed-in rows carry a delete affordance behind an inline confirm (never a modal); guests get none.
+// Signed-in rows carry a delete affordance behind an inline confirm (never a modal); guests get none.
 describe("delete conversation (AC-21)", () => {
   test("a signed-in row deletes via an inline confirm - onDeleteConversation fires only on confirm", () => {
     const onDeleteConversation = vi.fn();

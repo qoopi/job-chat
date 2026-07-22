@@ -3,7 +3,7 @@ import { armScript, insightScript } from "./chat-mock";
 
 const CHAT = "/chat/00000000-0000-4000-8000-000000000000";
 
-// AC-6b: the Chart|Table toggle swaps the visible primitive instantly and keeps the choice per card for
+// The Chart|Table toggle swaps the visible primitive instantly and keeps the choice per card for
 // the session - other cards are unaffected, and the choice survives a later turn re-rendering the
 // thread. Runs against the resumed fixture conversation (histogram=0, bars=1, ...).
 test.describe("InsightCard - tab switch and per-card session memory (AC-6b)", () => {

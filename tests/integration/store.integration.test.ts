@@ -79,7 +79,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     expect(loaded!.messages[1].parts).toEqual(parts);
   });
 
-  // AC-5: a caller-supplied message id makes the write idempotent - re-persisting the SAME id (a
+  // A caller-supplied message id makes the write idempotent - re-persisting the SAME id (a
   // replayed or re-executed completion reaching persistence twice) inserts exactly once. ON CONFLICT
   // (id) DO NOTHING, first write wins.
   it("appendMessage inserts once when the same message id is persisted twice (AC-5)", async () => {
@@ -98,7 +98,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     expect(loaded!.messages.find((m) => m.id === id)?.content).toBe("first write");
   });
 
-  // Contract boundary of the AC-5 upsert: omitting `id` must behave exactly as before the id column
+  // Contract boundary of the upsert: omitting `id` must behave exactly as before the id column
   // was added - the DB mints a fresh uuid per call, so two calls (even with identical role/content, as
   // the count-keyed user-turn path can produce) insert TWO distinct rows, never deduped. This guards
   // the no-id caller path (persistIncomingUserTurns' user rows) against a regression from the new
@@ -123,7 +123,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
 
   // The module contract says "`null` always means not found". A malformed (non-UUID) id must honor
   // that from the caller's view - not surface Postgres' `invalid input syntax for type uuid` as an
-  // unhandled error. 006 wires `/chat/[id]` from an untrusted URL param, so a garbage id must land
+  // unhandled error. `/chat/[id]` wires an untrusted URL param into it, so a garbage id must land
   // on the null/404 path, not a 500.
   it("getConversation returns null for a malformed (non-UUID) id, not a DB error", async () => {
     expect(await store.getConversation("not-a-valid-uuid")).toBeNull();
@@ -132,7 +132,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
   });
 
   // The lightweight owner lookup backing authorization + the agent guard: one row (conversations JOIN
-  // users), no history. Widened (012) to carry the owner's auth_user_id so the run() backstop can pick
+  // users), no history. Widened to carry the owner's auth_user_id so the run() backstop can pick
   // the cap by identity kind (null = guest cap, set = signed-in cap).
   it("getConversationOwner returns { user_id, auth_user_id }, or null for missing/malformed ids", async () => {
     await store.getOrCreateUser(guestId);
@@ -174,7 +174,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(u);
   });
 
-  // 012 review-fix (security): the stamp primitive must NEVER overwrite a row already linked to a
+  // Security: the stamp primitive must NEVER overwrite a row already linked to a
   // DIFFERENT account - a forged/stale guest cookie pointing at a signed-in row must not take it over.
   // The guard is the SQL itself (WHERE auth_user_id IS NULL), so no caller can misuse it.
   it("linkAuthUser refuses to rebind a row already linked to a DIFFERENT account (guard, no takeover)", async () => {
@@ -190,7 +190,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(victim);
   });
 
-  // 012 review-fix (the auth_user_id UNIQUE race, deterministic): two concurrent first sign-ins of the
+  // The auth_user_id UNIQUE race, deterministic: two concurrent first sign-ins of the
   // SAME account both read findUserByAuthId -> null, then both stamp their own guest row; the loser's
   // UPDATE passes the `auth_user_id IS NULL` guard on its OWN row but collides with the winner's
   // auth_user_id UNIQUE. The store catches that and reports "did not stamp" (typed false), never a 500 -
@@ -211,7 +211,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(loser);
   });
 
-  // 012 review-fix (security): adoption must move conversations only FROM a genuine guest row
+  // Security: adoption must move conversations only FROM a genuine guest row
   // (auth_user_id IS NULL). A row that already belongs to a DIFFERENT account is off-limits - a forged
   // guest cookie must not steal a signed-in user's conversations. Guard is the SQL (EXISTS ... IS NULL).
   it("adoptGuest does not move conversations from a source row linked to a DIFFERENT account (guard, no theft)", async () => {
@@ -229,7 +229,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(attacker);
   });
 
-  // AC-11 (store slice): sign-in on a device holding guest conversations adopts them onto the account's
+  // Sign-in on a device holding guest conversations adopts them onto the account's
   // canonical row - a single UPDATE of conversations.user_id, no message copying. Idempotent (re-run =
   // no-op, since no conversation is left under the guest id).
   it("adoptGuest re-points the guest's conversations to the canonical row; idempotent (AC-11)", async () => {
@@ -278,7 +278,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(guest);
   });
 
-  // AC-12 (store slice): the sidebar history is newest-first. created_at is pinned to distinct values so
+  // The sidebar history is newest-first. created_at is pinned to distinct values so
   // the ordering assertion is deterministic (not a clock-race between same-millisecond inserts).
   it("listConversations returns the user's conversations newest-first (AC-12)", async () => {
     const u = `test-guest-${crypto.randomUUID()}`;
@@ -296,7 +296,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(u);
   });
 
-  // refresh #2 s5: each history row carries the conversation's FIRST user message as a preview, so rows
+  // Each history row carries the conversation's FIRST user message as a preview, so rows
   // that share a title stay distinguishable. An assistant turn never becomes the preview.
   it("listConversations returns the first user message as each row's preview (refresh #2 s5)", async () => {
     const u = `test-guest-${crypto.randomUUID()}`;
@@ -330,7 +330,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(u);
   });
 
-  // AC-21: deleting a conversation removes it AND its messages (the FK has no ON DELETE CASCADE, so the
+  // Deleting a conversation removes it AND its messages (the FK has no ON DELETE CASCADE, so the
   // store deletes both in one transaction). A sibling conversation's messages are untouched.
   it("deleteConversation removes the conversation and its messages, leaving siblings intact (AC-21)", async () => {
     const owner = `test-guest-${crypto.randomUUID()}`;
@@ -362,7 +362,7 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(owner);
   });
 
-  // R3 must-fix (022): a regenerate supersedes the row it re-answers. deleteTrailingAssistant is the
+  // A regenerate supersedes the row it re-answers. deleteTrailingAssistant is the
   // narrow durable mirror of the SDK's trailing-assistant pop - it removes ONLY the assistant row(s)
   // trailing the LAST user message, leaving earlier turns intact. Validates the (created_at, id) tuple
   // comparison against real Postgres (the same composite order getConversation reads by).

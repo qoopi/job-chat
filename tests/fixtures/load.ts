@@ -1,9 +1,9 @@
 import type { ClickHouseClient } from "@clickhouse/client";
 import { FIXTURE_POSTINGS } from "./postings.fixture";
 
-// Load the AC-11 fixture into a separate table (default `postings_test`) with the postings DDL, so
-// expected numbers stay stable regardless of live ingest. Used by task 003's analytics test and,
-// later, task 004's agent test. Requires the base `postings` table to exist (ch:migrate).
+// Load the reference fixture into a separate table (default `postings_test`) with the postings DDL, so
+// expected numbers stay stable regardless of live ingest. Used by the analytics and agent tests.
+// Requires the base `postings` table to exist (ch:migrate).
 export async function loadFixtureTable(
   client: ClickHouseClient,
   table = "postings_test",

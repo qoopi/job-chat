@@ -97,7 +97,7 @@ export function ChevronLeftIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-// Account-menu glyphs (refresh #2 s4): profile (person), dark-mode (moon), sign-out (exit door).
+// Account-menu glyphs: profile (person), dark-mode (moon), sign-out (exit door).
 export function PersonIcon({ size = 15 }: { size?: number }) {
   return (
     <svg

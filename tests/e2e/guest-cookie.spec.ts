@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// AC-12 (cookie slice): a first-time visitor is minted a guest id cookie on arrival. A Server Component
+// A first-time visitor is minted a guest id cookie on arrival. A Server Component
 // cannot set a cookie during render, so the landing ensures the guest via a server action on first
 // paint. (The paired users-row write is exercised by the store/session integration tests against real
 // Postgres; here we assert the cookie half.)

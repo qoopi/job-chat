@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 
-// 027 testing-audit gap: the app's ONE transport seam (this file's subject, chat-transport.ts) statically
+// The app's ONE transport seam (this file's subject, chat-transport.ts) statically
 // imports `MockChatTransport` from the production stub `src/lib/e2e-transport.ts`, whose constructor
 // throws unconditionally ("MockChatTransport is available only in an E2E build"). The stub is safe only
 // because `useJobChatTransport` gates construction behind the `e2e` flag (`e2e ? new MockChatTransport(...)
@@ -12,7 +12,7 @@ import { renderHook } from "@testing-library/react";
 // e2e-transport.ts modules: prod (e2e=false) never reaches the stub's constructor (no throw), and the
 // stub's throw is reachable ONLY when e2e=true with no build-time alias in place (the exact reason the
 // seam needs next.config's turbopack.resolveAlias swap for a real Playwright e2e build, not a runtime
-// import - see 027's Completion Report "Deviations").
+// import).
 
 const sendMessagesMock = vi.fn();
 const reconnectToStreamMock = vi.fn();
@@ -48,7 +48,7 @@ describe("useJobChatTransport - the e2e construction gate (027 audit)", () => {
 
   // e2e=true DOES construct the seam's MockChatTransport import - which is the production STUB here (no
   // Turbopack resolveAlias in a plain vitest run), so its unconditional throw fires; this is exactly why
-  // the real e2e build needs the build-time alias swap, not a runtime flag alone (027 Deviations).
+  // the real e2e build needs the build-time alias swap, not a runtime flag alone.
   it("e2e=true without the build-time alias hits the stub's fail-closed throw", () => {
     expect(() =>
       renderHook(() => useJobChatTransport({ e2e: true, conversationId: "c1" })),

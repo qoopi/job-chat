@@ -10,8 +10,8 @@ const FOCUSABLE_SELECTOR =
 
 // The lazy auth dialog (interaction-spec s6, mock 3a/5a). Opens ONLY on demand (Sign in tap or the cap
 // moment - never on load), sits topmost (dialog > LCP > thread), and closes on cancel / Esc / backdrop
-// with the chat untouched. Google-ONLY (operator ruling 2026-07-21): email/password is removed.
-// `signIn.social` is a full-page CLIENT-initiated redirect to Google (gold standard s2.3); on success
+// with the chat untouched. Google-ONLY (email/password removed).
+// `signIn.social` is a full-page CLIENT-initiated redirect to Google; on success
 // Better Auth lands the browser on the STABLE `/auth/complete` route (which finalizes the sign-in
 // server-side), so there is NO in-page success callback - the dialog's job is to START the redirect. On
 // failure Better Auth bounces back to this page with `?error=<code>`; we read it on mount and surface it
@@ -30,7 +30,7 @@ function googleErrorMessage(code: string): string {
   }
 }
 
-// `next` is the post-sign-in destination the HOST decides (017 fix round 2): the landing host passes
+// `next` is the post-sign-in destination the HOST decides: the landing host passes
 // `/chat/new` (sign-in takes the user INTO the app), a chat host passes its own conversation path (sign-in
 // returns to that chat). It flows through /auth/complete's resolve-then-compare-origin safeNext guard, so
 // it must stay a same-origin path. Falls back to the current page for any host that omits it.
@@ -67,7 +67,7 @@ export function AuthDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Modal a11y (AC-10; engineering.md lists accessibility as never-simplify-away). Move focus INTO the
+  // Modal a11y. Move focus INTO the
   // dialog on open, contain Tab within it (a keyboard user must not reach the dimmed shell behind the
   // modal - interaction-spec "Priority of layers"), and restore focus to the opener when it closes.
   useEffect(() => {
@@ -117,7 +117,7 @@ export function AuthDialog({
     setError(null);
     setLoading(true);
     try {
-      // Full-page CLIENT-initiated redirect (gold standard s2.3). STABLE callbackURL (a fixed route, not
+      // Full-page CLIENT-initiated redirect. STABLE callbackURL (a fixed route, not
       // window.location.href) that finalizes the sign-in and lands the user on the HOST-decided `next`
       // (landing -> /chat/new; a chat -> that chat); errorCallbackURL returns to THIS page so the ?error
       // handler above can show what failed. Fall back to the current page when a host omits `next`.

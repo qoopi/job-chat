@@ -8,8 +8,8 @@ import {
 
 // The session core's boundary logic, unit-tested without a DB (pure). Two invariants live here:
 //  1. `chatTokenScopes` - the transport's public token is scoped read+write to EXACTLY one
-//     conversation, never broader. This is the auth boundary the AI SDK transport (006) trusts.
-//  2. Input bounds (must-fix B) - untrusted question/text is refused at the boundary BEFORE any store
+//     conversation, never broader. This is the auth boundary the AI SDK transport trusts.
+//  2. Input bounds - untrusted question/text is refused at the boundary BEFORE any store
 //     write or trigger, so a hostile 100KB payload never reaches Bedrock or the message store.
 
 describe("chatTokenScopes", () => {

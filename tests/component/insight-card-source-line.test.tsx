@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { DataInsight } from "@shared/insight";
 
-// P1 polish (must-fix #2): the source line ("N postings - updated ...") must be suppressed entirely
+// The source line ("N postings - updated ...") must be suppressed entirely
 // when sampleN is 0, so a defensive empty card can never show "0 postings - updated 20654d ago" (the
 // epoch-freshness bug). The Recharts subtree is stubbed - this test is about the foot source line only.
 vi.mock("@/components/insight/charts/InsightChart", () => ({
@@ -51,7 +51,7 @@ describe("InsightCard source line", () => {
   });
 });
 
-// AC-3: a current-state read (open-set predicate applied) reads "N open postings"; a full-history read
+// A current-state read (open-set predicate applied) reads "N open postings"; a full-history read
 // keeps the plain "N postings"; the sampleN=0 suppression is unchanged either way.
 describe("InsightCard open-set source-line copy", () => {
   test("reads 'N open postings' when meta.openSet is set", () => {
@@ -76,7 +76,7 @@ describe("InsightCard open-set source-line copy", () => {
   });
 });
 
-// refresh #2 s3-consistency: a capped bars chart's source line discloses "showing top 8" beside the real
+// A capped bars chart's source line discloses "showing top 8" beside the real
 // total, and only on the chart view (the Table tab shows every row via preview -> LCP). The Recharts
 // subtree is stubbed so the source-line text is what is under test.
 describe("InsightCard capped-chart source line", () => {

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Store, User } from "@shared/store";
 
-// Audit focus (013 testing pass): the `/chat/[id]` resume gate now keys ownership on the resolved
-// Viewer (ruling 2 - decision log) instead of the guest cookie alone. `resolveViewer` (server-store.ts)
+// The `/chat/[id]` resume gate now keys ownership on the resolved
+// Viewer instead of the guest cookie alone. `resolveViewer` (server-store.ts)
 // has NO existing test - this closes that gap at the unit level (the page.tsx wiring itself is covered
 // by chat-page-resume-gate.test.ts, which mocks this module as the boundary). Mocks only the framework
 // edges (next/headers, postgres, Better Auth); resolveViewer's own branching is real.
@@ -94,7 +94,7 @@ describe("resolveViewer (AC-14 / resume-gate ruling 2)", () => {
   });
 
   it("Should_ResolveAccountOwnership_When_SignedInWithLinkedRow", async () => {
-    // No guest cookie on THIS device - a signed-in account resuming on a fresh device (ruling 2).
+    // No guest cookie on THIS device - a signed-in account resuming on a fresh device.
     getSessionMock.mockResolvedValue({ user: { id: "auth-1", name: "Ada" } });
     fakeStore = makeStore({
       findUserByAuthId: async (authUserId) =>
@@ -140,7 +140,7 @@ describe("resolveViewer (AC-14 / resume-gate ruling 2)", () => {
 
   it("Should_IncludeBothOwnerIds_When_SignedInWithADistinctGuestCookieOnThisDevice", async () => {
     // Signed in AND a stray guest cookie from this browser (e.g. a fresh `ensureGuest` mint after
-    // sign-in, per the deviations log) - both ids may resume; the account id is deduped, not doubled.
+    // sign-in) - both ids may resume; the account id is deduped, not doubled.
     cookieStore.set("jobchat_guest", "guest-2");
     getSessionMock.mockResolvedValue({ user: { id: "auth-1" } });
     fakeStore = makeStore({

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-// AC-19: the system block is marked as a Bedrock prompt-cache point. Conformance correction 5: the
+// The system block is marked as a Bedrock prompt-cache point. The
 // toStreamTextOptions `systemProviderOptions` route SILENTLY NO-OPS in our wiring (the SDK builds a
 // system block only when chat.prompt.set() was used, and our explicit `system:` after the spread
 // overrides it anyway), so the cache point must ride a STRUCTURED SystemModelMessage passed straight

@@ -8,7 +8,7 @@ import { z } from "zod";
 // the full getEnv() also requires AWS_* keys that local dev provides via AWS_PROFILE,
 // and ingestion touches neither AWS nor Bedrock (ISP - don't couple to what it can't use).
 // Exported so shared/env.ts composes the full env schema from the per-domain slices instead of
-// re-declaring the same keys (decision log 2026-07-18, 002 review). Additive - the ingestion path
+// re-declaring the same keys. Additive - the ingestion path
 // still parses it the same way below.
 export const ClickhouseEnvSchema = z.object({
   CLICKHOUSE_URL: z.string().min(1),

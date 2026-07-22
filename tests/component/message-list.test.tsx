@@ -5,10 +5,10 @@ import type { UIMessage } from "ai";
 import type { DataInsight } from "@shared/insight";
 import { storeToUiMessages, type StoredMessage } from "@/lib/chat-ui";
 
-// MessageList maps `useChat` messages to the 005 components. Recharts needs real layout, so we stub the
+// MessageList maps `useChat` messages to the thread components. Recharts needs real layout, so we stub the
 // chart subtree (same device as the memo probe test) and assert the mapping: bubbles, insight card +
-// one-shot chips, the answering indicator (both the loading-part and the trailing pending states - 006
-// ruling: a loading part shows the indicator, never a hollow card), and the error / refusal cards.
+// one-shot chips, the answering indicator (both the loading-part and the trailing pending states: a
+// loading part shows the indicator, never a hollow card), and the error / refusal cards.
 // Plain DOM assertions only (this repo does not wire jest-dom matchers).
 vi.mock("@/components/insight/charts/InsightChart", () => ({
   InsightChart: () => <div data-testid="chart-subtree" />,
@@ -102,7 +102,7 @@ describe("MessageList", () => {
     expect(freshChip.textContent).toBe("Only remote roles");
   });
 
-  // 018 strand 2: a SUCCESS turn (an insight card) suppresses the model's accompanying prose too - the
+  // A SUCCESS turn (an insight card) suppresses the model's accompanying prose too - the
   // card is the single answer surface, so a fabricated framing sentence is never shown beside it.
   test("an insight-card turn shows only the card, not the accompanying model prose", () => {
     const messages: UIMessage[] = [
@@ -123,11 +123,9 @@ describe("MessageList", () => {
     expect(container.textContent).not.toContain("Apple and Netflix");
   });
 
-  // 05-testing audit gap fill (018 strand 2): the two tests above prove suppression for a LIVE-shaped
-  // insight turn and for the RESUMED error-card path (AC-25, inherited from 016) - but strand 2 extends
-  // suppression to SUCCESS cards, and no test drove that extension through the real resume/hydration
-  // function for a row persisted BEFORE this fix shipped (extractAssistantPersistence used to persist the
-  // model's fabricated prose alongside the insight card). This proves the exact backward-compat case.
+  // The two tests above prove suppression for a LIVE-shaped insight turn and the RESUMED error-card
+  // path. This drives the real resume/hydration function for a row persisted BEFORE suppression
+  // shipped (fabricated prose + card stored together) - the exact backward-compat case.
   test("018 strand 2 resume: a legacy-persisted insight turn (fabricated prose + card stored together) suppresses the prose on resume", () => {
     const stored: StoredMessage[] = [
       {
@@ -220,10 +218,9 @@ describe("MessageList", () => {
     expect(container.textContent).not.toContain("Something went wrong on my side - please try again.");
   });
 
-  // 05-testing gap fill: the AC-25 test above proves the render-layer suppression on a LIVE-shaped
-  // message. This proves the RESUMED path too, via the real hydration function (storeToUiMessages),
-  // for a row persisted BEFORE this fix shipped (extractAssistantPersistence used to persist the prose
-  // alongside the error kind) - the exact backward-compat case the render-layer fix exists for.
+  // The test above proves render-layer suppression on a LIVE-shaped message. This proves the RESUMED
+  // path too, via the real hydration function (storeToUiMessages), for a row persisted BEFORE the fix
+  // (prose + error kind stored together) - the backward-compat case the render-layer guard exists for.
   test("AC-25 resume: a legacy-persisted error turn (prose + error kind stored together) still renders one surface", () => {
     const stored: StoredMessage[] = [
       { id: "a1", role: "assistant", content: "Something went wrong on my side - please try again.", parts: { kind: "system" } },
@@ -242,7 +239,7 @@ describe("MessageList", () => {
 
   // A SYNTHESIZED failed turn (the errored turn had no response message) persists content "", so the row
   // hydrates no text part at all - belt and suspenders with the render-layer suppression. (A tool-failure
-  // that DID narrate persists the prose verbatim under F8; the render layer suppresses it - covered above.)
+  // that DID narrate persists the prose verbatim; the render layer suppresses it - covered above.)
   test("AC-25 resume: a synthesized error turn (empty content) hydrates with no prose part", () => {
     const stored: StoredMessage[] = [{ id: "a2", role: "assistant", content: "", parts: { kind: "system" } }];
     const messages = storeToUiMessages(stored);
@@ -252,7 +249,7 @@ describe("MessageList", () => {
     expect(container.querySelector(".bubble.ai")).toBeNull();
   });
 
-  // AC-6/7 (R3): a FAILED turn now persists as a turn (a synthesized system error card, content ""), so a
+  // A FAILED turn now persists as a turn (a synthesized system error card, content ""), so a
   // reload resumes it as the error card WITH Retry - not a bare unanswered question. Drives the real
   // hydration function (storeToUiMessages), the resume path onTurnComplete's error branch feeds.
   test("Should_ResumeErrorCard_When_FailedTurnReloaded", () => {

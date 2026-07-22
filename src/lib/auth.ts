@@ -2,10 +2,10 @@ import { betterAuth } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { Pool } from "pg";
 
-// Better Auth server config. Google OAuth ONLY (operator ruling 2026-07-21: email/password removed);
-// its OWN small node-`pg` Pool scoped to auth ONLY (epic's decided default) - the chat store keeps its
+// Better Auth server config. Google OAuth ONLY (email/password removed);
+// its OWN small node-`pg` Pool scoped to auth ONLY - the chat store keeps its
 // porsager `postgres` client untouched. Better Auth's CLI owns its tables
-// (user/session/account/verification, each with a PK - AC-15); our `users` table links to them via
+// (user/session/account/verification, each with a PK); our `users` table links to them via
 // `users.auth_user_id` (migration 0004), resolved in actions.ts.
 //
 // Build-safe: `new Pool` and `betterAuth` do no I/O at construction (creds resolve lazily per request),
@@ -22,9 +22,9 @@ const googleSecret = process.env.GOOGLE_CLIENT_SECRET;
 // verification (libpq semantics) - encrypt but skip the leaf check (the working Managed-PG prod path,
 // mirroring the porsager store's treatment of `require`). `verify-ca`/`verify-full` DO promise
 // verification, so HONOR it (rejectUnauthorized: true) rather than silently downgrading to no
-// verification (reviewer should-fix). disable/absent = no forced SSL (a plain local DB).
+// verification. disable/absent = no forced SSL (a plain local DB).
 // RESIDUAL: prod uses `require`, so the leaf cert is unverified (encryption only); the upgrade is a
-// pinned Managed-PG CA (a `ca` PEM + `verify-full`) - infeasible in-window without the CA bundle.
+// pinned Managed-PG CA (a `ca` PEM + `verify-full`) - needs the Managed-PG CA bundle.
 export function authPoolConfig(raw: string | undefined): { connectionString?: string; ssl?: { rejectUnauthorized: boolean } } {
   if (!raw) return {};
   const u = new URL(raw);
@@ -48,7 +48,7 @@ export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL,
   database: authPool,
   // Every frontend origin that may start an OAuth flow - guards state/callback CSRF and prevents the
-  // `state_mismatch` class (gold standard s2.4). Localhost in dev; in prod BOTH custom-domain hosts:
+  // `state_mismatch` class. Localhost in dev; in prod BOTH custom-domain hosts:
   // Vercel 308s the apex to www, so www.jobchat.dev is the canonical browser origin - omitting it
   // 403'd every prod sign-in (INVALID_ORIGIN). The apex stays trusted alongside it.
   trustedOrigins: ["http://localhost:3000", "https://jobchat.dev", "https://www.jobchat.dev"],
@@ -62,7 +62,7 @@ export const auth = betterAuth({
   ...(googleId && googleSecret
     ? { socialProviders: { google: { clientId: googleId, clientSecret: googleSecret } } }
     : {}),
-  // nextCookies MUST be LAST: it lets Better Auth flush Set-Cookie from Server Actions (gold standard
-  // s4.1). Keep it the final plugin.
+  // nextCookies MUST be LAST: it lets Better Auth flush Set-Cookie from Server Actions.
+  // Keep it the final plugin.
   plugins: [nextCookies()],
 });

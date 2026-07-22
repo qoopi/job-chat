@@ -1,6 +1,6 @@
 import type { ChatSessionPersistedState } from "@trigger.dev/sdk/chat";
 
-// The browser-durable home for the Trigger chat transport's per-conversation session state (F1). The
+// The browser-durable home for the Trigger chat transport's per-conversation session state. The
 // transport keeps that state - the scoped token, the `.out` cursor (`lastEventId`), and whether a turn
 // is streaming - in memory only, so a reload wipes it: `reconnectToStream` then has nothing to resume
 // from and a follow-up subscribes cursor-less, replaying the prior turn into the new answer. Persisting

@@ -113,9 +113,9 @@ async function resolveCaller(): Promise<Identity | null> {
 }
 
 /**
- * AC-12: first visit mints an httpOnly cookie guest id with a users row; returns the guest id.
+ * First visit mints an httpOnly cookie guest id with a users row; returns the guest id.
  * NOTE: the guest id is an UNSIGNED bearer cookie (forgeable). Hardening (signing / the Better Auth
- * anonymous plugin) was dropped by operator ruling 2026-07-21 - accepted residual for the hackathon.
+ * anonymous plugin) is an accepted residual for the hackathon.
  */
 export async function ensureGuest(): Promise<string> {
   const jar = await cookies();
@@ -130,14 +130,14 @@ export async function ensureGuest(): Promise<string> {
       maxAge: GUEST_COOKIE_MAX_AGE,
     });
   }
-  // E2E has no Postgres: the cookie is the AC-12 slice under test; the users-row half is covered by the
+  // E2E has no Postgres: the cookie is the slice under test; the users-row half is covered by the
   // store/session integration tests against real PG.
   if (isE2E()) return guestId;
   await createStore(sql()).getOrCreateUser(guestId);
   return guestId;
 }
 
-/** AC-11 landing handoff: create the conversation + persist user message #1, return its id. Turn 1 is
+/** Landing handoff: create the conversation + persist user message #1, return its id. Turn 1 is
  *  delivered on the client's public send path (no server-side trigger). */
 export async function startConversation(
   question: string,
@@ -152,8 +152,8 @@ export async function startConversation(
 }
 
 /**
- * Follow-up send GATE (mechanism a): input-bounded, ownership-checked, cap (AC-15) + daily-budget
- * (AC-20) guarded. A pure gate - it does NOT persist, trigger, or mint. The client transport's
+ * Follow-up send GATE: input-bounded, ownership-checked, cap + daily-budget
+ * guarded. A pure gate - it does NOT persist, trigger, or mint. The client transport's
  * `sendMessages` delivers the turn to `.in` (triggering the run) and subscribes with wait (the only SDK
  * path that streams a freshly-triggered follow-up live), refreshing its token via the `accessToken`
  * callback; the agent's `run()` persists the user turn before the backstop counts it.
@@ -185,7 +185,7 @@ export async function mintChatToken(
 }
 
 /**
- * The sign-in TRANSITION (AC-11, decision-log ruling): called by the client the moment an in-page
+ * The sign-in TRANSITION: called by the client the moment an in-page
  * sign-in succeeds. Binds the fresh Better Auth session to the chat identity - `resolveIdentity` adopts
  * the guest's conversations onto the account (idempotent, guarded at the store) - then clears the guest
  * cookie so the per-request path stops seeing it and never re-adopts. A no-op when no verified session
@@ -207,7 +207,7 @@ export async function completeSignIn(): Promise<{
 }
 
 /**
- * Sign-out companion (017): drop the guest cookie so a signed-out user does NOT resume a stale guest
+ * Sign-out companion: drop the guest cookie so a signed-out user does NOT resume a stale guest
  * thread. On the Google sign-in path the cookie was already cleared (completeSignIn) - this is the
  * defensive rotation for sign-out; the landing's `ensureGuest` mints a fresh guest identity next visit.
  */
@@ -216,7 +216,7 @@ export async function clearGuestSession(): Promise<void> {
 }
 
 /**
- * AC-12 (UI slice): the signed-in caller's conversations, newest first, for the sidebar history. The
+ * The signed-in caller's conversations, newest first, for the sidebar history. The
  * client refetches this after an in-page sign-in (the initial list is server-rendered by the chat
  * page). Empty for a caller that owns nothing.
  */
@@ -227,7 +227,7 @@ export async function listMyConversations(): Promise<ConversationSummary[]> {
 }
 
 /**
- * AC-21: delete one of the caller's OWN conversations (messages cascade). Ownership is enforced here in
+ * Delete one of the caller's OWN conversations (messages cascade). Ownership is enforced here in
  * the action via the resolved Identity + the session core's owner check - a non-owner (or a caller that
  * owns nothing) reads as not_found, never deleting another user's thread.
  */

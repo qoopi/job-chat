@@ -26,10 +26,10 @@ const AuthDialog = dynamic(
 );
 
 // The landing hero's interactive part (mock 4b): the ask box + intent chips that hand off to the chat,
-// carrying the question in `?q=` so turn 1 streams via the public send path on arrival (AC-11,
-// interaction-spec section 7). On first paint it
-// mints the guest cookie (AC-12). PROD posts the question to `startConversation`; a guest cap refusal
-// is now VISIBLE here (AC-13 - no silent refusal): a polite notice + a sign-in affordance that opens the
+// carrying the question in `?q=` so turn 1 streams via the public send path on arrival
+// (interaction-spec section 7). On first paint it
+// mints the guest cookie. PROD posts the question to `startConversation`; a guest cap refusal
+// is now VISIBLE here (no silent refusal): a polite notice + a sign-in affordance that opens the
 // lazy dialog and queues the blocked question for auto-continuation on success (interaction-spec s6/s7).
 // This component also hosts the one landing auth dialog (the header "Sign in" opens it via the shared
 // store). E2E skips the Bedrock-backed action and carries the question in the URL.
@@ -50,7 +50,7 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
   const dialogOpen = useAuthDialogOpen();
   useOpenAuthDialogOnError(); // a Google redirect error (?error=) opens the dialog so it can be surfaced
 
-  // AC-12: a first-time visitor gets a guest cookie (+ users row in prod) as soon as they arrive.
+  // A first-time visitor gets a guest cookie (+ users row in prod) as soon as they arrive.
   useEffect(() => {
     void ensureGuest();
   }, []);
@@ -73,9 +73,9 @@ export function LandingComposer({ e2e = false }: { e2e?: boolean }) {
       if (r.reason === "guest_cap" || r.reason === "daily_budget") {
         setRefusal(r.reason);
         setDraft(text); // the blocked question stays in the box (survives the dialog / cancel)
-        // refresh #2 s8: a guest cap renders the warm register card (RefusalNotice) with a "Create
+        // A guest cap renders the warm register card (RefusalNotice) with a "Create
         // account" button that opens the dialog - no auto-open, so the composer stays usable.
-        // Fix round (master ruling): carry the blocked question across Google sign-in exactly like the
+        // Carry the blocked question across Google sign-in exactly like the
         // chat path - stash under the landing dialog's "/chat/new" destination so the post-auth arrival
         // (fromAuth) replays it once. Only guest_cap (the register moment); daily_budget is a hard stop
         // that signing in cannot lift, matching the chat path's guest_cap-only `capped` carry.

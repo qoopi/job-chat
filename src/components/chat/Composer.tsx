@@ -3,10 +3,9 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { SendIcon, StopIcon } from "@/components/icons";
 
-// The message composer, all five design states (interaction-spec section 4). 005 shipped the markup;
-// 006 wires behavior via optional callbacks - controlled value, Enter-to-send (Shift+Enter newline),
-// and the streaming send->stop swap. With no handlers passed it stays inert (the 005 contract), so the
-// focus ring / disabled dimming / stop glyph remain pure CSS.
+// The message composer, all five design states (interaction-spec section 4): controlled value,
+// Enter-to-send (Shift+Enter newline), and the streaming send->stop swap. With no handlers passed it
+// stays inert, so the focus ring / disabled dimming / stop glyph remain pure CSS.
 export type ComposerState =
   "default" | "focused" | "streaming" | "disabled" | "capped";
 
@@ -15,7 +14,7 @@ const PLACEHOLDER: Record<ComposerState, string> = {
   focused: "I am looking for...",
   streaming: "Answering...",
   disabled: "Sign in to continue",
-  // refresh #2 s8: at the guest cap the composer stays ENABLED - a send opens the register dialog with
+  // At the guest cap the composer stays ENABLED - a send opens the register dialog with
   // the draft queued - so its placeholder invites the account instead of blocking.
   capped: "Create an account to keep asking…",
 };
@@ -33,7 +32,7 @@ export function Composer({
   onChange?: (value: string) => void;
   onSend?: () => void;
   onStop?: () => void;
-  /** AC-19: New chat focuses the composer in place. Bumping this counter (from the parent) moves focus
+  /** New chat focuses the composer in place. Bumping this counter (from the parent) moves focus
    *  to the textarea; the first render never steals focus (a resumed thread must not grab it on mount). */
   focusSignal?: number;
 }) {

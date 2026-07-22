@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { UIMessage } from "ai";
 import type { DataInsight } from "@shared/insight";
 
-// AC-7 (live, both paths): a turn that errors at the SDK level streams NO data-error part, so MessageList
+// A turn that errors at the SDK level streams NO data-error part, so MessageList
 // has nothing to render from the message parts. The client surfaces the error from useChat's error state
 // too (a `liveError` flag), rendering the same ErrorCard + Retry. Two guards ride with it: never
 // double-render when a data-error part ALSO exists (tool failures stream the part), and Retry only on the

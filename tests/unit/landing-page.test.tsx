@@ -3,11 +3,9 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { Conversation } from "@shared/store";
 
-// Audit (05-testing, AC-D36/AC-D38): landing-signin.test.tsx only exercises the LandingSignIn component
-// given an already-computed `openChatsHref` prop; nothing tested page.tsx's OWN logic - the "most recent
-// conversation, else /chat/new" resolution and the optional welcome sub-line. Server Component (a plain
-// async function with no hooks), so it is called directly and its returned element rendered, same
-// approach as chat-page-resume-gate.test.ts uses for chat/[id]/page.tsx.
+// page.tsx's OWN logic: the "most recent conversation, else /chat/new" resolution and the optional
+// welcome sub-line. Server Component (a plain async function with no hooks) - called directly and
+// its returned element rendered, same approach as chat-page-resume-gate.test.ts.
 const hadE2EFlag = "JOBCHAT_E2E" in process.env;
 const priorE2EFlag = process.env.JOBCHAT_E2E;
 process.env.JOBCHAT_E2E = ""; // force the production (resolveViewer) branch, not the E2E fixture path
