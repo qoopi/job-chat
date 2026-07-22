@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DataInsight } from "@shared/insight";
 import type { UIMessage } from "ai";
+import type { Profile } from "@shared/profile";
 import {
   classifyCardData,
   isStreaming,
@@ -8,6 +9,7 @@ import {
   proseSpans,
   reconcileMessagesById,
   resolveInsightTarget,
+  resolveLcpContent,
   storeToUiMessages,
   type StoredMessage,
 } from "@/lib/chat-ui";
@@ -59,6 +61,57 @@ describe("classifyCardData", () => {
     expect(classifyCardData({ foo: "bar" })).toEqual({ kind: "unknown" });
     expect(classifyCardData(null)).toEqual({ kind: "unknown" });
   });
+
+  // The 029 part vocabulary: profile-card / postings / auth-invite / profile-invite.
+  const profile: Profile = {
+    titles: ["Senior Backend Engineer"],
+    seniority: "senior",
+    skills: [{ name: "Go", source: "both" }],
+    locations: ["Berlin"],
+    remotePref: true,
+    salaryMin: 120000,
+    yearsExp: 8,
+    domains: ["distributed systems"],
+    ossHighlights: ["Merged PRs to trigger.dev"],
+    experience: [],
+  };
+
+  it("classifies a valid profile-card payload, carrying the profile", () => {
+    const c = classifyCardData({ kind: "profile-card", profile });
+    expect(c.kind).toBe("profile-card");
+    if (c.kind === "profile-card") expect(c.profile.titles).toEqual(["Senior Backend Engineer"]);
+  });
+
+  it("drops a malformed profile-card to unknown (no profile)", () => {
+    expect(classifyCardData({ kind: "profile-card" })).toEqual({ kind: "unknown" });
+  });
+
+  it("classifies a valid postings payload, carrying rows + total", () => {
+    const rows = [
+      {
+        title: "Senior Backend Engineer",
+        company: "Google",
+        city: "Munich",
+        remote: false,
+        salaryMin: 95000,
+        salaryMax: 140000,
+        experience: "Senior",
+        publishedAt: "2026-07-20",
+        score: 0.91,
+      },
+    ];
+    const c = classifyCardData({ kind: "postings", rows, total: 23 });
+    expect(c.kind).toBe("postings");
+    if (c.kind === "postings") {
+      expect(c.total).toBe(23);
+      expect(c.rows[0].company).toBe("Google");
+    }
+  });
+
+  it("classifies the two invite markers by kind", () => {
+    expect(classifyCardData({ kind: "auth-invite" })).toEqual({ kind: "auth-invite" });
+    expect(classifyCardData({ kind: "profile-invite" })).toEqual({ kind: "profile-invite" });
+  });
 });
 
 // The LCP target is an identity `{ messageId, partId }`; the panel body is
@@ -94,6 +147,59 @@ describe("resolveInsightTarget", () => {
       { id: "a2", role: "assistant", parts: [{ type: "data-error", id: "a2-e", data: { kind: "system" } } as UIMessage["parts"][number]] },
     ];
     expect(resolveInsightTarget(withError, { messageId: "a2", partId: "a2-e" })).toBeNull();
+  });
+});
+
+// The LCP superset resolver: a card-backed panel is a table, the expanded profile, or the full postings
+// list, re-resolved from the immutable part payload (identical resume semantics to the table path).
+describe("resolveLcpContent", () => {
+  const profile: Profile = {
+    titles: ["Senior Backend Engineer"],
+    seniority: "senior",
+    skills: [{ name: "Go", source: "both" }],
+    locations: ["Berlin"],
+    remotePref: true,
+    salaryMin: 120000,
+    yearsExp: 8,
+    domains: [],
+    ossHighlights: [],
+    experience: [],
+  };
+  const postingsRows = [
+    {
+      title: "Senior Backend Engineer",
+      company: "Google",
+      city: "Munich",
+      remote: false,
+      salaryMin: 95000,
+      salaryMax: 140000,
+      experience: "Senior",
+      publishedAt: "2026-07-20",
+      score: 0.9,
+    },
+  ];
+  const messages: UIMessage[] = [
+    { id: "a1", role: "assistant", parts: [{ type: "data-insight", id: "a1-c0", data: insight } as UIMessage["parts"][number]] },
+    { id: "a2", role: "assistant", parts: [{ type: "data-profile-card", id: "a2-c0", data: { kind: "profile-card", profile } } as UIMessage["parts"][number]] },
+    { id: "a3", role: "assistant", parts: [{ type: "data-postings", id: "a3-c0", data: { kind: "postings", rows: postingsRows, total: 23 } } as UIMessage["parts"][number]] },
+  ];
+
+  it("resolves an insight part to a table", () => {
+    const c = resolveLcpContent(messages, { messageId: "a1", partId: "a1-c0" });
+    expect(c?.kind).toBe("table");
+  });
+  it("resolves a profile-card part to the profile", () => {
+    const c = resolveLcpContent(messages, { messageId: "a2", partId: "a2-c0" });
+    expect(c?.kind).toBe("profile-card");
+    if (c?.kind === "profile-card") expect(c.profile.titles).toEqual(["Senior Backend Engineer"]);
+  });
+  it("resolves a postings part to the rows + total", () => {
+    const c = resolveLcpContent(messages, { messageId: "a3", partId: "a3-c0" });
+    expect(c?.kind).toBe("postings");
+    if (c?.kind === "postings") expect(c.total).toBe(23);
+  });
+  it("returns null for a missing target", () => {
+    expect(resolveLcpContent(messages, { messageId: "zzz", partId: "a1-c0" })).toBeNull();
   });
 });
 
@@ -238,5 +344,24 @@ describe("storeToUiMessages (AC-13 resume hydration)", () => {
     ];
     const [ui] = storeToUiMessages(stored);
     expect(ui.parts).toEqual([{ type: "text", text: "plain answer" }]);
+  });
+
+  it("re-tags a resumed profile-card payload as a data-profile-card part (029)", () => {
+    const profile: Profile = {
+      titles: ["Senior Backend Engineer"],
+      seniority: "senior",
+      skills: [],
+      locations: [],
+      remotePref: null,
+      salaryMin: null,
+      yearsExp: null,
+      domains: [],
+      ossHighlights: [],
+      experience: [],
+    };
+    const payload = { kind: "profile-card", profile };
+    const stored: StoredMessage[] = [{ id: "m6", role: "assistant", content: "", parts: payload }];
+    const [ui] = storeToUiMessages(stored);
+    expect(ui.parts).toEqual([{ type: "data-profile-card", id: "m6-card-0", data: payload }]);
   });
 });

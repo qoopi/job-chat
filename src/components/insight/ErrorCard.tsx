@@ -1,4 +1,5 @@
 import { InfoIcon } from "@/components/icons";
+import { InlinePromptCard } from "./InlinePromptCard";
 import {
   errorCopy,
   refusalCopy,
@@ -42,19 +43,11 @@ export function RefusalNotice({
 }) {
   if (onSignIn && reason === "guest_cap") {
     return (
-      <div className="register-card">
-        <p>
-          You&rsquo;ve reached the guest limit &mdash; create a free account to
-          keep going and save this conversation.
-        </p>
-        <button
-          className="btn btn-primary btn-sm"
-          type="button"
-          onClick={onSignIn}
-        >
-          Create account
-        </button>
-      </div>
+      <InlinePromptCard
+        text="You’ve reached the guest limit — create a free account to keep going and save this conversation."
+        buttonLabel="Create account"
+        onAction={onSignIn}
+      />
     );
   }
   return <div className="notice">{refusalCopy(reason)}</div>;

@@ -52,8 +52,20 @@ const MIDSTREAM_THREAD: FixtureThread = {
   ],
 };
 
+// A THIRD fixture id - a thread whose one assistant turn is a profile-invite card. The invite ->
+// form -> card e2e resumes this, clicks "Add your profile", and drives the (e2e-short-circuited) form.
+const PROFILE_INVITE_FIXTURE_ID = "00000000-0000-4000-8000-000000000002";
+const PROFILE_INVITE_THREAD: FixtureThread = {
+  title: "Find me a job that fits",
+  messages: [
+    { id: "fx-inv-0", role: "user", content: "Find me a job that fits", parts: null },
+    { id: "fx-inv-1", role: "assistant", content: "", parts: { kind: "profile-invite" } },
+  ],
+};
+
 export function e2eFixtureThread(conversationId: string): FixtureThread | null {
   if (conversationId === MIDSTREAM_FIXTURE_ID) return MIDSTREAM_THREAD;
+  if (conversationId === PROFILE_INVITE_FIXTURE_ID) return PROFILE_INVITE_THREAD;
   if (conversationId !== FIXTURE_ID) return null;
   return {
     title: FIXTURE_CONVERSATION.title,

@@ -18,10 +18,12 @@ vi.mock("next/headers", () => ({
 vi.mock("postgres", () => ({ default: () => ({}) }));
 
 const triggerMock = vi.fn(async () => ({ id: "run_1" }));
+const runsRetrieveMock = vi.fn(async (): Promise<{ status: string }> => ({ status: "EXECUTING" }));
 vi.mock("@trigger.dev/sdk", () => ({
   auth: { createPublicToken: vi.fn() },
   sessions: { open: vi.fn() },
   tasks: { trigger: (...args: unknown[]) => triggerMock(...(args as [])) },
+  runs: { retrieve: (...args: unknown[]) => runsRetrieveMock(...(args as [])) },
 }));
 vi.mock("@trigger.dev/sdk/ai", () => ({
   chat: { createStartSessionAction: () => vi.fn() },
@@ -38,7 +40,8 @@ vi.mock("@shared/store", async (importOriginal) => {
   return { ...actual, createStore: () => fakeStore };
 });
 
-import { saveProfile, getMyProfile, deleteProfile } from "@/app/actions";
+import { saveProfile, getMyProfile, deleteProfile, getProfileRunStatus } from "@/app/actions";
+import { profileCardMessageId } from "../../trigger/profile-card-id";
 
 const ACCT = "acct-1";
 const AUTH = "auth-1";
@@ -81,6 +84,7 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     clearResumePdf: boom,
     markExtractionFailed: boom,
     deleteProfile: boom,
+    deleteMessage: boom,
     messageCounts: boom,
     ...overrides,
   } as Store;
@@ -217,5 +221,44 @@ describe("deleteProfile", () => {
     fakeStore = makeStore({ deleteProfile: del });
     expect(await deleteProfile()).toEqual({ ok: true });
     expect(del).toHaveBeenCalledWith(ACCT);
+  });
+
+  it("also deletes the profile card in the active conversation the caller owns (card-on-delete)", async () => {
+    signIn();
+    const deleteMessage = vi.fn(async () => {});
+    fakeStore = makeStore({ deleteProfile: vi.fn(async () => {}), deleteMessage });
+    await deleteProfile(CONV);
+    expect(deleteMessage).toHaveBeenCalledWith(CONV, profileCardMessageId(CONV));
+  });
+
+  it("does NOT delete a card in a conversation the caller does not own", async () => {
+    signIn();
+    const deleteMessage = vi.fn();
+    fakeStore = makeStore({
+      deleteProfile: vi.fn(async () => {}),
+      deleteMessage,
+      getConversationOwner: async () => ({ user_id: "someone-else", auth_user_id: "other" }),
+    });
+    await deleteProfile(CONV);
+    expect(deleteMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("getProfileRunStatus", () => {
+  it("maps COMPLETED -> done", async () => {
+    runsRetrieveMock.mockResolvedValueOnce({ status: "COMPLETED" });
+    expect(await getProfileRunStatus("run_1")).toEqual({ status: "done" });
+  });
+  it("maps a terminal failure status -> failed (the re-save-edge backstop)", async () => {
+    runsRetrieveMock.mockResolvedValueOnce({ status: "FAILED" });
+    expect(await getProfileRunStatus("run_1")).toEqual({ status: "failed" });
+  });
+  it("maps an in-flight status -> pending", async () => {
+    runsRetrieveMock.mockResolvedValueOnce({ status: "EXECUTING" });
+    expect(await getProfileRunStatus("run_1")).toEqual({ status: "pending" });
+  });
+  it("treats a retrieve error as pending (never terminates the poll early)", async () => {
+    runsRetrieveMock.mockRejectedValueOnce(new Error("transient"));
+    expect(await getProfileRunStatus("run_1")).toEqual({ status: "pending" });
   });
 });

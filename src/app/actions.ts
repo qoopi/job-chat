@@ -2,10 +2,11 @@
 
 import { cookies, headers } from "next/headers";
 import postgres, { type Sql } from "postgres";
-import { auth, tasks } from "@trigger.dev/sdk";
+import { auth, runs, tasks } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore, type ConversationSummary } from "@shared/store";
 import type { Profile } from "@shared/profile";
+import { profileCardMessageId } from "../../trigger/profile-card-id";
 import type { extractProfileTask } from "../../trigger/extract-profile";
 import { getGuardConfig } from "@shared/env";
 import { isE2E } from "@/lib/e2e";
@@ -345,10 +346,52 @@ export async function getMyProfile(): Promise<MyProfile | null> {
 }
 
 /** Delete the signed-in caller's profile (raw inputs + structured profile). Idempotent; subsequent
- *  fit-intents then behave as the no-profile path (AC-10). */
-export async function deleteProfile(): Promise<{ ok: boolean }> {
+ *  fit-intents then behave as the no-profile path (AC-10). When a `conversationId` the caller owns is
+ *  passed, the profile CARD in that active conversation is also deleted (card-on-delete rule: the
+ *  deterministic card id makes it one DELETE); orphan cards in other conversations stay as history. */
+export async function deleteProfile(conversationId?: string): Promise<{ ok: boolean }> {
   const identity = await resolveCaller();
   if (!identity || identity.kind !== "account") return { ok: false };
-  await createStore(sql()).deleteProfile(identity.userId);
+  const store = createStore(sql());
+  await store.deleteProfile(identity.userId);
+  if (conversationId) {
+    const owner = await store.getConversationOwner(conversationId);
+    if (owner && owner.user_id === identity.userId) {
+      await store.deleteMessage(conversationId, profileCardMessageId(conversationId));
+    }
+  }
   return { ok: true };
+}
+
+// Trigger run statuses that are TERMINAL failures (all retries spent / crashed / canceled). The others
+// (QUEUED / EXECUTING / WAITING / ...) are still in-flight; COMPLETED is terminal success.
+const TERMINAL_FAILURE_STATUSES = new Set([
+  "FAILED",
+  "CRASHED",
+  "CANCELED",
+  "SYSTEM_FAILURE",
+  "TIMED_OUT",
+  "EXPIRED",
+  "PARTIAL_FAILED",
+]);
+
+/**
+ * The extraction run's terminal state, by runId - the poll's re-save-edge backstop. When a prior profile
+ * already exists, a failed re-extraction can NOT flip `extraction_failed` (the marker only flips when no
+ * profile was produced, i.e. `extracted_at IS NULL`), and it never advances `extracted_at` either - so
+ * `getMyProfile` alone would poll forever. The run status closes that edge: a terminal FAILED run ends the
+ * saving state in the error view (prior profile untouched). A transient retrieve error reads as `pending`
+ * (the client bounds the poll), never terminating early.
+ */
+export async function getProfileRunStatus(
+  runId: string,
+): Promise<{ status: "pending" | "done" | "failed" }> {
+  try {
+    const run = await runs.retrieve(runId);
+    if (run.status === "COMPLETED") return { status: "done" };
+    if (TERMINAL_FAILURE_STATUSES.has(run.status)) return { status: "failed" };
+    return { status: "pending" };
+  } catch {
+    return { status: "pending" };
+  }
 }
