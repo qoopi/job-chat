@@ -48,6 +48,38 @@ describe("hydrateHistory (the SDK hydrateMessages seam)", () => {
     expect(out.map((m) => m.id)).toEqual(["r1"]);
   });
 
+  // 05-testing audit gap fill: the id-dedupe case above only proves hydrateHistory's OWN output does not
+  // double the row. It never drives that deduped return through the real production bridge (the SDK's
+  // convertToModelMessages, then persistIncomingUserTurns) to prove the redelivered-id shape - turn-1's
+  // id-continuous arrival from 024 - does not increment the new-turn count and double-persist. This closes
+  // that gap: same shape as the count-semantics test above, but the incoming wire message's id ALREADY
+  // exists in the persisted store (not a new id), so persistIncomingUserTurns must see zero new turns.
+  it("does not double-persist turn-1's id-continuous arrival (redelivered id => zero new turns)", async () => {
+    const persisted = [{ id: "r1", role: "user" as const, content: "q1" }];
+    // 024's id continuity: the arrival send carries the SAME id startConversation already persisted.
+    const incoming: UIMessage[] = [{ id: "r1", role: "user", parts: [{ type: "text", text: "q1" }] }];
+
+    const hydrated = hydrateHistory(persisted, incoming);
+    const model = (await convertToModelMessages(hydrated)) as RunMessage[];
+
+    const appended: Array<{ role: string; content: string }> = [];
+    const store = {
+      getConversation: async () => ({
+        conversation: {} as never,
+        messages: persisted.map((m) => ({ ...m, parts: null }) as unknown as Message),
+      }),
+      appendMessage: async (_c: string, role: "user" | "assistant", content: string) => {
+        appended.push({ role, content });
+        return { role, content } as unknown as Message;
+      },
+    } as unknown as Store;
+
+    const outcome = await persistIncomingUserTurns(store, "c1", model);
+
+    expect(outcome).toBeNull();
+    expect(appended).toEqual([]); // no new turn - the redelivered id must not double-persist
+  });
+
   it("count-semantics: an error turn between two users flows through unchanged (drift closed by construction)", async () => {
     // The drift case: an errored assistant turn (content "") sits between two user turns. If the seam
     // coalesced (as buildModelHistory does for the MODEL), the two users would merge into one and
