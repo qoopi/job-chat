@@ -23,7 +23,7 @@ vi.mock("@/components/insight/charts/InsightChart", () => ({
 // The real, shipped MockChatTransport (extended with the `__CHAT_REPLAY__` tail) - not an inline stub -
 // so the reconnect/replay path under test is the one the e2e suite ships.
 vi.mock("@/lib/chat-transport", async () => {
-  const { MockChatTransport } = await import("@/lib/mock-transport");
+  const { MockChatTransport } = await import("../e2e/mock-transport");
   const instance = new MockChatTransport();
   return { useJobChatTransport: () => instance };
 });

@@ -19,7 +19,7 @@ const FORBIDDEN: [name: string, pattern: RegExp][] = [
 const RESUME_CHAIN_FILES = [
   "src/app/chat/[id]/page.tsx",
   "src/lib/server-store.ts",
-  "src/lib/chat-fixtures.ts",
+  "tests/e2e/chat-fixtures.ts",
   "src/lib/chat-ui.ts",
 ];
 

@@ -4,7 +4,6 @@ import type { UIMessage } from "ai";
 import type { ConversationSummary } from "@shared/store";
 import { ChatClient } from "@/components/chat/ChatClient";
 import { storeToUiMessages } from "@/lib/chat-ui";
-import { e2eFixtureThread } from "@/lib/chat-fixtures";
 import {
   loadConversation,
   listOwnerConversations,
@@ -51,7 +50,11 @@ export default async function ChatPage({
 
   if (e2e) {
     // No Postgres in the automated suite: resume from the fixture, or carry the landing question in. A
-    // fresh shell resumes nothing (no fixture lookup for "new").
+    // fresh shell resumes nothing (no fixture lookup for "new"). The E2E-only fixtures live in tests/ and
+    // are dynamic-imported behind this flag, so a production build's module graph never pulls in test code.
+    const { e2eFixtureThread } = await import(
+      "../../../../tests/e2e/chat-fixtures"
+    );
     const fixture = isNewChat ? undefined : e2eFixtureThread(id);
     if (fixture) {
       title = fixture.title;

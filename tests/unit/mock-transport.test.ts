@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { MockChatTransport } from "@/lib/mock-transport";
+import { MockChatTransport } from "../e2e/mock-transport";
 
 // AC-9 (stop keeps partial) depends entirely on the E2E mock transport honoring the abort signal: the
 // "ai" package's consumeStream() just loops `reader.read()` until the stream itself closes/errors - it
