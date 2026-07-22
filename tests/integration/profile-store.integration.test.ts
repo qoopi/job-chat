@@ -57,13 +57,19 @@ describe.skipIf(!hasCreds)("profiles store against real Postgres", () => {
     expect(pending!.profile).toBeNull(); // extraction pending
     expect(pending!.extracted_at).toBeNull();
 
-    // Phase 2 - the extraction task writes the structured profile, NULLs the transient PDF, stamps time.
-    await store.saveExtractedProfile(userId, extracted);
+    // Phase 2 - the extraction task writes the structured profile + stamps time, and reports it updated a
+    // row. The transient PDF is NOT nulled here - it survives until the card append succeeds (S1).
+    const updated = await store.saveExtractedProfile(userId, extracted);
+    expect(updated).toBe(true); // the row existed
     const done = await store.getProfile(userId);
     expect(done!.profile).toEqual(extracted); // structured profile persisted verbatim
     expect(done!.extracted_at).toBeInstanceOf(Date); // the DONE marker the poll waits on
-    expect(done!.resume_pdf).toBeNull(); // transient PII consumed
+    expect(Uint8Array.from(done!.resume_pdf!)).toEqual(pdf); // PDF still staged (cleared only after the card)
     expect(done!.raw_resume_text).toBe("Senior backend engineer, 8 years."); // raw input preserved
+
+    // Phase 3 - the terminal transient-PII clear runs after the card append succeeds.
+    await store.clearResumePdf(userId);
+    expect((await store.getProfile(userId))!.resume_pdf).toBeNull(); // transient PII consumed
   });
 
   // A re-save (the Update flow) must not destroy the working profile: saveProfileInputs replaces the
@@ -88,11 +94,11 @@ describe.skipIf(!hasCreds)("profiles store against real Postgres", () => {
 
   // The stated reason for the saveProfileInputs/saveExtractedProfile split (Deviation 3): a FAILED
   // re-extraction must never destroy the prior working profile. runProfileExtraction never calls
-  // saveExtractedProfile when the model generation throws (extractProfileFields propagates after its one
-  // retry), so the whole task run rejects - proved here end-to-end against real Postgres, not just at the
-  // store layer: seed an already-extracted profile, re-save new inputs, then run the REAL pipeline
-  // function with a `generate` that always rejects.
-  it("a failed re-extraction (both model attempts reject) preserves the prior extracted profile untouched", async () => {
+  // saveExtractedProfile when the model generation throws (extractProfileFields re-throws a transport
+  // error immediately - S2), so the whole task run rejects - proved here end-to-end against real Postgres,
+  // not just at the store layer: seed an already-extracted profile, re-save new inputs, then run the REAL
+  // pipeline function with a `generate` that rejects with a transport error.
+  it("a failed re-extraction (model transport error) preserves the prior extracted profile untouched", async () => {
     const u = `test-guest-${crypto.randomUUID()}`;
     await store.getOrCreateUser(u);
     await store.saveProfileInputs({ userId: u, rawResumeText: "v1", resumePdf: null, githubUsername: null });
@@ -118,7 +124,7 @@ describe.skipIf(!hasCreds)("profiles store against real Postgres", () => {
         { userId: u, conversationId: crypto.randomUUID() },
       ),
     ).rejects.toThrow("model unavailable");
-    expect(failingGenerate).toHaveBeenCalledTimes(2); // both the initial attempt AND its one retry failed
+    expect(failingGenerate).toHaveBeenCalledTimes(1); // a transport error is NOT retried inline - it propagates (S2)
 
     const after = await store.getProfile(u);
     expect(after!.profile).toEqual(before!.profile); // the WORKING profile survives the failed re-extraction
@@ -129,6 +135,53 @@ describe.skipIf(!hasCreds)("profiles store against real Postgres", () => {
     cardSpy.mockRestore();
 
     await sql`DELETE FROM profiles WHERE user_id = ${u}`;
+    await sql`DELETE FROM users WHERE user_id = ${u}`;
+  });
+
+  // Must-fix: on a PERMANENT extraction failure (no profile ever produced), markExtractionFailed clears
+  // the transient PDF (never long-term PII) AND stamps the terminal marker the poll surfaces.
+  it("markExtractionFailed clears the transient PDF and stamps the failure marker (must-fix)", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    await store.saveProfileInputs({ userId: u, rawResumeText: null, resumePdf: pdf, githubUsername: null });
+    expect((await store.getProfile(u))!.extraction_failed).toBe(false); // fresh save: pending, not failed
+
+    await store.markExtractionFailed(u);
+    const failed = await store.getProfile(u);
+    expect(failed!.resume_pdf).toBeNull(); // transient PII cleared even though extraction never completed
+    expect(failed!.extraction_failed).toBe(true); // the terminal marker the saving panel reads
+    expect(failed!.extracted_at).toBeNull(); // still no profile - genuinely failed
+
+    // A re-save queues a fresh attempt and clears the stale failure marker.
+    await store.saveProfileInputs({ userId: u, rawResumeText: "retry", resumePdf: null, githubUsername: null });
+    expect((await store.getProfile(u))!.extraction_failed).toBe(false);
+
+    await sql`DELETE FROM profiles WHERE user_id = ${u}`;
+    await sql`DELETE FROM users WHERE user_id = ${u}`;
+  });
+
+  // Must-fix guard: if a profile WAS produced, markExtractionFailed still clears the PDF but does NOT
+  // mismark the row as failed (extraction_failed = extracted_at IS NULL).
+  it("markExtractionFailed does not mark failed when a profile was already extracted", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    await store.saveProfileInputs({ userId: u, rawResumeText: "r", resumePdf: new Uint8Array([1]), githubUsername: null });
+    await store.saveExtractedProfile(u, extracted);
+    await store.markExtractionFailed(u);
+    const row = await store.getProfile(u);
+    expect(row!.resume_pdf).toBeNull(); // PDF still cleared
+    expect(row!.extraction_failed).toBe(false); // a real profile exists - not mismarked as failed
+    expect(row!.profile).toEqual(extracted);
+    await sql`DELETE FROM profiles WHERE user_id = ${u}`;
+    await sql`DELETE FROM users WHERE user_id = ${u}`;
+  });
+
+  // S3: saveExtractedProfile reports whether it matched a row, so the caller can skip an orphan card.
+  it("saveExtractedProfile returns false when the profile row is gone (deleted mid-extraction, S3)", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u); // user exists, but NO profiles row
+    expect(await store.saveExtractedProfile(u, extracted)).toBe(false); // matched zero rows
     await sql`DELETE FROM users WHERE user_id = ${u}`;
   });
 

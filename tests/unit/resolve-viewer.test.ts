@@ -55,6 +55,8 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     getProfile: boom,
     saveProfileInputs: boom,
     saveExtractedProfile: boom,
+    clearResumePdf: boom,
+    markExtractionFailed: boom,
     deleteProfile: boom,
     messageCounts: boom,
     ...overrides,

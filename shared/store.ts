@@ -63,8 +63,10 @@ export interface Message {
 
 /**
  * A profiles row: the raw inputs the save action stored plus (once the extraction task runs) the
- * structured profile. `extracted_at IS NOT NULL` is the DONE marker the poll read waits on. `resume_pdf`
- * is transient - present only between the save and the task, then NULLed. Postgres-only (AC-13).
+ * structured profile. `extracted_at IS NOT NULL` is the DONE marker the poll read waits on;
+ * `extraction_failed` is the terminal-FAILURE marker (the poll's other exit). `resume_pdf` is transient -
+ * present only between the save and the task, then NULLed once the extraction TERMINATES. Postgres-only
+ * (AC-13).
  */
 export interface ProfileRow {
   user_id: string;
@@ -72,7 +74,8 @@ export interface ProfileRow {
   resume_pdf: Uint8Array | null;
   github_username: string | null;
   profile: Profile | null; // null until the extraction task writes it
-  extracted_at: Date | null; // null = extraction pending
+  extracted_at: Date | null; // null = extraction pending (or failed - see extraction_failed)
+  extraction_failed: boolean; // true only after a PERMANENT extraction failure (all task retries spent)
 }
 
 /** The raw inputs the save action stores (the pre-extraction write). A null field clears that input. */
@@ -176,15 +179,32 @@ export interface Store {
    * Store the raw profile inputs (the save action's pre-extraction write): upsert the resume text / PDF
    * bytes / github username. Leaves `profile` and `extracted_at` UNTOUCHED, so a re-save keeps the
    * previous extracted profile in place until the task overwrites it - a failed re-extraction never
-   * destroys the working profile (AC: "error keeps the previous profile untouched").
+   * destroys the working profile (AC: "error keeps the previous profile untouched"). Clears
+   * `extraction_failed` (a re-save starts a fresh attempt, so any prior terminal-failure marker is stale).
    */
   saveProfileInputs(inputs: ProfileInputs): Promise<void>;
   /**
    * Write the extracted structured profile (the extraction task's post-extraction write): set `profile`
-   * + `extracted_at = now()` and NULL `resume_pdf` (transient PII consumed). A no-op if the row was
-   * deleted mid-extraction. Full replace of the profile - a re-extraction overwrites the prior one.
+   * + `extracted_at = now()`. Does NOT touch `resume_pdf` - the transient PII is cleared by
+   * `clearResumePdf` only AFTER the card append succeeds (so a mid-task retry can still re-extract a
+   * PDF-only resume). Returns whether it updated a row: `false` when the profile was deleted
+   * mid-extraction (UPDATE ... WHERE user_id matched nothing), so the caller skips appending an orphan
+   * card. Full replace of the profile - a re-extraction overwrites the prior one.
    */
-  saveExtractedProfile(userId: string, profile: Profile): Promise<void>;
+  saveExtractedProfile(userId: string, profile: Profile): Promise<boolean>;
+  /**
+   * Clear the transient resume PDF after a SUCCESSFUL extraction (the terminal PII clear-point, run only
+   * after the profile write + card append both succeed). A no-op if the row is already gone.
+   */
+  clearResumePdf(userId: string): Promise<void>;
+  /**
+   * Stamp the terminal-FAILURE marker after a PERMANENT extraction failure (the task's onFailure hook,
+   * fired once all retries are exhausted): NULL the transient `resume_pdf` (it must never linger as
+   * long-term PII) and set `extraction_failed` true - but ONLY when no profile was produced
+   * (`extracted_at IS NULL`), so a run that saved a profile yet failed a later step is not mismarked as
+   * failed. A no-op if the row is already gone.
+   */
+  markExtractionFailed(userId: string): Promise<void>;
   /** Remove the caller's profile (raw inputs + structured profile). Idempotent - deleting a
    *  non-existent profile is a no-op; subsequent fit-intents then behave as the no-profile path (AC-10). */
   deleteProfile(userId: string): Promise<void>;
@@ -379,30 +399,50 @@ export function createStore(sql: Sql): Store {
 
     async getProfile(userId) {
       const rows = await sql<ProfileRow[]>`
-        SELECT user_id, raw_resume_text, resume_pdf, github_username, profile, extracted_at
+        SELECT user_id, raw_resume_text, resume_pdf, github_username, profile, extracted_at, extraction_failed
         FROM profiles WHERE user_id = ${userId}`;
       return rows.length === 0 ? null : rows[0];
     },
 
     async saveProfileInputs({ userId, rawResumeText, resumePdf, githubUsername }) {
       // Upsert the raw inputs only; profile / extracted_at are left as-is on conflict (a re-save keeps the
-      // prior extracted profile until the task overwrites it - a failed re-extraction loses nothing).
+      // prior extracted profile until the task overwrites it - a failed re-extraction loses nothing). But
+      // clear extraction_failed: a re-save queues a FRESH attempt, so a prior terminal-failure marker is
+      // stale (else the poll would read the new pending attempt as already-failed).
       await sql`
         INSERT INTO profiles (user_id, raw_resume_text, resume_pdf, github_username)
         VALUES (${userId}, ${rawResumeText}, ${resumePdf}, ${githubUsername})
         ON CONFLICT (user_id) DO UPDATE SET
           raw_resume_text = EXCLUDED.raw_resume_text,
           resume_pdf = EXCLUDED.resume_pdf,
-          github_username = EXCLUDED.github_username`;
+          github_username = EXCLUDED.github_username,
+          extraction_failed = FALSE`;
     },
 
     async saveExtractedProfile(userId, profile) {
-      // Post-extraction write: set the structured profile + stamp extracted_at, and NULL the transient
-      // resume_pdf (its named consumer - the extraction task - is done with it). UPDATE-only: if the row
-      // was deleted mid-extraction, this matches zero rows and no profile is resurrected.
+      // Post-extraction write: set the structured profile + stamp extracted_at, and clear any stale
+      // failure marker. Does NOT null resume_pdf - clearResumePdf does that only after the card append
+      // succeeds (so a mid-task retry still has the PDF). UPDATE-only: a row deleted mid-extraction matches
+      // zero rows (count 0), so the caller skips the card append rather than orphaning one.
+      const result = await sql`
+        UPDATE profiles
+        SET profile = ${sql.json(profile as never)}, extracted_at = now(), extraction_failed = FALSE
+        WHERE user_id = ${userId}`;
+      return result.count > 0;
+    },
+
+    async clearResumePdf(userId) {
+      // The terminal transient-PII clear on the SUCCESS path (after the profile write + card append).
+      await sql`UPDATE profiles SET resume_pdf = NULL WHERE user_id = ${userId}`;
+    },
+
+    async markExtractionFailed(userId) {
+      // The terminal transient-PII clear + failure stamp on the PERMANENT-FAILURE path (onFailure). Always
+      // null resume_pdf (never leave PII at rest), but flag failed ONLY when no profile was produced -
+      // `extraction_failed = (extracted_at IS NULL)` - so a run that did save a profile is not mismarked.
       await sql`
         UPDATE profiles
-        SET profile = ${sql.json(profile as never)}, extracted_at = now(), resume_pdf = NULL
+        SET resume_pdf = NULL, extraction_failed = (extracted_at IS NULL)
         WHERE user_id = ${userId}`;
     },
 

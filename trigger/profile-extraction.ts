@@ -1,3 +1,4 @@
+import { ZodError } from "zod";
 import { ProfileSchema, type Profile } from "@shared/profile";
 import type { Store } from "@shared/store";
 import type { GithubSignals } from "./github-profile";
@@ -79,8 +80,11 @@ export function buildExtractionPrompt(input: {
   return { system: SYSTEM, messages: [{ role: "user", content }] };
 }
 
-/** Build the prompt and call the model, retrying ONCE on a failed/invalid generation (the model
- *  occasionally returns JSON that fails the schema; a single retry recovers it). */
+/** Build the prompt and call the model, retrying ONCE only on a SCHEMA-INVALID generation (the model
+ *  occasionally returns an object that fails ProfileSchema; a single re-ask recovers it). A transport /
+ *  throttle error is re-thrown so the task's OWN retry policy (schemaTask maxAttempts, with backoff) owns
+ *  it - the inner retry must not compound with generateObject.maxRetries + maxAttempts into a large
+ *  model-call fan-out (S2). */
 export async function extractProfileFields(
   generate: GenerateProfile,
   input: { resumeText?: string; resumePdf?: Uint8Array; githubSignals?: GithubSignals },
@@ -88,7 +92,8 @@ export async function extractProfileFields(
   const { system, messages } = buildExtractionPrompt(input);
   try {
     return ProfileSchema.parse(await generate({ system, messages }));
-  } catch {
+  } catch (err) {
+    if (!(err instanceof ZodError)) throw err; // transport/throttle - the task's retry, not ours
     return ProfileSchema.parse(await generate({ system, messages }));
   }
 }
@@ -102,8 +107,9 @@ export interface ExtractionDeps {
 
 /**
  * Run the extraction for one save: read the pending row, enrich from GitHub (resume-only if the fetch
- * throws - AC-5), extract, upsert the structured profile (which NULLs the transient PDF), and append the
- * deterministic-id profile card. Returns the profile, or `null` if the row was gone (deleted mid-flight).
+ * throws - AC-5), extract, upsert the structured profile, append the deterministic-id profile card, then
+ * clear the transient PDF. Returns the profile, or `null` if the row was gone - deleted before the task
+ * ran, or deleted mid-extraction (the profile write matched no row: skip the card so none is orphaned, S3).
  */
 export async function runProfileExtraction(
   deps: ExtractionDeps,
@@ -128,10 +134,29 @@ export async function runProfileExtraction(
     githubSignals,
   });
 
-  await deps.store.saveExtractedProfile(payload.userId, profile);
+  // The profile write is UPDATE ... WHERE user_id; if the profile was deleted mid-extraction it matches no
+  // row. Skip the card (and the PDF clear) so a deleted profile never gets an orphan card message (S3).
+  const updated = await deps.store.saveExtractedProfile(payload.userId, profile);
+  if (!updated) return null;
+
   await deps.store.appendProfileCard(payload.conversationId, profileCardMessageId(payload.conversationId), {
     kind: "profile-card",
     profile,
   });
+  // Clear the transient PDF ONLY after the card append succeeds (S1). If anything above throws (a transient
+  // blip), schemaTask retries the whole run and the PDF is still present, so a PDF-only resume re-extracts
+  // instead of degrading to the no-resume branch. A PERMANENT failure clears it via the onFailure hook.
+  await deps.store.clearResumePdf(payload.userId);
   return profile;
+}
+
+/**
+ * Terminal-failure handler wired to the task's onFailure hook, which fires once ALL retries are exhausted
+ * (a PERMANENT failure). Clears the transient resume PDF (it must never linger as long-term PII) and stamps
+ * the failure marker `getMyProfile` surfaces, so the saving panel can stop polling. Pure over the injected
+ * store - the task (extract-profile.ts) wires the real store seam.
+ */
+export async function markProfileExtractionFailed(store: Store, userId: string): Promise<void> {
+  console.error(`[extract-profile] extraction permanently failed for ${userId} - clearing the transient PDF and stamping the failure marker`);
+  await store.markExtractionFailed(userId);
 }

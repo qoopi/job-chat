@@ -140,7 +140,11 @@ export function createMemoryStore(): Store {
       return null;
     },
     async saveProfileInputs() {},
-    async saveExtractedProfile() {},
+    async saveExtractedProfile() {
+      return true;
+    },
+    async clearResumePdf() {},
+    async markExtractionFailed() {},
     async deleteProfile() {},
   };
 }

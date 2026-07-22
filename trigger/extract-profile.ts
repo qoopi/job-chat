@@ -7,7 +7,7 @@ import postgres from "postgres";
 import { ProfileSchema } from "@shared/profile";
 import { createStore, type Store } from "@shared/store";
 import { fetchGithubProfile } from "./github-profile";
-import { runProfileExtraction, type GenerateProfile } from "./profile-extraction";
+import { markProfileExtractionFailed, runProfileExtraction, type GenerateProfile } from "./profile-extraction";
 
 // The background extraction task: the save action triggers it (payload: userId + conversationId), it
 // reads the pending profiles row, enriches from GitHub, makes ONE haiku-class Bedrock call with the
@@ -35,6 +35,9 @@ const generate: GenerateProfile = async ({ system, messages }) => {
     schema: ProfileSchema,
     system,
     messages,
+    // Hand transport/throttle retries to the task's own retry policy (schemaTask maxAttempts, with
+    // backoff) instead of retrying inside each attempt - keeps the model-call fan-out bounded (S2).
+    maxRetries: 0,
   });
   return object;
 };
@@ -61,4 +64,10 @@ export const extractProfileTask = schemaTask({
         payload,
       ),
     ),
+  // onFailure fires only after the run threw on the FINAL attempt (all retries exhausted) - the terminal
+  // point to clear the transient resume PDF (never long-term PII) and stamp the failure marker the poll
+  // surfaces, so the saving panel can stop polling instead of spinning on a never-advancing extracted_at.
+  onFailure: async ({ payload }) => {
+    await withStore((store) => markProfileExtractionFailed(store, payload.userId));
+  },
 });
