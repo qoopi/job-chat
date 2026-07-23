@@ -18,6 +18,7 @@ const base: Posting = {
     { city: "Tokyo", region: "Tokyo", country: "Japan", kind: 0 },
   ],
   publishedAt: "2026-07-17T23:38:42Z",
+  roles: [],
 };
 
 const ingestedAt = new Date("2026-07-18T06:00:00Z");
@@ -189,5 +190,67 @@ describe("PostingSchema externalApplyUrl boundary", () => {
     const tooLong = `https://example.com/${"a".repeat(2100)}`;
     const result = PostingSchema.safeParse({ ...base, externalApplyUrl: tooLong });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("PostingSchema roles boundary (forward-compatible default)", () => {
+  it("defaults an ABSENT roles field to [] (the pre-ship payload) and projects empty arrays", () => {
+    // base carries no roles field at all - the pre-ship reality. It must parse and project to empty
+    // arrays so matching falls to the title-term path (unchanged behavior).
+    const result = PostingSchema.safeParse(base);
+    expect(result.success).toBe(true);
+    expect((result.data as Posting).roles).toEqual([]);
+    const row = mapPostingToRow(result.data as Posting, ingestedAt);
+    expect(row.role_ids).toEqual([]);
+    expect(row.role_names).toEqual([]);
+  });
+
+  it("parses an explicit empty roles array (an unclassified item) to empty projections", () => {
+    const result = PostingSchema.safeParse({ ...base, roles: [] });
+    expect(result.success).toBe(true);
+    const row = mapPostingToRow(result.data as Posting, ingestedAt);
+    expect(row.role_ids).toEqual([]);
+    expect(row.role_names).toEqual([]);
+  });
+
+  it("projects populated roles to parallel id/name arrays", () => {
+    const result = PostingSchema.safeParse({
+      ...base,
+      roles: [
+        { id: 12, name: "Backend Engineer" },
+        { id: 45, name: "Platform Engineer" },
+      ],
+    });
+    expect(result.success).toBe(true);
+    const row = mapPostingToRow(result.data as Posting, ingestedAt);
+    expect(row.role_ids).toEqual([12, 45]);
+    expect(row.role_names).toEqual(["Backend Engineer", "Platform Engineer"]);
+  });
+
+  it("dedupes roles by id (first name per id wins), preserving order", () => {
+    const row = mapPostingToRow(
+      {
+        ...base,
+        roles: [
+          { id: 12, name: "Backend Engineer" },
+          { id: 12, name: "Backend Engineer (dupe)" },
+          { id: 7, name: "Data Scientist" },
+        ],
+      },
+      ingestedAt,
+    );
+    expect(row.role_ids).toEqual([12, 7]);
+    expect(row.role_names).toEqual(["Backend Engineer", "Data Scientist"]);
+  });
+
+  it("strips unknown fields on a role rather than failing the batch (object is not strict)", () => {
+    const result = PostingSchema.safeParse({
+      ...base,
+      roles: [{ id: 12, name: "Backend Engineer", weight: 0.9, extra: "x" }],
+    });
+    expect(result.success).toBe(true);
+    const row = mapPostingToRow(result.data as Posting, ingestedAt);
+    expect(row.role_ids).toEqual([12]);
+    expect(row.role_names).toEqual(["Backend Engineer"]);
   });
 });

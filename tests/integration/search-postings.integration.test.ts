@@ -39,6 +39,8 @@ function row(over: Partial<PostingRow> & Pick<PostingRow, "external_id" | "title
     salary_currency: null,
     published_at: "2026-07-10 10:00:00",
     apply_url: "",
+    role_ids: [],
+    role_names: [],
     ingested_at: INGESTED,
     ...over,
   };

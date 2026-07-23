@@ -15,6 +15,13 @@ export const LocationSchema = z.object({
   kind: z.number().nullish(),
 });
 
+// A canonical role the jobs-api tags a posting with. Unknown fields on the wire are stripped (the object
+// is not .strict), so an evolving role shape never fails a batch.
+export const RoleSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+});
+
 export const PostingSchema = z.object({
   id: z.union([z.number(), z.string()]),
   title: z.string(),
@@ -30,6 +37,11 @@ export const PostingSchema = z.object({
   // The apply/careers-site link the jobs-api attaches per item. Validated (reject junk that would render a
   // dead link) and capped; nullish so an item that omits it still ingests.
   externalApplyUrl: z.string().url().max(2048).nullish(),
+  // The canonical roles the item carries: ALWAYS an array, EMPTY when the item is unclassified. The
+  // field is ABSENT on the pre-ship payload, so .default([]) makes an absent field AND an empty array
+  // both parse to [] - matching then falls to the title-term path (unchanged behavior) until the field
+  // ships and a re-ingest populates it.
+  roles: z.array(RoleSchema).default([]),
 });
 
 export type Posting = z.infer<typeof PostingSchema>;
@@ -62,6 +74,10 @@ export interface PostingRow {
   published_at: string;
   // The apply link-out; empty string when the item carried none (the CH column is non-nullable, DEFAULT '').
   apply_url: string;
+  // The canonical role ids/names, deduped by id and kept as parallel arrays (id[i] pairs with name[i]).
+  // Empty for an unclassified posting. role_ids drives the role-IN match; both feed the roles dimension.
+  role_ids: number[];
+  role_names: string[];
   ingested_at: string;
 }
 
@@ -75,6 +91,16 @@ export function mapPostingToRow(posting: Posting, ingestedAt: Date): PostingRow 
   // Single location columns: keep the first, drop the rest.
   const loc = posting.locations[0];
   const salary = posting.salary;
+  // Project roles to parallel id/name arrays, deduped by id (first name per id wins), order preserved.
+  const seenRole = new Set<number>();
+  const roleIds: number[] = [];
+  const roleNames: string[] = [];
+  for (const role of posting.roles) {
+    if (seenRole.has(role.id)) continue;
+    seenRole.add(role.id);
+    roleIds.push(role.id);
+    roleNames.push(role.name);
+  }
   return {
     source: posting.source,
     external_id: String(posting.id),
@@ -91,6 +117,8 @@ export function mapPostingToRow(posting: Posting, ingestedAt: Date): PostingRow 
     salary_currency: salary?.currency ?? null,
     published_at: toChDateTime(posting.publishedAt),
     apply_url: posting.externalApplyUrl ?? "",
+    role_ids: roleIds,
+    role_names: roleNames,
     ingested_at: toChDateTime(ingestedAt),
   };
 }
