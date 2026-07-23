@@ -82,6 +82,19 @@ export function PostingsCard({
   onEdit?: () => void;
   pending?: boolean;
 }) {
+  // Item 1: the chips are CLIENT-SIDE toggles over the DELIVERED rows - never a chat turn (the old
+  // follow-up re-derived search params and returned MORE rows). Composable (AND). Counts are honest to
+  // the delivered set only; the server `total` is never re-queried (that re-query is out of scope).
+  // Hooks run before the no-matches early return (rules-of-hooks) - unused on that path.
+  const [onlyRemote, setOnlyRemote] = useState(false);
+  const [onlySalary, setOnlySalary] = useState(false);
+  const remoteCount = useMemo(() => rows.filter((r) => r.remote).length, [rows]);
+  const salaryCount = useMemo(() => rows.filter(hasSalary).length, [rows]);
+  const filtered = useMemo(
+    () => rows.filter((r) => (!onlyRemote || r.remote) && (!onlySalary || hasSalary(r))),
+    [rows, onlyRemote, onlySalary],
+  );
+
   // No-matches variant: the rows present ARE the near-misses (rows[0] is the closest); no dedicated near-miss field.
   if (total === 0) {
     const near = rows.length;
@@ -121,17 +134,6 @@ export function PostingsCard({
     );
   }
 
-  // Item 1: the chips are CLIENT-SIDE toggles over the DELIVERED rows - never a chat turn (the old
-  // follow-up re-derived search params and returned MORE rows). Composable (AND). Counts are honest to
-  // the delivered set only; the server `total` is never re-queried (that re-query is out of scope).
-  const [onlyRemote, setOnlyRemote] = useState(false);
-  const [onlySalary, setOnlySalary] = useState(false);
-  const remoteCount = useMemo(() => rows.filter((r) => r.remote).length, [rows]);
-  const salaryCount = useMemo(() => rows.filter(hasSalary).length, [rows]);
-  const filtered = useMemo(
-    () => rows.filter((r) => (!onlyRemote || r.remote) && (!onlySalary || hasSalary(r))),
-    [rows, onlyRemote, onlySalary],
-  );
   const filtering = onlyRemote || onlySalary;
   const visible = filtered.slice(0, POSTINGS_INCHAT_CAP);
   return (
