@@ -573,12 +573,16 @@ describe("Should_ScoreByFixedFormula_When_SearchPostingsBuilt (AC-7/AC-8)", () =
     expect(rowsSql).toContain("1 * (salary_max IS NOT NULL AND salary_max >= 150000)");
   });
 
-  it("orders by score DESC then publishedAt DESC, over the open set, keeping only matches (score > 0)", () => {
+  it("orders by score DESC, salary-listed DESC, then publishedAt DESC, over the open set, keeping only matches (score > 0)", () => {
     const { rowsSql } = buildSearchPostingsSql(params, "postings");
     expect(rowsSql).toContain("FROM postings FINAL");
     expect(rowsSql).toContain("WHERE ingested_at = (SELECT max(ingested_at) FROM postings)");
     expect(rowsSql).toContain("WHERE score > 0");
-    expect(rowsSql).toContain("ORDER BY score DESC, published_at DESC");
+    // Item 4 (register 20) tie-break: within equal scores, salary-listed rows and freshest first
+    // (deterministic - a listed-salary US row never sinks below an unlisted India row on a score tie).
+    expect(rowsSql).toContain(
+      "ORDER BY score DESC, (salary_min IS NOT NULL OR salary_max IS NOT NULL) DESC, published_at DESC",
+    );
     expect(rowsSql).toContain("LIMIT 10"); // interface default
   });
 

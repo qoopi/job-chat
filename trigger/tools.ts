@@ -190,6 +190,12 @@ const GENERIC_TITLE_TOKENS = new Set([
   "lead",
 ]);
 
+// Family-crossing tokens: distinctive enough to survive the generic stoplist, but bare they match across
+// unrelated job families (a bare "Automation" recalled "UX Designer, Tools Automation and Infrastructure" -
+// register 17). Never emit them alone: pair with the phrase's preceding distinctive token AND a canonical
+// pairing (so "QA Automation Engineer" contributes "QA Automation" + "Test Automation", never "Automation").
+const CONTEXT_REQUIRED_TOKENS: Record<string, string> = { automation: "Test Automation" };
+
 /** F4: broaden title terms for the whole-phrase ILIKE scorer, which recalls almost nothing against
  *  real-world titles ("Software Engineer III, Full Stack" never matches '%Full-Stack Developer%'). Per term
  *  emit the phrase, its hyphen->space normalization, and its DISTINCTIVE tokens (the generic-token stoplist
@@ -212,8 +218,20 @@ export function expandTitleTerms(terms: string[]): string[] {
     push(phrase);
     const normalized = phrase.replace(/-/g, " ").replace(/\s+/g, " ").trim();
     push(normalized);
-    for (const token of normalized.split(" ")) {
-      if (!GENERIC_TITLE_TOKENS.has(token.toLowerCase())) push(token);
+    const tokens = normalized.split(" ");
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      const lower = token.toLowerCase();
+      if (GENERIC_TITLE_TOKENS.has(lower)) continue;
+      const canonical = CONTEXT_REQUIRED_TOKENS[lower];
+      if (canonical) {
+        // Never bare: emit the phrase's own bigram with the preceding distinctive token, plus the canonical pairing.
+        const prev = tokens[i - 1];
+        if (prev && !GENERIC_TITLE_TOKENS.has(prev.toLowerCase())) push(`${prev} ${token}`);
+        push(canonical);
+        continue;
+      }
+      push(token);
     }
   }
   return out.slice(0, 10);
