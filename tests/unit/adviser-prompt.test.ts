@@ -149,6 +149,16 @@ describe("adviser-v2 system prompt", () => {
     expect(ADVISER_V2.toLowerCase()).toMatch(/can match people|unable to match/);
   });
 
+  // Item 6 (register 22): a multi-turn divergence - after several fit turns the model kept answering a
+  // GENERAL market question ("how is the job market doing") with the postings card instead of a data
+  // answer. The fix is a routing reminder conditioning search_postings on EXPLICIT personal-fit wording.
+  it("guards mode routing: search_postings is only for explicit personal fit; a market question stays a data answer", () => {
+    const p = ADVISER_V2.toLowerCase();
+    expect(p).toMatch(/only for an explicit personal fit|search_postings is only/);
+    expect(p).toMatch(/how is the job market/);
+    expect(p).toMatch(/data answer/);
+  });
+
   it("guardrails: always steer to jobs, and stay out of medical/legal/financial professional advice (career IS in scope)", () => {
     const p = ADVISER_V2.toLowerCase();
     expect(p).toMatch(/always .*steer|always end by steering/);

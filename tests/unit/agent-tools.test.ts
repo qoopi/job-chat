@@ -262,7 +262,9 @@ describe("expandTitleTerms (F4 recall broadening)", () => {
   it.each([
     // [input, expected expansion]
     [["Full-Stack Developer"], ["Full-Stack Developer", "Full Stack Developer", "Stack"]],
-    [["QA Automation Engineer"], ["QA Automation Engineer", "QA", "Automation"]],
+    // Item 3: bare "Automation" crosses job families ("UX Designer, Tools Automation") - never emit it
+    // standalone. Instead emit the phrase's own bigram ("QA Automation") + the canonical pairing ("Test Automation").
+    [["QA Automation Engineer"], ["QA Automation Engineer", "QA", "QA Automation", "Test Automation"]],
     [["Backend Engineer"], ["Backend Engineer", "Backend"]],
     [["staff engineer"], ["staff engineer"]], // both tokens generic -> only the phrase survives
     [["backend"], ["backend"]], // a distinctive single token: phrase == token, deduped
@@ -279,7 +281,10 @@ describe("expandTitleTerms (F4 recall broadening)", () => {
     // the distinctive tokens still make it through
     expect(out).toContain("Stack");
     expect(out).toContain("QA");
-    expect(out).toContain("Automation");
+    // Item 3: "Automation" is family-crossing - NEVER bare; only its paired forms survive.
+    expect(out).not.toContain("Automation");
+    expect(out).toContain("QA Automation");
+    expect(out).toContain("Test Automation");
   });
 
   it("dedupes case-insensitively and caps at the analytics limit of 10", () => {

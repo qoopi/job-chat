@@ -47,10 +47,14 @@ export function scriptedClient(pages: (PostingsPage | Error)[]): SearchnapplyCli
 
 export function collectingSink() {
   const batches: PostingRow[][] = [];
+  const deletes: { table: string; olderThan: Date }[] = [];
   const sink: RowSink = {
     async insert({ values }) {
       batches.push(values);
     },
+    async deleteOlderThan(params) {
+      deletes.push(params);
+    },
   };
-  return { sink, batches };
+  return { sink, batches, deletes };
 }

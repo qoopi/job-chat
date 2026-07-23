@@ -546,7 +546,9 @@ export function buildSearchPostingsSql(
     `  WHERE ${openSet}`,
     ")",
     "WHERE score > 0",
-    "ORDER BY score DESC, published_at DESC",
+    // Item 4 (register 20): deterministic tie-break within equal scores - salary-listed rows first, then
+    // freshest. Stops a listed-salary US row sinking below an unlisted India row on a score tie.
+    "ORDER BY score DESC, (salary_min IS NOT NULL OR salary_max IS NOT NULL) DESC, published_at DESC",
     `LIMIT ${p.limit}`,
   ]);
   const metaSql = assemble([

@@ -8,6 +8,7 @@ import {
   loadConversation,
   listOwnerConversations,
   resolveViewer,
+  viewerHasProfile,
 } from "@/lib/server-store";
 import { isE2E } from "@/lib/e2e";
 import { e2eFixtureThread } from "@/lib/e2e-fixtures";
@@ -41,6 +42,9 @@ export default async function ChatPage({
   let conversations: ConversationSummary[] = [];
   let accountName: string | undefined;
   let accountEmail: string | undefined;
+  // Item 2: whether the returning account already has a profile - only the post-auth arrival consumes it,
+  // so it is read (via the existing store, no new endpoint) only on that path.
+  let hasProfile = false;
 
   if (e2e) {
     // No Postgres in the suite: resume from the fixture. `e2eFixtureThread` is the production STUB (prod never calls this).
@@ -69,6 +73,9 @@ export default async function ChatPage({
     conversations = viewer.accountUserId
       ? await listOwnerConversations(viewer.accountUserId)
       : [];
+    if (fromAuth === "1" && viewer.accountUserId) {
+      hasProfile = await viewerHasProfile(viewer.accountUserId);
+    }
   }
 
   return (
@@ -85,6 +92,7 @@ export default async function ChatPage({
       conversations={conversations}
       profileOnArrival={profile === "1"}
       fromAuth={fromAuth === "1"}
+      hasProfile={hasProfile}
     />
   );
 }

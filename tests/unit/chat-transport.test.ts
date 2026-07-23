@@ -23,9 +23,14 @@ const REAL_TRANSPORT = {
 };
 
 // The Trigger.dev SDK's real transport hook - an external boundary, mocked so this test drives only
-// chat-transport.ts's own branching (the e2e ternary), not the SDK's internals.
+// chat-transport.ts's own branching (the e2e ternary), not the SDK's internals. Capture the options so the
+// canonical multiTab flag (item 5) can be pinned.
+let capturedOptions: Record<string, unknown> | undefined;
 vi.mock("@trigger.dev/sdk/chat/react", () => ({
-  useTriggerChatTransport: () => REAL_TRANSPORT,
+  useTriggerChatTransport: (options: Record<string, unknown>) => {
+    capturedOptions = options;
+    return REAL_TRANSPORT;
+  },
 }));
 
 // The server actions module ("use server": postgres + next/headers at import time) - mocked exactly as
@@ -44,6 +49,13 @@ describe("useJobChatTransport - the e2e construction gate (027 audit)", () => {
       useJobChatTransport({ e2e: false, conversationId: "c1" }),
     );
     expect(result.current).toBe(REAL_TRANSPORT);
+  });
+
+  // Item 5: multiTab: true is the canonical two-tab guard (BroadcastChannel claims the chatId so other tabs
+  // go read-only, preventing a double-send). Pinned so a future edit that drops it fails loudly.
+  it("passes multiTab: true to the SDK transport (the canonical two-tab guard)", () => {
+    renderHook(() => useJobChatTransport({ e2e: false, conversationId: "c1" }));
+    expect(capturedOptions?.multiTab).toBe(true);
   });
 
   // e2e=true DOES construct the seam's MockChatTransport import - which is the production STUB here (no

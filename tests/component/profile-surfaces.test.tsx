@@ -228,6 +228,72 @@ describe("PostingsCard", () => {
     expect(screen.getByRole("button", { name: "Open top 50 of 51 in panel" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Open all 51 in panel" })).toBeNull();
   });
+
+  // Item 1 (register 19/20): the "Only remote" / "Only with salary" chips are CLIENT-SIDE toggles over
+  // the delivered rows - they NEVER send a chat turn (the old behavior re-derived search params and
+  // returned MORE rows). Counts are honest to the delivered set; composable (AND); toggling off restores.
+  // postingsRows: 12 rows, remote at i%3==0 (=4), salary listed at i%2==0 (=6), remote&salary at i∈{0,6} (=2).
+  test("chip toggles filter the delivered rows locally and NEVER send a chat turn (honest counts)", () => {
+    const onFollowup = vi.fn();
+    render(<PostingsCard rows={postingsRows} total={23} onFollowup={onFollowup} onOpenPanel={vi.fn()} />);
+    // Chip labels carry the honest live count of matching delivered rows.
+    const remoteChip = screen.getByRole("button", { name: /Only remote · 4/ });
+    const salaryChip = screen.getByRole("button", { name: /Only with salary · 6/ });
+    // Baseline: full delivered set, 8 shown of the 23 server total.
+    expect(document.querySelectorAll("tbody tr").length).toBe(8);
+    expect(screen.getByText("8 of 23 matches")).toBeTruthy();
+
+    // Toggle remote: 4 remote rows, all shown; aria-pressed; footer honest to the delivered subset.
+    fireEvent.click(remoteChip);
+    expect(remoteChip.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelectorAll("tbody tr").length).toBe(4);
+    expect(screen.getByText("4 of 4 shown")).toBeTruthy();
+    // Composable (AND) with salary: remote AND salary-listed = 2 rows.
+    fireEvent.click(salaryChip);
+    expect(document.querySelectorAll("tbody tr").length).toBe(2);
+    expect(screen.getByText("2 of 2 shown")).toBeTruthy();
+
+    // Toggling both off restores the full delivered set + the server-total footer.
+    fireEvent.click(remoteChip);
+    fireEvent.click(salaryChip);
+    expect(document.querySelectorAll("tbody tr").length).toBe(8);
+    expect(screen.getByText("8 of 23 matches")).toBeTruthy();
+
+    // Never a chat turn - the whole point of the fix.
+    expect(onFollowup).not.toHaveBeenCalled();
+  });
+
+  test("empty-filter-result: a filter that matches nothing shows a message, not an empty table", () => {
+    const noRemote = postingsRows.map((r) => ({ ...r, remote: false }));
+    render(<PostingsCard rows={noRemote} total={23} onOpenPanel={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Only remote · 0/ }));
+    expect(document.querySelectorAll("tbody tr").length).toBe(0);
+    expect(screen.getByText(/None of these 12 match that filter/)).toBeTruthy();
+  });
+
+  // 037b should-fix: under an active filter the Verdict headline must stay consistent with the visible
+  // rows. The unfiltered headline reads "23 postings match your profile — showing the best 8"; over a
+  // 4-row filtered table the "showing the best 8" tail is a visible honesty contradiction. It is
+  // suppressed while a filter is active (the honest server total stays), and restored when the filter clears.
+  test("verdict headline drops the 'showing the best N' tail under an active filter (server total honest), restores on clear", () => {
+    render(<PostingsCard rows={postingsRows} total={23} onOpenPanel={vi.fn()} />);
+    const verdict = () => document.querySelector(".verdict")?.textContent ?? "";
+    // Baseline (no filter): server total AND the capped-shown tail.
+    expect(verdict()).toContain("23 postings match your profile");
+    expect(verdict()).toContain("showing the best 8");
+
+    // Filter active (4 remote rows shown): the "showing the best 8" tail would contradict the 4-row
+    // table, so it is gone; the honest server total (23) claim remains.
+    const remoteChip = screen.getByRole("button", { name: /Only remote · 4/ });
+    fireEvent.click(remoteChip);
+    expect(document.querySelectorAll("tbody tr").length).toBe(4);
+    expect(verdict()).toContain("23 postings match your profile");
+    expect(verdict()).not.toContain("showing the best");
+
+    // Filter cleared: the original headline is restored verbatim.
+    fireEvent.click(remoteChip);
+    expect(verdict()).toContain("showing the best 8");
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------
@@ -600,5 +666,43 @@ describe("DetailProfile error state (poll contract)", () => {
 
     expect(await screen.findByText("Couldn’t build the profile")).toBeTruthy();
     expect(screen.getByText("Your previous profile is untouched.")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Item 2 (register 16): a post-auth return whose account ALREADY has a profile on file must SKIP the form
+// and auto-continue the queued fit question (the same F3 one-shot machinery, armed at a new site). No
+// profile -> the form opens (F2 unchanged). `hasProfile` is the SSR-resolved signal the page passes down.
+// ---------------------------------------------------------------------------------------------------
+describe("Item 2 fromAuth-with-profile auto-continue (register 16)", () => {
+  const FIT_Q = "find me a job that fits";
+  function threadWithInvite(): UIMessage[] {
+    return [
+      { id: "u-fit", role: "user", parts: [{ type: "text", text: FIT_Q }] } as UIMessage,
+      assistantPart("data-profile-invite", { kind: "profile-invite" }),
+    ];
+  }
+
+  test("Should_SkipFormAndAutoContinue_When_PostAuthArrivalWithProfileOnFile", async () => {
+    sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
+    renderChat(threadWithInvite(), { e2e: true, fromAuth: true, hasProfile: true });
+    // The queued fit question is re-asked exactly once (original + one auto re-run) - no manual "So?".
+    await waitFor(() => expect(screen.getAllByText(FIT_Q)).toHaveLength(2));
+    // The form is NOT opened (a profile is already on file), and getMyProfile is never consulted.
+    expect(screen.queryByRole("region", { name: "Your profile" })).toBeNull();
+    expect(getMyProfile).not.toHaveBeenCalled();
+    // read-once: the flag is cleared on consumption.
+    expect(sessionStorage.getItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`)).toBeNull();
+  });
+
+  test("Should_OpenFormAndNotAutoContinue_When_PostAuthArrivalWithoutProfile (F2 unchanged)", async () => {
+    sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
+    renderChat(threadWithInvite(), { e2e: true, fromAuth: true }); // hasProfile defaults false
+    // No profile on file -> the form opens (interaction-spec flow C step 4)...
+    expect(await screen.findByRole("region", { name: "Your profile" })).toBeTruthy();
+    // ...and the fit question is NOT auto-resent (it waits for the save to fire the armed continuation).
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.getAllByText(FIT_Q)).toHaveLength(1);
   });
 });

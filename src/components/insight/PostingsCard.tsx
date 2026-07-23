@@ -82,6 +82,19 @@ export function PostingsCard({
   onEdit?: () => void;
   pending?: boolean;
 }) {
+  // Item 1: the chips are CLIENT-SIDE toggles over the DELIVERED rows - never a chat turn (the old
+  // follow-up re-derived search params and returned MORE rows). Composable (AND). Counts are honest to
+  // the delivered set only; the server `total` is never re-queried (that re-query is out of scope).
+  // Hooks run before the no-matches early return (rules-of-hooks) - unused on that path.
+  const [onlyRemote, setOnlyRemote] = useState(false);
+  const [onlySalary, setOnlySalary] = useState(false);
+  const remoteCount = useMemo(() => rows.filter((r) => r.remote).length, [rows]);
+  const salaryCount = useMemo(() => rows.filter(hasSalary).length, [rows]);
+  const filtered = useMemo(
+    () => rows.filter((r) => (!onlyRemote || r.remote) && (!onlySalary || hasSalary(r))),
+    [rows, onlyRemote, onlySalary],
+  );
+
   // No-matches variant: the rows present ARE the near-misses (rows[0] is the closest); no dedicated near-miss field.
   if (total === 0) {
     const near = rows.length;
@@ -121,16 +134,27 @@ export function PostingsCard({
     );
   }
 
-  const shown = shownCount(rows);
-  const visible = rows.slice(0, POSTINGS_INCHAT_CAP);
+  const filtering = onlyRemote || onlySalary;
+  const visible = filtered.slice(0, POSTINGS_INCHAT_CAP);
   return (
     <div className="insight" style={{ maxWidth: 760 }}>
       <div className="insight-head">
-        <Verdict text={postingsVerdict(total, shown)} />
+        {/* Under an active filter the "showing the best N" tail would contradict the filtered table
+            (item 1 honesty). Pass shown=total to suppress the tail while the honest server total stays;
+            the full headline restores when the filter clears. */}
+        <Verdict text={postingsVerdict(total, filtering ? total : shownCount(rows))} />
       </div>
       <div className="insight-body">
-        <PostingsTable rows={visible} />
-        <HonestyCaption rows={rows} />
+        {filtered.length > 0 ? (
+          <>
+            <PostingsTable rows={visible} />
+            <HonestyCaption rows={filtered} />
+          </>
+        ) : (
+          <div style={{ fontSize: 13, color: "var(--text-2)", padding: "8px 2px" }}>
+            None of these {rows.length} match that filter.
+          </div>
+        )}
       </div>
       <div className="insight-foot">
         <div className="followups">
@@ -139,15 +163,27 @@ export function PostingsCard({
               {openPanelLabel(rows.length, total)} in panel
             </button>
           ) : null}
-          <button className="chip" type="button" disabled={pending} onClick={() => onFollowup?.("Only remote")}>
-            Only remote
+          <button
+            className={onlyRemote ? "chip chip-accent" : "chip"}
+            type="button"
+            aria-pressed={onlyRemote}
+            onClick={() => setOnlyRemote((v) => !v)}
+          >
+            Only remote · {remoteCount}
           </button>
-          <button className="chip" type="button" disabled={pending} onClick={() => onFollowup?.("Only with salary")}>
-            Only with salary
+          <button
+            className={onlySalary ? "chip chip-accent" : "chip"}
+            type="button"
+            aria-pressed={onlySalary}
+            onClick={() => setOnlySalary((v) => !v)}
+          >
+            Only with salary · {salaryCount}
           </button>
         </div>
         <span className="src">
-          {shown} of {total} matches
+          {filtering
+            ? `${Math.min(filtered.length, POSTINGS_INCHAT_CAP)} of ${filtered.length} shown`
+            : `${shownCount(rows)} of ${total} matches`}
         </span>
       </div>
     </div>

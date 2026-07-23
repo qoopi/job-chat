@@ -1,13 +1,30 @@
-import { mapPostingToRow, type PostingRow } from "./postings";
+import type { ClickHouseClient } from "@clickhouse/client";
+import { mapPostingToRow, toChDateTime, type PostingRow } from "./postings";
 import type { SearchnapplyClient } from "./searchnapply";
 
-// The insert seam: structurally satisfied by @clickhouse/client's insert (real client in prod, fake in tests).
+// The write seam: structurally satisfied by @clickhouse/client (real client in prod, fake in tests).
 export interface RowSink {
   insert(params: {
     table: string;
     values: PostingRow[];
     format: "JSONEachRow";
   }): Promise<unknown>;
+  /** Delisting cleanup: drop snapshot rows older than the run's version. Keyed to the run timestamp, so it
+   *  is overlap-safe - an older run's delete (a smaller `olderThan`) can never touch a newer snapshot. */
+  deleteOlderThan(params: { table: string; olderThan: Date }): Promise<unknown>;
+}
+
+/** The production ClickHouse-backed sink (insert + delisting delete). One home for both prod and the
+ *  integration test, so the delete SQL lives in a single place. */
+export function createClickhouseRowSink(client: ClickHouseClient): RowSink {
+  return {
+    insert: (params) => client.insert(params),
+    deleteOlderThan: ({ table, olderThan }) =>
+      client.command({
+        query: `DELETE FROM ${table} WHERE ingested_at < '${toChDateTime(olderThan)}'`,
+        clickhouse_settings: { wait_end_of_query: 1 },
+      }),
+  };
 }
 
 export interface IngestDeps {
@@ -47,6 +64,10 @@ export async function ingestPostings(deps: IngestDeps): Promise<IngestResult> {
     }
     page += 1;
   } while (page <= totalPages);
+
+  // Delisting cleanup: only reached after ALL pages inserted (a mid-run throw skips it). Keyed to THIS
+  // run's version so it is idempotent across retries and overlap-safe (an older run cannot prune a newer snapshot).
+  await deps.sink.deleteOlderThan({ table, olderThan: deps.ingestedAt });
 
   return { pages: page - 1, rows, totalCount };
 }
