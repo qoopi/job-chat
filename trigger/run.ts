@@ -89,11 +89,11 @@ function corpusNote(c: CorpusSummary): string {
   const salaryPct = Math.round(c.salaryCoverage * 100);
   const lines = [
     `CORPUS: the live data you answer from right now - ${c.total.toLocaleString()} open postings, snapshot ${snapshot}.` +
-      ` These are the values that EXIST; filter matching is case-insensitive (use any casing), but only filter on values shown here.`,
+      ` These are the values that EXIST; filter matching is case-insensitive (use any casing).`,
   ];
   if (c.sources.length)
     lines.push(`Sources: ${c.sources.map((s) => `${s.source} ${Math.round(s.share * 100)}%`).join(", ")}.`);
-  if (c.topCities.length) lines.push(`Top cities: ${c.topCities.join(", ")}.`);
+  if (c.topCities.length) lines.push(`Busiest cities: ${c.topCities.join(", ")}.`);
   if (c.countries.length) lines.push(`Countries: ${c.countries.join(", ")}.`);
   if (c.experienceLevels.length) lines.push(`experience_level values: ${c.experienceLevels.join(", ")}.`);
   if (c.employmentTypes.length) lines.push(`employment_type values: ${c.employmentTypes.join(", ")}.`);
@@ -108,12 +108,16 @@ export function createChatRun<R>(deps: ChatRunDeps<R>) {
   // (new chatId) re-fetches fresh corpus facts. Held for the life of this run factory (a module singleton
   // in trigger/chat.ts). A rejected fetch is NOT pinned - a later turn retries.
   const corpusByChat = new Map<string, Promise<CorpusSummary | null>>();
+  const CORPUS_MEMO_CAP = 1000; // bound the worker-lifetime memo (chatId is unbounded)
   const resolveCorpus = (
     chatId: string,
     fetch: (id: string) => Promise<CorpusSummary | null>,
   ): Promise<CorpusSummary | null> => {
     const cached = corpusByChat.get(chatId);
     if (cached) return cached;
+    // Clear-all (not evict-one) past the cap: a re-fetch of the stable corpus re-renders byte-identically,
+    // so an active conversation's cached system prefix stays warm across the rare clear.
+    if (corpusByChat.size >= CORPUS_MEMO_CAP) corpusByChat.clear();
     const pending = fetch(chatId).catch((err) => {
       corpusByChat.delete(chatId);
       throw err;

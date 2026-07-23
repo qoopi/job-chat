@@ -236,7 +236,7 @@ describe("createChatRun CORPUS note injection (044 AC-2/3)", () => {
     expect(capturedSystem).toContain("3,488 open postings");
     expect(capturedSystem).toContain("snapshot 2026-07-18");
     expect(capturedSystem).toContain("Sources: searchnapply 98%, fixture 2%.");
-    expect(capturedSystem).toContain("Top cities: San Francisco, Los Angeles, Berlin.");
+    expect(capturedSystem).toContain("Busiest cities: San Francisco, Los Angeles, Berlin.");
     expect(capturedSystem).toContain("Countries: United States, Germany.");
     expect(capturedSystem).toContain("experience_level values: Senior, Junior, Staff.");
     expect(capturedSystem).toContain("employment_type values: full-time, contract.");
