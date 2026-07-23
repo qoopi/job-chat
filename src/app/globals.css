@@ -209,9 +209,9 @@ a:hover {
   min-width: 0;
 }
 .canvas {
-  /* Fills the main alone; when the detail panel opens (.docked) flex-grow animates to 0 so the chat docks to a
-     360px right rail over 240ms (interaction-spec section 1). flex-basis is the docked rail width. */
-  flex: 1 1 360px;
+  /* Fills the main alone (~chat 80vw); when the detail panel opens (.docked) flex-grow animates to 0 so the
+     chat docks to a 35vw right rail over 240ms (operator 039: sidebar 20 / detail 45 / chat 35). flex-basis is the docked rail width. */
+  flex: 1 1 35vw;
   transition: flex-grow 240ms ease-out;
   background: var(--canvas-bg);
   border-radius: var(--r-lg);
@@ -279,7 +279,9 @@ a:hover {
 
 /* ---------- sidebar ---------- */
 .sidebar {
-  width: 248px;
+  /* 20vw with a floor so a narrow window never crushes the history (operator 039). */
+  width: 20vw;
+  min-width: 220px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -414,6 +416,7 @@ a:hover {
 }
 .sidebar.collapsed {
   width: 64px;
+  min-width: 0; /* clear the expanded 220px floor so the icon rail stays 64px */
   align-items: center;
   padding: var(--sp-5) var(--sp-2);
 }
