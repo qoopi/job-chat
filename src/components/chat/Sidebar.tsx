@@ -202,6 +202,9 @@ export function Sidebar({
                     className="sb-rename"
                     aria-label={`Rename ${c.title}`}
                     defaultValue={c.title}
+                    // Mirror the server's TitleSchema cap (trigger/session.ts, max 120) so the field can't
+                    // silently over-type past what the store would trim anyway.
+                    maxLength={120}
                     autoFocus
                     onFocus={(e) => e.currentTarget.select()}
                     onBlur={() => setRenamingId(null)}
@@ -258,7 +261,8 @@ export function Sidebar({
                     aria-haspopup="menu"
                     aria-expanded={menuId === c.id}
                     // Two conversations can share a title, so a short id suffix keeps each options label's accessible name unique.
-                    aria-label={`Options for ${c.title} (${c.id.slice(0, 8)})`}
+                    // Fall back like the visible pill (title.trim() || "New chat") so an empty title never reads "Options for  (id)".
+                    aria-label={`Options for ${c.title.trim() || "New chat"} (${c.id.slice(0, 8)})`}
                     onClick={() => setMenuId((m) => (m === c.id ? null : c.id))}
                   >
                     <KebabIcon />
