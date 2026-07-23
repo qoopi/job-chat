@@ -19,7 +19,9 @@ import { persistedSessionIsStreaming } from "@/lib/chat-session-store";
 import {
   classifyCardData,
   dataParts,
+  dedupeInviteCards,
   isStreaming,
+  messageText,
   reconcileMessagesById,
   resolveDetailContent,
   type DetailTarget,
@@ -118,6 +120,15 @@ export function ChatClient({
   // `status` off "ready". `pending = isStreaming(status) || awaiting`; the send/attach `finally` clears it, never stuck.
   const [awaiting, setAwaiting] = useState(false);
   const started = useRef(false);
+  // F3 auto-continue: the fit question an invite card interrupted. Armed ONLY when an invite is the trailing
+  // assistant turn at the moment the profile flow starts; consumed exactly once (nulled BEFORE the send).
+  const autoContinueRef = useRef<string | null>(null);
+  // Latest turns for the arm-time trailing-card read, so the arm helper stays a stable ([]) callback (no memo
+  // churn). Synced in an effect (post-commit), which is always before an event-handler/microtask arm reads it.
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // The open detail panel, held by identity so its body re-resolves from the immutable payload (a resume renders the same detail panel). One at a time.
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
@@ -131,22 +142,27 @@ export function ChatClient({
     setDetailTarget(null);
     setProfileOpen(true);
   }, []);
-  const closeProfile = useCallback(() => setProfileOpen(false), []);
+  const closeProfile = useCallback(() => {
+    autoContinueRef.current = null; // abandon the flow without saving -> never auto-continue a stale question later
+    setProfileOpen(false);
+  }, []);
 
-  // The profile card is out-of-band: the task persists it under a DETERMINISTIC id, and the form injects it
-  // into the LIVE thread under the SAME id, so a re-save REPLACES the one card (reconcileMessagesById folds by id).
-  const onProfileSaved = useCallback(
-    async (profile: Profile) => {
-      const id = await profileCardMessageId(conversationId);
-      const card = {
-        id,
-        role: "assistant",
-        parts: [{ type: "data-profile-card", id: `${id}-card`, data: { kind: "profile-card", profile } }],
-      } as UIMessage;
-      setMessages((prev) => (prev.some((m) => m.id === id) ? prev.map((m) => (m.id === id ? card : m)) : [...prev, card]));
-    },
-    [conversationId, setMessages],
-  );
+  // F3: arm the one-shot replay IF an invite card is the trailing assistant turn right now (the invite
+  // interrupted a fit question). Capture that question; a non-invite trailing card (an Edit from the profile
+  // card, the title-bar profile entry) leaves the ref untouched, so those never auto-continue.
+  const armAutoContinue = useCallback(() => {
+    const msgs = messagesRef.current;
+    const trailing = msgs[msgs.length - 1];
+    if (!trailing || trailing.role !== "assistant") return;
+    const isInviteTrailing = dataParts(trailing).some((p) => {
+      const kind = classifyCardData(p.data).kind;
+      return kind === "auth-invite" || kind === "profile-invite";
+    });
+    if (!isInviteTrailing) return;
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    const question = lastUser ? messageText(lastUser).trim() : "";
+    autoContinueRef.current = question || null;
+  }, []);
 
   const onProfileDeleted = useCallback(async () => {
     const id = await profileCardMessageId(conversationId);
@@ -155,20 +171,20 @@ export function ChatClient({
 
   const onAuthInvite = useCallback(() => {
     if (signedIn) {
+      armAutoContinue(); // a signed-in click on an auth-invite opens the form in place - continue the fit question after the save
       openProfile();
       return;
     }
     queuePendingProfileInvite(conversationId);
     openAuthDialog();
-  }, [signedIn, conversationId, openProfile]);
+  }, [signedIn, conversationId, openProfile, armAutoContinue]);
 
-  const injectProfileInvite = useCallback(() => {
-    const id = crypto.randomUUID();
-    setMessages((prev) => [
-      ...prev,
-      { id, role: "assistant", parts: [{ type: "data-profile-invite", id: `${id}-invite`, data: { kind: "profile-invite" } }] } as UIMessage,
-    ]);
-  }, [setMessages]);
+  // Opening the profile from a card/invite: arm the auto-continue when an INVITE is trailing (a no-op for
+  // the profile-card/postings Edit, whose trailing card is not an invite). The title bar opens via openProfile directly (no arm).
+  const onEditProfile = useCallback(() => {
+    armAutoContinue();
+    openProfile();
+  }, [armAutoContinue, openProfile]);
 
   // New chat starts fresh IN PLACE - clear the thread/detail panel/composer without navigating; `freshChatRef` arms the next send to create a brand-new conversation.
   const startNewChat = useCallback(() => {
@@ -326,6 +342,26 @@ export function ChatClient({
     ],
   );
 
+  // The profile card is out-of-band: the task persists it under a DETERMINISTIC id, and the form injects it
+  // into the LIVE thread under the SAME id, so a re-save REPLACES the one card (reconcileMessagesById folds by id).
+  const onProfileSaved = useCallback(
+    async (profile: Profile) => {
+      const id = await profileCardMessageId(conversationId);
+      const card = {
+        id,
+        role: "assistant",
+        parts: [{ type: "data-profile-card", id: `${id}-card`, data: { kind: "profile-card", profile } }],
+      } as UIMessage;
+      setMessages((prev) => (prev.some((m) => m.id === id) ? prev.map((m) => (m.id === id ? card : m)) : [...prev, card]));
+      // F3: if an invite started this flow, re-run the fit question it interrupted. Null the ref BEFORE the
+      // send so a double-save can never fire twice; `send` still enforces the reentrancy + cap guards itself.
+      const question = autoContinueRef.current;
+      autoContinueRef.current = null;
+      if (question) void send(question);
+    },
+    [conversationId, setMessages, send],
+  );
+
   // Arrival: deliver turn 1 through the public send path. Message #1 was SSR-loaded into initialMessages;
   // delivering with its id reconciles the streamed turn onto the SSR bubble (one bubble) and keeps the count-persist a no-op.
   const deliverArrival = useCallback(
@@ -365,7 +401,13 @@ export function ChatClient({
         const queued = takeQueuedDraft(conversationId);
         const pendingInvite = takePendingProfileInvite(conversationId);
         if (queued && fromAuth) void send(queued);
-        else if (pendingInvite && fromAuth) injectProfileInvite();
+        // F2: the post-auth return OPENS the profile form (the interaction-spec flow C step 4), never a second
+        // invite card. F3: this is the guest continuation of onAuthInvite across the redirect - arm the fit
+        // question the SSR thread's trailing invite interrupted, so the save auto-continues it.
+        else if (pendingInvite && fromAuth) {
+          armAutoContinue();
+          openProfile();
+        }
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -430,7 +472,8 @@ export function ChatClient({
 
   // Reconcile by id at the merge seam: reconnecting to a live run re-receives the already-present assistant tail
   // (SDK session replay, same id); fold those duplicates (replace in place, order kept) so each turn renders once and keys stay unique.
-  const view = useMemo(() => reconcileMessagesById(messages), [messages]);
+  // Then dedupeInviteCards (F1): the idempotent invite cards arrive from uncoordinated sources under DIFFERENT ids, so only a presentation pass collapses them.
+  const view = useMemo(() => dedupeInviteCards(reconcileMessagesById(messages)), [messages]);
 
   // The open detail panel's body, re-resolved from the current (immutable) messages. The EXPENSIVE resolve (classify +
   // Zod safeParse -> a fresh insight whose new `rows` ref re-sorts the DataTable) is memoized on the target
@@ -517,7 +560,7 @@ export function ChatClient({
               onRetry={onRetry}
               onOpenDetailPanel={openDetailPanel}
               onSignIn={signedIn ? undefined : openAuthDialog}
-              onEditProfile={openProfile}
+              onEditProfile={onEditProfile}
               onAuthInvite={onAuthInvite}
               liveError={liveError}
             />

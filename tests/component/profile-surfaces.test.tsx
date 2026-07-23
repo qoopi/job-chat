@@ -340,44 +340,122 @@ test("auth-invite card wires the auth dialog (guest)", async () => {
 // ---------------------------------------------------------------------------------------------------
 // The pending profile-invite across the REAL auth boundary (the Google redirect)
 // ---------------------------------------------------------------------------------------------------
-describe("pending profile-invite replay across the auth redirect", () => {
+describe("pending profile-invite across the auth redirect (F2: opens the FORM, injects nothing)", () => {
   // The post-auth return: `/auth/complete` lands back on this SAME conversation with `fromAuth=1`. The
-  // queued flag (set above) is read-once and, on this genuine post-auth arrival, replayed as the
-  // profile-invite card in the live thread.
-  test("Should_ReplayProfileInviteCardOnce_When_PostAuthArrivalWithPendingInvite", async () => {
+  // queued flag (set above) is read-once and, on this genuine post-auth arrival, OPENS the profile form
+  // (interaction-spec flow C step 4) - never a second invite card (F2 replaced injectProfileInvite with openProfile).
+  test("Should_OpenProfileFormAndInjectNothing_When_PostAuthArrivalWithPendingInvite", async () => {
     sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
     renderChat([], { fromAuth: true });
-    expect(await screen.findByRole("button", { name: "Add your profile" })).toBeTruthy();
+    // the profile panel opens and resolves to the empty form (getMyProfile -> null)...
+    expect(await screen.findByRole("region", { name: "Your profile" })).toBeTruthy();
+    expect(await screen.findByText("No profile yet")).toBeTruthy();
+    // ...and NO invite card was injected into the thread
+    expect(screen.queryByRole("button", { name: "Add your profile" })).toBeNull();
     // read-once: the flag is cleared once consumed, so it can never fire a second time from storage alone
     expect(sessionStorage.getItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`)).toBeNull();
   });
 
-  // Mutation-check: the exactly-once guarantee must live at the sessionStorage layer itself, not just a
-  // component mount ref - a SECOND ChatClient mount for the SAME conversation (a StrictMode double-invoke,
-  // or a real remount) after the first already consumed the flag must NOT inject a second card.
-  test("Should_NotReplayOnSecondUnrelatedMount_When_PendingInviteAlreadyConsumed", async () => {
+  // Mutation-check: the exactly-once guarantee lives at the sessionStorage layer itself - a SECOND ChatClient
+  // mount for the SAME conversation (a StrictMode double-invoke, or a real remount) after the first already
+  // consumed the flag must NOT open the form again.
+  test("Should_NotReopenFormOnSecondMount_When_PendingInviteAlreadyConsumed", async () => {
     sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
     const first = renderChat([], { fromAuth: true });
-    await screen.findByRole("button", { name: "Add your profile" });
+    await screen.findByRole("region", { name: "Your profile" });
     first.unmount();
 
     renderChat([], { fromAuth: true });
     await Promise.resolve();
     await Promise.resolve();
-    expect(screen.queryByRole("button", { name: "Add your profile" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Your profile" })).toBeNull();
   });
 
   // The flag is taken-and-cleared on ANY signed-in mount (a signed-in user never legitimately owns one),
-  // but only INJECTED on a genuine post-auth arrival. A LATER ordinary signed-in mount that happens to
-  // find a stale flag (the guest abandoned the sign-in, then returned via an unrelated navigation) must
-  // not surface the card either - it is garbage-collected instead.
-  test("Should_NotInjectInvite_When_OrdinarySignedInMountFindsAStalePendingFlag", async () => {
+  // but only ACTED ON (form opened) on a genuine post-auth arrival. A LATER ordinary signed-in mount that
+  // happens to find a stale flag (the guest abandoned the sign-in, then returned via an unrelated
+  // navigation) must not open the form either - the flag is garbage-collected instead.
+  test("Should_NotOpenForm_When_OrdinarySignedInMountFindsAStalePendingFlag", async () => {
     sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
     renderChat([]); // signed in (renderChat default), fromAuth absent
     await Promise.resolve();
     await Promise.resolve();
-    expect(screen.queryByRole("button", { name: "Add your profile" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Your profile" })).toBeNull();
     expect(sessionStorage.getItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`)).toBeNull(); // still cleared
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// F1: dedupe invite cards from uncoordinated sources (rendered through the real ChatClient view memo)
+// ---------------------------------------------------------------------------------------------------
+describe("F1 invite-card dedupe", () => {
+  test("Should_RenderOneCardPerKind_When_DuplicateInviteSourcesInThread", () => {
+    // Three profile-invite parts under DIFFERENT message ids (an inject + a resume re-stream + an .out
+    // replay) - reconcileMessagesById can't fold them (distinct ids); dedupeInviteCards must.
+    const dupInvites: UIMessage[] = ["inv-a", "inv-b", "inv-c"].map(
+      (id) =>
+        ({
+          id,
+          role: "assistant",
+          parts: [{ type: "data-profile-invite", id: `${id}-p`, data: { kind: "profile-invite" } }],
+        }) as UIMessage,
+    );
+    renderChat(dupInvites);
+    expect(screen.getAllByRole("button", { name: "Add your profile" })).toHaveLength(1);
+    expect(document.querySelectorAll(".register-card")).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// F3: guarded one-shot auto-continue - after an invite-started profile save, re-run the fit question once
+// ---------------------------------------------------------------------------------------------------
+describe("F3 auto-continue after profile save", () => {
+  const FIT_Q = "find me a job that fits";
+  function threadWithInvite(): UIMessage[] {
+    return [
+      { id: "u-fit", role: "user", parts: [{ type: "text", text: FIT_Q }] } as UIMessage,
+      assistantPart("data-profile-invite", { kind: "profile-invite" }),
+    ];
+  }
+
+  test("Should_AutoResendFitQuestionOnce_When_ProfileSavedAfterInvite", async () => {
+    renderChat(threadWithInvite(), { e2e: true }); // signed in; e2e build injects the card + fires onProfileSaved
+    expect(screen.getAllByText(FIT_Q)).toHaveLength(1); // only the original ask so far
+    fireEvent.click(screen.getByRole("button", { name: "Add your profile" })); // arms the auto-continue + opens the form
+    fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
+    fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
+    // the fit question is re-asked exactly once (original + the one auto re-run)
+    await waitFor(() => expect(screen.getAllByText(FIT_Q)).toHaveLength(2));
+  });
+
+  test("Should_NotAutoResend_When_NoInviteStartedTheFlow", async () => {
+    // The form is opened by the fromAuth path over an EMPTY thread (a stale pending flag, no trailing invite),
+    // so nothing is armed; a save must not re-send anything.
+    sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
+    renderChat([], { e2e: true, fromAuth: true });
+    await screen.findByRole("region", { name: "Your profile" });
+    fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
+    fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
+    await screen.findByText("Profile saved ✓");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.querySelectorAll(".bubble.user")).toHaveLength(0); // no auto-resent user turn
+  });
+
+  test("Should_AutoResendOnlyOnce_When_ProfileSavedTwice (double-save -> one)", async () => {
+    renderChat(threadWithInvite(), { e2e: true });
+    fireEvent.click(screen.getByRole("button", { name: "Add your profile" }));
+    fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
+    fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
+    await waitFor(() => expect(screen.getAllByText(FIT_Q)).toHaveLength(2)); // save #1 auto-continues
+    // Re-save from the saved state; the ref was consumed by save #1, so no second auto-send.
+    fireEvent.click(await screen.findByRole("button", { name: "Edit & re-save" }));
+    fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByText("Profile saved ✓");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.getAllByText(FIT_Q)).toHaveLength(2); // still exactly one auto re-run
   });
 });
 
