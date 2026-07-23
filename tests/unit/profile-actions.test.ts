@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProfileRow, Store, User } from "@shared/store";
-import type { Profile } from "@shared/profile";
+import type { Profile, Skill } from "@shared/profile";
 
 // The profile server actions' boundary logic: signed-in-only + conversation ownership + the PDF size cap
 // + the empty guard, plus the sanitized poll read (never the transient PDF bytes). Exercises the REAL
@@ -46,6 +46,7 @@ import {
   deleteProfile,
   getProfileRunStatus,
   updateProfilePrefs,
+  updateProfileSkills,
 } from "@/app/actions";
 import { profileCardMessageId } from "../../trigger/profile-card-id";
 
@@ -88,6 +89,7 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     saveProfileInputs: boom,
     saveExtractedProfile: boom,
     updateProfilePrefs: boom,
+    updateProfileSkills: boom,
     clearResumePdf: boom,
     markExtractionFailed: boom,
     deleteProfile: boom,
@@ -299,6 +301,87 @@ describe("updateProfilePrefs", () => {
     signIn();
     fakeStore = makeStore({ updateProfilePrefs: async () => null });
     expect(await updateProfilePrefs({ salary: 100000, location: "SF" })).toEqual({ ok: false, reason: "not_found" });
+  });
+});
+
+describe("updateProfileSkills", () => {
+  const SKILLS: Skill[] = [
+    { name: "Go", source: "both" },
+    { name: "ClickHouse", source: "github" },
+    { name: "Rust", source: "resume" },
+  ];
+
+  it("refuses a guest (not_found) and never touches the store", async () => {
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    expect(await updateProfileSkills({ skills: SKILLS })).toEqual({ ok: false, reason: "not_found" });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("trims names, drops empties, dedupes case-insensitively (first wins, source preserved); returns the row", async () => {
+    signIn();
+    const updated: Profile = { ...PROFILE, skills: [{ name: "Go", source: "both" }, { name: "Rust", source: "resume" }] };
+    const upd = vi.fn(async () => updated);
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    const res = await updateProfileSkills({
+      skills: [
+        { name: "  Go  ", source: "both" },
+        { name: "", source: "resume" }, // dropped
+        { name: "go", source: "github" }, // dup of Go -> dropped, first (both) wins
+        { name: "Rust", source: "resume" },
+      ],
+    });
+    expect(res).toEqual({ ok: true, profile: updated });
+    expect(upd).toHaveBeenCalledWith(ACCT, [
+      { name: "Go", source: "both" },
+      { name: "Rust", source: "resume" },
+    ]);
+  });
+
+  it("allows removing every github-proven chip - an empty array persists (the user owns their profile)", async () => {
+    signIn();
+    const upd = vi.fn(async () => ({ ...PROFILE, skills: [] }));
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    await updateProfileSkills({ skills: [] });
+    expect(upd).toHaveBeenCalledWith(ACCT, []);
+  });
+
+  it("rejects a skill name over 60 chars (invalid_input), never persisting", async () => {
+    signIn();
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    expect(await updateProfileSkills({ skills: [{ name: "x".repeat(61), source: "resume" }] })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("rejects more than 40 skills (invalid_input)", async () => {
+    signIn();
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    const many: Skill[] = Array.from({ length: 41 }, (_, i) => ({ name: `skill-${i}`, source: "resume" }));
+    expect(await updateProfileSkills({ skills: many })).toEqual({ ok: false, reason: "invalid_input" });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid source from an untrusted client (invalid_input)", async () => {
+    signIn();
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    // @ts-expect-error - deliberately malformed source
+    expect(await updateProfileSkills({ skills: [{ name: "Go", source: "linkedin" }] })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found when the caller has no extracted profile row (store -> null)", async () => {
+    signIn();
+    fakeStore = makeStore({ updateProfileSkills: async () => null });
+    expect(await updateProfileSkills({ skills: SKILLS })).toEqual({ ok: false, reason: "not_found" });
   });
 });
 

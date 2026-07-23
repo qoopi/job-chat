@@ -249,4 +249,37 @@ describe.skipIf(!hasCreds)("profiles store against real Postgres", () => {
     await sql`DELETE FROM profiles WHERE user_id = ${u}`;
     await sql`DELETE FROM users WHERE user_id = ${u}`;
   });
+
+  // 041: replacing the skills array (add/remove) leaves the rest intact and returns the updated row.
+  it("updateProfileSkills replaces only the skills array and leaves the rest of the profile intact", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    await store.saveProfileInputs({ userId: u, rawResumeText: "r", resumePdf: null, githubUsername: null });
+    await store.saveExtractedProfile(u, extracted);
+
+    const nextSkills = [
+      { name: "Go", source: "both" as const },
+      { name: "TypeScript", source: "resume" as const }, // added
+    ];
+    const updated = await store.updateProfileSkills(u, nextSkills);
+    expect(updated).not.toBeNull();
+    expect(updated!.skills).toEqual(nextSkills);
+    expect(updated!.salaryMin).toBe(extracted.salaryMin); // untouched
+    expect(updated!.locations).toEqual(extracted.locations); // untouched
+    expect((await store.getProfile(u))!.profile!.skills).toEqual(nextSkills); // persisted
+
+    // Removing every proven chip is allowed - an empty array persists.
+    const emptied = await store.updateProfileSkills(u, []);
+    expect(emptied!.skills).toEqual([]);
+
+    await sql`DELETE FROM profiles WHERE user_id = ${u}`;
+    await sql`DELETE FROM users WHERE user_id = ${u}`;
+  });
+
+  it("updateProfileSkills returns null for a missing/pending profile row", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    expect(await store.updateProfileSkills(u, [{ name: "Go", source: "both" }])).toBeNull();
+    await sql`DELETE FROM users WHERE user_id = ${u}`;
+  });
 });

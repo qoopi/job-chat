@@ -1,10 +1,11 @@
 "use server";
 
 import { cookies, headers } from "next/headers";
+import { z } from "zod";
 import { auth, runs, tasks } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore, type ConversationSummary } from "@shared/store";
-import type { Profile } from "@shared/profile";
+import type { Profile, Skill } from "@shared/profile";
 import { profileCardMessageId } from "../../trigger/profile-card-id";
 import type { extractProfileTask } from "../../trigger/extract-profile";
 import { getGuardConfig } from "@shared/env";
@@ -334,6 +335,43 @@ export async function updateProfilePrefs(input: {
     locations,
     remotePref,
   });
+  if (!profile) return { ok: false, reason: "not_found" };
+  return { ok: true, profile };
+}
+
+const MAX_SKILLS = 40;
+const MAX_SKILL_NAME = 60;
+const SkillsEditSchema = z.array(
+  z.object({ name: z.string(), source: z.enum(["resume", "github", "both"]) }),
+);
+
+/** Replace the caller's OWN skills array (the 041 chip add/remove). The client supplies the full array with
+ *  each chip's source preserved (a newly ADDED chip carries source "resume"); the server validates (names
+ *  trimmed non-empty <= 60, max 40, case-insensitively deduped) and persists. Removing a github-proven chip
+ *  is allowed - the user owns their profile. Returns the updated row. */
+export async function updateProfileSkills(input: {
+  skills: Skill[];
+}): Promise<UpdateProfileResult> {
+  const identity = await resolveCaller();
+  if (!identity || identity.kind !== "account") return { ok: false, reason: "not_found" };
+
+  const parsed = SkillsEditSchema.safeParse(input.skills);
+  if (!parsed.success) return { ok: false, reason: "invalid_input" };
+
+  const cleaned: Skill[] = [];
+  const seen = new Set<string>();
+  for (const raw of parsed.data) {
+    const name = raw.name.trim();
+    if (!name) continue; // an empty chip is dropped, never persisted
+    if (name.length > MAX_SKILL_NAME) return { ok: false, reason: "invalid_input" };
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue; // first wins, preserving its source
+    seen.add(key);
+    cleaned.push({ name, source: raw.source });
+  }
+  if (cleaned.length > MAX_SKILLS) return { ok: false, reason: "invalid_input" };
+
+  const profile = await createStore(getJobchatSql()).updateProfileSkills(identity.userId, cleaned);
   if (!profile) return { ok: false, reason: "not_found" };
   return { ok: true, profile };
 }

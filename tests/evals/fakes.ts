@@ -149,6 +149,9 @@ export function createMemoryStore(): Store {
     async updateProfilePrefs() {
       return null;
     },
+    async updateProfileSkills() {
+      return null;
+    },
     async clearResumePdf() {},
     async markExtractionFailed() {},
     async deleteProfile() {},

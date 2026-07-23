@@ -1,5 +1,5 @@
 import type { Sql } from "postgres";
-import type { Profile } from "./profile";
+import type { Profile, Skill } from "./profile";
 
 // OLTP chat store (raw postgres, no ORM). Contract: `null` always means "not found".
 
@@ -142,6 +142,10 @@ export interface Store {
    *  Profile, or null when the user has no extracted profile row (nothing to edit). Ownership is the
    *  userId scope (the CALLER passes its own id, mirroring the other profile methods). */
   updateProfilePrefs(userId: string, prefs: ProfilePrefs): Promise<Profile | null>;
+  /** Replace the skills array on the caller's EXTRACTED profile (jsonb merge; the caller supplies the full
+   *  validated array, sources included). Returns the updated Profile, or null when there is no extracted
+   *  profile row. Ownership is the userId scope, exactly like updateProfilePrefs. */
+  updateProfileSkills(userId: string, skills: Skill[]): Promise<Profile | null>;
   /** Clear the transient resume PDF - the terminal PII clear-point on the success path. */
   clearResumePdf(userId: string): Promise<void>;
   /** onFailure (all retries spent): NULL `resume_pdf` (transient PII must never linger) and set
@@ -333,6 +337,15 @@ export function createStore(sql: Sql): Store {
       // to edit), so a missing/pending row matches zero rows -> null (the action reads it as not_found).
       const rows = await sql<{ profile: Profile }[]>`
         UPDATE profiles SET profile = profile || ${sql.json(prefs as never)}::jsonb
+        WHERE user_id = ${userId} AND profile IS NOT NULL
+        RETURNING profile`;
+      return rows.length === 0 ? null : rows[0].profile;
+    },
+
+    async updateProfileSkills(userId, skills) {
+      // Same targeted jsonb merge as updateProfilePrefs, replacing only the `skills` array.
+      const rows = await sql<{ profile: Profile }[]>`
+        UPDATE profiles SET profile = profile || ${sql.json({ skills } as never)}::jsonb
         WHERE user_id = ${userId} AND profile IS NOT NULL
         RETURNING profile`;
       return rows.length === 0 ? null : rows[0].profile;
