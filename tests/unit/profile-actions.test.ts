@@ -40,7 +40,13 @@ vi.mock("@shared/store", async (importOriginal) => {
   return { ...actual, createStore: () => fakeStore };
 });
 
-import { saveProfile, getMyProfile, deleteProfile, getProfileRunStatus } from "@/app/actions";
+import {
+  saveProfile,
+  getMyProfile,
+  deleteProfile,
+  getProfileRunStatus,
+  updateProfilePrefs,
+} from "@/app/actions";
 import { profileCardMessageId } from "../../trigger/profile-card-id";
 
 const ACCT = "acct-1";
@@ -81,6 +87,7 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     getProfile: boom,
     saveProfileInputs: boom,
     saveExtractedProfile: boom,
+    updateProfilePrefs: boom,
     clearResumePdf: boom,
     markExtractionFailed: boom,
     deleteProfile: boom,
@@ -241,6 +248,57 @@ describe("deleteProfile", () => {
     });
     await deleteProfile(CONV);
     expect(deleteMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateProfilePrefs", () => {
+  it("refuses a guest (not_found) and never touches the store", async () => {
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfilePrefs: upd });
+    expect(await updateProfilePrefs({ salary: 100000, location: "SF" })).toEqual({ ok: false, reason: "not_found" });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("parses the location + persists the prefs, returning the updated row", async () => {
+    signIn();
+    const updated: Profile = { ...PROFILE, salaryMin: 150000, locations: ["SF"], remotePref: true };
+    const upd = vi.fn(async () => updated);
+    fakeStore = makeStore({ updateProfilePrefs: upd });
+    const res = await updateProfilePrefs({ salary: 150000, location: "SF or remote" });
+    expect(res).toEqual({ ok: true, profile: updated });
+    expect(upd).toHaveBeenCalledWith(ACCT, { salaryMin: 150000, locations: ["SF"], remotePref: true });
+  });
+
+  it("clears both prefs when salary is null and location is blank", async () => {
+    signIn();
+    const upd = vi.fn(async () => ({ ...PROFILE, salaryMin: null, locations: [], remotePref: null }));
+    fakeStore = makeStore({ updateProfilePrefs: upd });
+    await updateProfilePrefs({ salary: null, location: "   " });
+    expect(upd).toHaveBeenCalledWith(ACCT, { salaryMin: null, locations: [], remotePref: null });
+  });
+
+  it("rejects a non-positive / non-integer / over-cap salary (invalid_input), never persisting", async () => {
+    signIn();
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfilePrefs: upd });
+    for (const salary of [0, -5, 1.5, 10_000_001]) {
+      expect(await updateProfilePrefs({ salary, location: null })).toEqual({ ok: false, reason: "invalid_input" });
+    }
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("rejects location text over the 120 cap (invalid_input), never persisting", async () => {
+    signIn();
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfilePrefs: upd });
+    expect(await updateProfilePrefs({ salary: null, location: "x".repeat(121) })).toEqual({ ok: false, reason: "invalid_input" });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found when the caller has no extracted profile row (store -> null)", async () => {
+    signIn();
+    fakeStore = makeStore({ updateProfilePrefs: async () => null });
+    expect(await updateProfilePrefs({ salary: 100000, location: "SF" })).toEqual({ ok: false, reason: "not_found" });
   });
 });
 

@@ -12,6 +12,7 @@ import { isE2E } from "@/lib/e2e";
 import { auth as authServer } from "@/lib/auth";
 import { GUEST_COOKIE } from "@/lib/guest-cookie";
 import { getJobchatSql } from "@/lib/jobchat-sql";
+import { parseLocationPref } from "@/lib/profile-format";
 import { AGENT_ID } from "../../trigger/agent-id";
 import {
   chatTokenScopes,
@@ -294,6 +295,47 @@ export async function deleteProfile(conversationId?: string): Promise<{ ok: bool
     }
   }
   return { ok: true };
+}
+
+// The profile-edit bounds (041): server-authoritative caps mirrored loosely by the client inputs.
+const MAX_SALARY = 10_000_000;
+const MAX_LOCATION_TEXT = 120;
+
+/** A profile edit outcome: the re-rendered row on success, else a typed refusal. `not_found` = the caller
+ *  is a guest / signed-in with no extracted profile (a profile edit is only for one's OWN extracted
+ *  profile - mirrors renameConversation's non-owner -> not_found); `invalid_input` = a bound was breached. */
+export type UpdateProfileResult =
+  | { ok: true; profile: Profile }
+  | { ok: false; reason: "not_found" | "invalid_input" };
+
+/** Edit the caller's OWN salary/location preferences (the 041 inline edit). Validates server-side (salary a
+ *  positive int capped, location text trimmed + capped, both clearable), parses the free-text location into
+ *  {locations, remotePref}, and persists via the store's targeted jsonb merge. Returns the updated row so
+ *  the view re-renders from server truth. These fields feed searchPostings - the NEXT match run reflects them. */
+export async function updateProfilePrefs(input: {
+  salary: number | null;
+  location: string | null;
+}): Promise<UpdateProfileResult> {
+  const identity = await resolveCaller();
+  if (!identity || identity.kind !== "account") return { ok: false, reason: "not_found" };
+
+  let salaryMin: number | null;
+  if (input.salary === null) salaryMin = null;
+  else if (!Number.isInteger(input.salary) || input.salary <= 0 || input.salary > MAX_SALARY) {
+    return { ok: false, reason: "invalid_input" };
+  } else salaryMin = input.salary;
+
+  const rawLocation = input.location ?? "";
+  if (rawLocation.trim().length > MAX_LOCATION_TEXT) return { ok: false, reason: "invalid_input" };
+  const { locations, remotePref } = parseLocationPref(rawLocation);
+
+  const profile = await createStore(getJobchatSql()).updateProfilePrefs(identity.userId, {
+    salaryMin,
+    locations,
+    remotePref,
+  });
+  if (!profile) return { ok: false, reason: "not_found" };
+  return { ok: true, profile };
 }
 
 // Trigger run statuses that are TERMINAL failures; others are in-flight, COMPLETED is terminal success.
