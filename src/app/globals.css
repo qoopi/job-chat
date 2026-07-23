@@ -924,6 +924,22 @@ a:hover {
   font-weight: 500;
   color: var(--text-2);
 }
+/* 041: the "+ Add" skill input in the profile editor - a pill-shaped input matching the chip row. */
+.skill-add-input {
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  border: 1px dashed var(--border);
+  background: var(--surface);
+  color: var(--text);
+  outline: 0;
+}
+.skill-add-input:focus {
+  border-style: solid;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
 /* small uppercase section label (Skills / Works on / Sources / Experience) */
 .micro {
   font-size: 10px;

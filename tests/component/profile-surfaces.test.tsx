@@ -21,6 +21,8 @@ vi.mock("@/app/actions", () => ({
   saveProfile: vi.fn(),
   deleteProfile: vi.fn(async () => ({ ok: true })),
   getProfileRunStatus: vi.fn(async () => ({ status: "pending" })),
+  updateProfilePrefs: vi.fn(),
+  updateProfileSkills: vi.fn(),
 }));
 // `push` is a shared, captured mock so the F3 abandon tests can assert a stale send never navigates to a spurious new conversation (the fresh-chat send branch calls router.push).
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
@@ -38,7 +40,14 @@ import { ProfileCard, ProfileExpanded } from "@/components/insight/ProfileCard";
 import { PostingsCard } from "@/components/insight/PostingsCard";
 import { InlinePromptCard } from "@/components/insight/InlinePromptCard";
 import { DetailProfile } from "@/components/chat/DetailProfile";
-import { deleteProfile, getMyProfile, saveProfile, type MyProfile } from "@/app/actions";
+import {
+  deleteProfile,
+  getMyProfile,
+  saveProfile,
+  updateProfilePrefs,
+  updateProfileSkills,
+  type MyProfile,
+} from "@/app/actions";
 import { pollProfileSave } from "@/lib/profile-poll";
 import { profileCardMessageId } from "@/lib/profile-card-id";
 
@@ -112,6 +121,8 @@ afterEach(() => {
   vi.mocked(getMyProfile).mockReset().mockResolvedValue(null);
   vi.mocked(saveProfile).mockReset();
   vi.mocked(deleteProfile).mockReset().mockResolvedValue({ ok: true });
+  vi.mocked(updateProfilePrefs).mockReset();
+  vi.mocked(updateProfileSkills).mockReset();
   vi.mocked(pollProfileSave).mockReset();
   pushMock.mockClear();
 });
@@ -395,14 +406,14 @@ describe("DetailProfile form", () => {
     // saved summary shows the identity + counts, and Edit/Delete
     expect(await screen.findByText("Profile saved ✓")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit & re-save" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete profile" })).toBeTruthy();
   });
 
   test("delete from the saved state returns to the empty form (e2e: local reset, no server call)", async () => {
     render(<DetailProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} />);
     fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
     fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete profile" }));
     expect(await screen.findByText("No profile yet")).toBeTruthy();
   });
 
@@ -619,7 +630,7 @@ describe("profile-delete keeps the thread card (041 req 3: history is history)",
     expect(document.querySelector(".insight")).toBeTruthy(); // the live ProfileCard in the thread
 
     fireEvent.click(screen.getByRole("button", { name: "Edit profile" })); // opens the detail panel form
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete profile" }));
 
     // The persisted profile ROW is deleted (no conversationId - delete never scopes to a thread)...
     await waitFor(() => expect(deleteProfile).toHaveBeenCalled());
@@ -652,6 +663,96 @@ describe("profile-delete keeps the thread card (041 req 3: history is history)",
       />,
     );
     expect(screen.getByText("Senior Backend Engineer")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 041: the inline profile editor (salary/location prefs + skill chips). One "Save changes" round persists
+// both; a failed save leaves the previous truth; chip add/remove; edits never auto-send (no onProfileSaved).
+// ---------------------------------------------------------------------------------------------------
+describe("profile editor (041 inline edits)", () => {
+  test("edits salary + location, saves in one round, and re-renders from the returned row", async () => {
+    vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
+    const returned: Profile = {
+      ...profile,
+      salaryMin: 150000,
+      locations: ["SF"],
+      remotePref: true,
+      skills: [...profile.skills, { name: "Kafka", source: "resume" }],
+    };
+    vi.mocked(updateProfilePrefs).mockResolvedValueOnce({
+      ok: true,
+      profile: { ...profile, salaryMin: 150000, locations: ["SF"], remotePref: true },
+    });
+    vi.mocked(updateProfileSkills).mockResolvedValueOnce({ ok: true, profile: returned });
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+
+    // The editor loads seeded from the saved row.
+    const salary = (await screen.findByLabelText(/salary/i)) as HTMLInputElement;
+    expect(salary.value).toBe("120000");
+    const location = screen.getByLabelText(/location/i) as HTMLInputElement;
+    expect(location.value).toBe("Berlin or Munich or remote");
+
+    fireEvent.change(salary, { target: { value: "150000" } });
+    fireEvent.change(location, { target: { value: "SF or remote" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updateProfilePrefs).toHaveBeenCalledWith({ salary: 150000, location: "SF or remote" }));
+    await waitFor(() => expect(updateProfileSkills).toHaveBeenCalled());
+    // Re-renders from the RETURNED row (the Kafka chip the server sent back appears).
+    expect(await screen.findByText("Kafka")).toBeTruthy();
+  });
+
+  test("a failed save shows an error, keeps the previous truth, and never partially applies (skills untried)", async () => {
+    vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
+    vi.mocked(updateProfilePrefs).mockResolvedValueOnce({ ok: false, reason: "invalid_input" });
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+
+    const salary = (await screen.findByLabelText(/salary/i)) as HTMLInputElement;
+    fireEvent.change(salary, { target: { value: "-5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(updateProfileSkills).not.toHaveBeenCalled(); // prefs failed first -> no cross-surface partial write
+  });
+
+  test("removes a github-proven chip and adds a new resume chip; save sends the edited array", async () => {
+    vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
+    vi.mocked(updateProfilePrefs).mockResolvedValueOnce({ ok: true, profile });
+    vi.mocked(updateProfileSkills).mockResolvedValueOnce({ ok: true, profile });
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+    await screen.findByLabelText(/salary/i);
+
+    // Removing a github-proven chip is allowed (the user owns their profile).
+    fireEvent.click(screen.getByRole("button", { name: "Remove ClickHouse" }));
+    expect(screen.queryByText("ClickHouse")).toBeNull();
+    // Add a new (resume-sourced) chip via the + Add input.
+    fireEvent.change(screen.getByLabelText("Add a skill"), { target: { value: "Kafka" } });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add" }));
+    expect(screen.getByText("Kafka")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(updateProfileSkills).toHaveBeenCalledWith({
+        skills: [
+          { name: "Go", source: "both" },
+          { name: "Python", source: "resume" },
+          { name: "Kafka", source: "resume" },
+        ],
+      }),
+    );
+  });
+
+  test("Save never re-injects the thread card or auto-sends (onProfileSaved untouched by an inline edit)", async () => {
+    vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
+    vi.mocked(updateProfilePrefs).mockResolvedValueOnce({ ok: true, profile });
+    vi.mocked(updateProfileSkills).mockResolvedValueOnce({ ok: true, profile });
+    const onProfileSaved = vi.fn();
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={onProfileSaved} />);
+    await screen.findByLabelText(/salary/i);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateProfileSkills).toHaveBeenCalled());
+    expect(onProfileSaved).not.toHaveBeenCalled(); // inline edits do NOT fire the card inject / F3 auto-continue
   });
 });
 
@@ -707,7 +808,7 @@ describe("DetailProfile error state (poll contract)", () => {
 // experience, OSS - keeping "Find me a job that fits" + "Edit & re-save" wired; still display-only.
 // ---------------------------------------------------------------------------------------------------
 describe("post-parse full profile (039 item 3)", () => {
-  test("saving transitions to the full profile view with Find/Edit wired and no editing surfaces", async () => {
+  test("saving transitions to the full profile view with Find/Edit wired and inline editing surfaces (041)", async () => {
     vi.mocked(getMyProfile).mockResolvedValue(null); // empty form, and the build()'s prior-capture read
     vi.mocked(saveProfile).mockResolvedValueOnce({ ok: true, taskState: "queued", runId: "run_z" });
     vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "saved", profile, githubUsername: "octocat" });
@@ -735,12 +836,15 @@ describe("post-parse full profile (039 item 3)", () => {
     expect(screen.getByText("Experience — from the resume")).toBeTruthy();
     expect(screen.getByText("· ClickHouse migration CLI")).toBeTruthy(); // OSS list (not just the first)
 
-    // "Find me a job that fits" is wired; "Edit & re-save" is kept; display-only (no salary/location inputs).
+    // "Find me a job that fits" is wired; "Edit & re-save" is kept; 041 adds the editable salary/location
+    // inputs + a "Save changes" button (the inline edit surface).
     fireEvent.click(screen.getByRole("button", { name: "Find me a job that fits" }));
     expect(onFindJob).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Edit & re-save" })).toBeTruthy();
-    expect(screen.queryByLabelText(/salary/i)).toBeNull();
-    expect(screen.queryByLabelText(/location/i)).toBeNull();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeTruthy();
+    expect(screen.getByLabelText(/salary/i)).toBeTruthy();
+    expect(screen.getByLabelText(/location/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete profile" })).toBeTruthy();
   });
 });
 

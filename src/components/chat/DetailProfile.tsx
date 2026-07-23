@@ -1,10 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Profile } from "@shared/profile";
-import { deleteProfile, getMyProfile, getProfileRunStatus, saveProfile } from "@/app/actions";
+import type { Profile, Skill } from "@shared/profile";
+import {
+  deleteProfile,
+  getMyProfile,
+  getProfileRunStatus,
+  saveProfile,
+  updateProfilePrefs,
+  updateProfileSkills,
+} from "@/app/actions";
 import { pollProfileSave } from "@/lib/profile-poll";
-import { isGithubSkipped, profileTitle } from "@/lib/profile-format";
+import { formatLocationPref, isGithubSkipped, parseLocationPref, profileTitle } from "@/lib/profile-format";
 import { ProfileExpanded } from "@/components/insight/ProfileCard";
 
 // The account's profile form in the detail panel (five states: empty/saving/saved/github-skipped/error). Save polls
@@ -77,6 +84,9 @@ export function DetailProfile({
   // state asynchronously below.
   const [status, setStatus] = useState<Status>(e2e ? "form" : "loading");
   const [profile, setProfile] = useState<Profile | null>(null);
+  // Bumped on each inline-edit save so the editor REMOUNTS and re-seeds its drafts from the returned row
+  // (the key-based reset - no setState-in-effect). Build/re-extract re-seeds via the status remount already.
+  const [profileEpoch, setProfileEpoch] = useState(0);
   // The error copy gate = the POLL OUTCOME's `hadPriorProfile` (not local state, which can diverge in a multi-tab race).
   const [errorHadPriorProfile, setErrorHadPriorProfile] = useState(false);
 
@@ -203,6 +213,13 @@ export function DetailProfile({
     setStatus("form");
   }, [e2e]);
 
+  // A successful inline edit: adopt the returned row as the new truth and remount the editor to re-seed. This
+  // NEVER re-injects the thread card or fires the F3 auto-continue - inline edits do not auto-send (req 4).
+  const onEditorSaved = useCallback((saved: Profile) => {
+    setProfile(saved);
+    setProfileEpoch((n) => n + 1);
+  }, []);
+
   const onPickFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
     fileRef.current = file;
@@ -229,11 +246,14 @@ export function DetailProfile({
         ) : status === "saving" ? (
           <SavingState sources={savingSources} pdfName={pdfName} github={githubInput.trim()} />
         ) : status === "saved" && profile ? (
-          <SavedState
+          <ProfileEditor
+            key={profileEpoch}
             profile={profile}
+            e2e={e2e}
             onFindJob={() => onFindJob?.()}
             onEdit={() => setStatus("form")}
             onDelete={() => void remove()}
+            onSaved={onEditorSaved}
           />
         ) : status === "github-skipped" && profile ? (
           <GithubSkippedState
@@ -398,40 +418,200 @@ function SavingState({
   );
 }
 
-// The post-parse FULL profile (operator 039): the confirmation heading + the display-only expanded profile
-// (identity header, source ticks, skills split by source, experience, OSS) + the two actions to keep wired.
-function SavedState({
+/** The DECODED "$120,000" -> 120000 (or null when cleared); the server re-validates the positive-int cap. */
+function parseSalaryDraft(v: string): number | null {
+  const digits = v.replace(/[^\d]/g, "");
+  return digits === "" ? null : Number(digits);
+}
+
+function saveErrorCopy(reason: "not_found" | "invalid_input"): string {
+  return reason === "invalid_input"
+    ? "Check the salary (a whole number) and try again."
+    : "Couldn’t save — your profile may have changed. Reopen and try again.";
+}
+
+// The post-parse FULL profile (operator 039) made editable (041): identity header + editable target-salary
+// and location prefs + editable skill chips (add/remove) + the read-only remainder (Sources, experience,
+// OSS). "Save changes" persists prefs + skills in ONE round; it NEVER re-injects the thread card or fires
+// the F3 auto-continue (inline edits do not auto-send). Delete/Find/Edit&re-save stay wired.
+function ProfileEditor({
   profile,
+  e2e,
   onFindJob,
   onEdit,
   onDelete,
+  onSaved,
 }: {
   profile: Profile;
+  e2e: boolean;
   onFindJob: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  /** Re-seed the panel from the saved row after a successful edit (local only - no card, no auto-continue). */
+  onSaved: (profile: Profile) => void;
 }) {
+  const [salaryDraft, setSalaryDraft] = useState(profile.salaryMin != null ? String(profile.salaryMin) : "");
+  const [locationDraft, setLocationDraft] = useState(formatLocationPref(profile));
+  const [skillsDraft, setSkillsDraft] = useState<Skill[]>(profile.skills);
+  const [addDraft, setAddDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const proven = skillsDraft.filter((s) => s.source !== "resume");
+  const claimed = skillsDraft.filter((s) => s.source === "resume");
+
+  const removeSkill = (name: string) =>
+    setSkillsDraft((prev) => prev.filter((s) => s.name !== name));
+  const addSkill = () => {
+    const name = addDraft.trim();
+    setAddDraft("");
+    if (!name) return;
+    // A new chip is resume-claimed (unproven); silently ignore a case-insensitive duplicate.
+    if (skillsDraft.some((s) => s.name.toLowerCase() === name.toLowerCase())) return;
+    setSkillsDraft((prev) => [...prev, { name, source: "resume" }]);
+  };
+
+  const save = useCallback(async () => {
+    setSaveError(null);
+    const salary = parseSalaryDraft(salaryDraft);
+    if (e2e) {
+      // No Postgres in e2e: apply the drafts locally (mirrors build()'s short-circuit).
+      const { locations, remotePref } = parseLocationPref(locationDraft);
+      onSaved({ ...profile, salaryMin: salary, locations, remotePref, skills: skillsDraft });
+      return;
+    }
+    setSaving(true);
+    // One save round, prefs then skills; the skills call's returned row reflects both (disjoint jsonb keys).
+    const prefsRes = await updateProfilePrefs({ salary, location: locationDraft.trim() || null });
+    if (!prefsRes.ok) {
+      setSaving(false);
+      setSaveError(saveErrorCopy(prefsRes.reason)); // previous truth kept (nothing re-seeded)
+      return;
+    }
+    const skillsRes = await updateProfileSkills({ skills: skillsDraft });
+    setSaving(false);
+    if (!skillsRes.ok) {
+      setSaveError(saveErrorCopy(skillsRes.reason));
+      return;
+    }
+    onSaved(skillsRes.profile);
+  }, [e2e, salaryDraft, locationDraft, skillsDraft, profile, onSaved]);
+
   return (
     <div className="profile-form">
       <h3>Profile saved ✓</h3>
-      {/* Identity header - the headline role (the profile schema carries no name field). */}
+      {/* Identity header - the headline role (the profile schema carries no name field). Kept as the FIRST
+          div child (a downstream test reads it). */}
       <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text)" }}>
         {profileTitle(profile)}
       </div>
-      {/* The read-only full profile: subline, Sources (ticks), skills split by source, experience, OSS. */}
-      <ProfileExpanded profile={profile} />
+
+      <div className="field">
+        <label htmlFor="profile-salary">Target salary</label>
+        <input
+          id="profile-salary"
+          type="text"
+          inputMode="numeric"
+          placeholder="e.g. 120000"
+          value={salaryDraft}
+          onChange={(e) => setSalaryDraft(e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="profile-location">Location</label>
+        <input
+          id="profile-location"
+          type="text"
+          placeholder="e.g. SF or remote"
+          value={locationDraft}
+          onChange={(e) => setLocationDraft(e.target.value)}
+        />
+      </div>
+
+      {proven.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span className="micro">Skills — proven in code</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {proven.map((s) => (
+              <EditableChip key={s.name} name={s.name} proven onRemove={() => removeSkill(s.name)} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <span className="micro">Skills — from the resume</span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          {claimed.map((s) => (
+            <EditableChip key={s.name} name={s.name} onRemove={() => removeSkill(s.name)} />
+          ))}
+          <input
+            aria-label="Add a skill"
+            type="text"
+            className="skill-add-input"
+            placeholder="+ Add"
+            style={{ width: 96 }}
+            value={addDraft}
+            onChange={(e) => setAddDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addSkill();
+              }
+            }}
+          />
+          <button className="chip" type="button" onClick={addSkill}>
+            + Add
+          </button>
+        </div>
+      </div>
+
+      {/* The non-editable remainder (Sources, domains, experience, OSS) - one home in ProfileExpanded. */}
+      <ProfileExpanded profile={profile} extrasOnly />
+
+      {saveError ? (
+        <span className="field-error" role="alert">
+          {saveError}
+        </span>
+      ) : null}
+
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button className="btn btn-primary btn-sm" type="button" onClick={() => void save()} disabled={saving}>
+          {saving ? "Saving…" : "Save changes"}
+        </button>
         <button className="chip chip-accent" type="button" onClick={onFindJob}>
           Find me a job that fits
         </button>
         <button className="chip" type="button" onClick={onEdit}>
           Edit &amp; re-save
         </button>
-        <button className="btn btn-ghost btn-sm" type="button" style={{ color: "var(--danger)", marginLeft: "auto" }} onClick={onDelete}>
-          Delete
+        <button
+          className="btn btn-ghost btn-sm"
+          type="button"
+          style={{ color: "var(--danger)", marginLeft: "auto" }}
+          onClick={onDelete}
+        >
+          Delete profile
         </button>
       </div>
     </div>
+  );
+}
+
+/** A skill chip in the editor: the name + a remove ✕. `proven` renders the accent tag, else the neutral pill. */
+function EditableChip({ name, proven = false, onRemove }: { name: string; proven?: boolean; onRemove: () => void }) {
+  return (
+    <span className={proven ? "tag" : "skill-claimed"} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      {name}
+      <button
+        type="button"
+        aria-label={`Remove ${name}`}
+        onClick={onRemove}
+        style={{ border: 0, background: "none", padding: 0, cursor: "pointer", color: "inherit", font: "inherit", lineHeight: 1 }}
+      >
+        ×
+      </button>
+    </span>
   );
 }
 
