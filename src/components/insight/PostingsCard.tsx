@@ -139,7 +139,10 @@ export function PostingsCard({
   return (
     <div className="insight" style={{ maxWidth: 760 }}>
       <div className="insight-head">
-        <Verdict text={postingsVerdict(total, shownCount(rows))} />
+        {/* Under an active filter the "showing the best N" tail would contradict the filtered table
+            (item 1 honesty). Pass shown=total to suppress the tail while the honest server total stays;
+            the full headline restores when the filter clears. */}
+        <Verdict text={postingsVerdict(total, filtering ? total : shownCount(rows))} />
       </div>
       <div className="insight-body">
         {filtered.length > 0 ? (

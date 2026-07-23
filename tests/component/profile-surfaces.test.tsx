@@ -270,6 +270,30 @@ describe("PostingsCard", () => {
     expect(document.querySelectorAll("tbody tr").length).toBe(0);
     expect(screen.getByText(/None of these 12 match that filter/)).toBeTruthy();
   });
+
+  // 037b should-fix: under an active filter the Verdict headline must stay consistent with the visible
+  // rows. The unfiltered headline reads "23 postings match your profile — showing the best 8"; over a
+  // 4-row filtered table the "showing the best 8" tail is a visible honesty contradiction. It is
+  // suppressed while a filter is active (the honest server total stays), and restored when the filter clears.
+  test("verdict headline drops the 'showing the best N' tail under an active filter (server total honest), restores on clear", () => {
+    render(<PostingsCard rows={postingsRows} total={23} onOpenPanel={vi.fn()} />);
+    const verdict = () => document.querySelector(".verdict")?.textContent ?? "";
+    // Baseline (no filter): server total AND the capped-shown tail.
+    expect(verdict()).toContain("23 postings match your profile");
+    expect(verdict()).toContain("showing the best 8");
+
+    // Filter active (4 remote rows shown): the "showing the best 8" tail would contradict the 4-row
+    // table, so it is gone; the honest server total (23) claim remains.
+    const remoteChip = screen.getByRole("button", { name: /Only remote · 4/ });
+    fireEvent.click(remoteChip);
+    expect(document.querySelectorAll("tbody tr").length).toBe(4);
+    expect(verdict()).toContain("23 postings match your profile");
+    expect(verdict()).not.toContain("showing the best");
+
+    // Filter cleared: the original headline is restored verbatim.
+    fireEvent.click(remoteChip);
+    expect(verdict()).toContain("showing the best 8");
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------
