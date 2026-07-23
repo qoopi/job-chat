@@ -61,6 +61,12 @@ describe("classifyCardData", () => {
     expect(classifyCardData(null)).toEqual({ kind: "unknown" });
   });
 
+  // A 0-row tool result emits the empty marker; it is neither skeleton nor insight, so it renders NOTHING -
+  // an empty insight never becomes a hollow chart body (the answer is the model's plain prose instead).
+  it("classifies the empty (0-row) marker as unknown - no chart is ever rendered for it", () => {
+    expect(classifyCardData({ status: "empty" })).toEqual({ kind: "unknown" });
+  });
+
   // The 029 part vocabulary: profile-card / postings / auth-invite / profile-invite.
   const profile: Profile = {
     titles: ["Senior Backend Engineer"],
