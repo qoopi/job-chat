@@ -34,6 +34,8 @@ export function useJobChatTransport({
   );
   const real = useTriggerChatTransport<typeof jobChatAgent>({
     task: AGENT_ID,
+    // BroadcastChannel two-tab guard: one tab claims the chatId, others go read-only (no double-send).
+    multiTab: true,
     accessToken: async ({ chatId }) => {
       const r = await mintChatToken(chatId);
       if (!r.ok) throw new Error("chat session unavailable");
