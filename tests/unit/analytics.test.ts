@@ -3,6 +3,7 @@ import type { ClickHouseClient } from "@clickhouse/client";
 import {
   buildComposedSql,
   buildCorpusSql,
+  buildRoleResolveSql,
   buildSearchPostingsSql,
   buildTemplateSql,
   createAnalytics,
@@ -239,6 +240,75 @@ describe("search_postings company scope (hard filter)", () => {
     expect(() =>
       buildSearchPostingsSql({ titleTerms: ["engineer"], companies: ["a", "b", "c", "d", "e", "f"] }, "postings"),
     ).toThrow();
+  });
+});
+
+// The roles dimension resolve: distinct role ids whose name matches a phrase, read from the corpus's own
+// role arrays (arrayZip/arrayJoin) via lowerUTF8 LIKE - no query-time roles API call.
+describe("buildRoleResolveSql (roles dimension, CH-resolve)", () => {
+  it("fans out the corpus role arrays and lowers both sides of a name LIKE, over the open set", () => {
+    const sql = buildRoleResolveSql(["Backend Engineer"], "postings");
+    expect(sql).toContain("arrayJoin(arrayZip(role_ids, role_names))");
+    expect(sql).toContain("pair.1 AS id");
+    expect(sql).toContain("lowerUTF8(pair.2) LIKE '%backend engineer%'"); // phrase lowered + wrapped
+    expect(sql).toContain("notEmpty(role_ids)"); // unclassified rows contribute nothing
+    expect(sql).toContain("ingested_at = (SELECT max(ingested_at) FROM postings)"); // open set
+    expect(sql).toContain("LIMIT 100"); // bounded id list
+  });
+
+  it("ORs one LIKE per phrase", () => {
+    const sql = buildRoleResolveSql(["backend engineer", "platform"], "postings");
+    expect(sql).toContain("lowerUTF8(pair.2) LIKE '%backend engineer%' OR lowerUTF8(pair.2) LIKE '%platform%'");
+  });
+
+  it("escapes LIKE metacharacters and quote break-outs in a phrase (injection-safe, literal match)", () => {
+    const sql = buildRoleResolveSql(["a_b%", "x' OR '1'='1"], "postings");
+    expect(sql).toContain("LIKE '%a\\\\_b\\\\%%'"); // _ and % escaped (backslash doubled by chStr) to match literally
+    expect(sql).toContain("'%x\\' or \\'1\\'=\\'1%'"); // quote break-out neutralized; phrase lowered
+  });
+
+  it("yields a no-match query (WHERE 0) when every phrase is blank", () => {
+    const sql = buildRoleResolveSql(["   ", ""], "postings");
+    expect(sql).toContain("WHERE 0");
+  });
+});
+
+// Role-IN matching: when phrase(s) resolve to canonical id(s), has(role_ids, id) is the PRIMARY weight-3
+// signal and the title-term hits become the fallback for unclassified rows. With NO resolved ids the
+// weight-3 term IS the title hits, so the SQL is byte-identical to the pre-roles builder (forward-compat).
+describe("buildSearchPostingsSql role-IN term", () => {
+  it("makes role-IN the weight-3 term when ids resolved: hasAny at full weight, title as the empty-roles fallback", () => {
+    const titleOnly = buildSearchPostingsSql({ titleTerms: ["backend"] }, "postings").rowsSql;
+    const withRoles = buildSearchPostingsSql({ titleTerms: ["backend"] }, "postings", [12, 45]).rowsSql;
+    // The resolved-id branch: role-IN hit -> 2, else unclassified -> the title hits, else classified miss -> 0.
+    expect(withRoles).toContain(
+      "3 * multiIf(hasAny(role_ids, [12, 45]), 2, empty(role_ids), least((title ILIKE '%backend%'), 2), 0)",
+    );
+    // The title-only build never mentions role_ids (the pre-ship shape).
+    expect(titleOnly).not.toContain("role_ids");
+    expect(titleOnly).toContain("3 * least((title ILIKE '%backend%'), 2)");
+  });
+
+  it("is FORWARD-COMPATIBLE: an empty resolved-id list yields SQL byte-identical to the two-arg (pre-roles) call", () => {
+    const params = { titleTerms: ["senior", "backend"], experience: "senior", cities: ["Berlin"], remoteOk: true, salaryMin: 150000 };
+    const twoArg = buildSearchPostingsSql(params, "postings");
+    const emptyRoles = buildSearchPostingsSql(params, "postings", []);
+    expect(emptyRoles.rowsSql).toBe(twoArg.rowsSql);
+    expect(emptyRoles.metaSql).toBe(twoArg.metaSql);
+    expect(twoArg.rowsSql).not.toContain("role_ids"); // no role machinery leaks into the pre-ship SQL
+  });
+
+  it("drops a non-integer resolved id before interpolation (numeric-only, injection-safe)", () => {
+    // A malformed id can never reach the SQL as anything but an integer literal.
+    const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["backend"] }, "postings", [12, NaN, 3.5, 45]);
+    expect(rowsSql).toContain("hasAny(role_ids, [12, 45])");
+  });
+
+  it("accepts the model's role phrases through the strict params without using them in the SQL directly", () => {
+    // `roles` (phrases) is a valid param (the runtime resolves it); the builder keys off resolved IDS, not phrases.
+    const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["backend"], roles: ["backend engineer"] }, "postings", [12]);
+    expect(rowsSql).toContain("hasAny(role_ids, [12])");
+    expect(rowsSql).not.toContain("backend engineer"); // the phrase is never interpolated into the score
   });
 });
 
