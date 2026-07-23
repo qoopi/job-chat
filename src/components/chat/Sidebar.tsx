@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Conversation } from "@shared/store";
-import { PlusIcon, ChevronLeftIcon } from "@/components/icons";
+import { PlusIcon, ChevronLeftIcon, KebabIcon } from "@/components/icons";
 import { freshnessLabel } from "@/lib/insight-format";
+import { isAuthDialogOpen, setMenuOpen } from "@/lib/layers";
 
 // A history row: the stored fields only (title + date - the design contract's whole row, no preview line).
 type HistoryItem = Pick<Conversation, "id" | "title" | "created_at">;
@@ -55,6 +56,7 @@ export function Sidebar({
   onNewChat,
   onSignIn,
   onDeleteConversation,
+  onRenameConversation,
 }: {
   signedIn?: boolean;
   conversations?: HistoryItem[];
@@ -64,10 +66,49 @@ export function Sidebar({
   onSignIn?: () => void;
   /** Delete a signed-in conversation (guarded server-side). Absent (guest) => no affordance. */
   onDeleteConversation?: (conversationId: string) => void;
+  /** Rename a signed-in conversation to a new title (guarded server-side). Absent (guest) => no affordance. */
+  onRenameConversation?: (conversationId: string, title: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   // Which row shows its inline "Delete this chat?" confirm (never a modal).
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  // At most one open kebab menu at a time, and at most one row in inline-rename.
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+
+  // Publish the menu's open state to the layer seam (Esc order: dialog > menu > detail panel), so an Esc
+  // that closes the kebab menu doesn't also close the detail panel underneath.
+  useEffect(() => {
+    setMenuOpen(menuId != null);
+    return () => setMenuOpen(false);
+  }, [menuId]);
+
+  // Close the open menu on outside-click / Esc (yield Esc while the auth dialog is up); one menu at a time.
+  useEffect(() => {
+    if (menuId == null) return;
+    function onClick(e: MouseEvent) {
+      const t = e.target as Element | null;
+      if (t?.closest?.(".sb-menu") || t?.closest?.(".sb-kebab")) return;
+      setMenuId(null);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape" || isAuthDialogOpen()) return;
+      setMenuId(null);
+    }
+    window.addEventListener("mousedown", onClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuId]);
+
+  // Enter commits a non-empty (trimmed) rename; the server re-trims/caps. Empty or unchanged just closes.
+  function commitRename(id: string, value: string) {
+    const t = value.trim();
+    setRenamingId(null);
+    if (t) onRenameConversation?.(id, t);
+  }
 
   if (collapsed) {
     return (
@@ -154,7 +195,29 @@ export function Sidebar({
             <div className="sb-empty">No conversations yet</div>
           ) : (
             conversations.map((c) =>
-              confirmingId === c.id ? (
+              renamingId === c.id ? (
+                // Inline rename in place: seeded with the current title, Enter saves, Esc / blur cancels.
+                <div key={c.id} className="sb-item-row">
+                  <input
+                    className="sb-rename"
+                    aria-label={`Rename ${c.title}`}
+                    defaultValue={c.title}
+                    autoFocus
+                    onFocus={(e) => e.currentTarget.select()}
+                    onBlur={() => setRenamingId(null)}
+                    onKeyDown={(e) => {
+                      // Keep Enter/Esc local so they never also reach the detail-panel Esc handler.
+                      if (e.key === "Enter") {
+                        e.stopPropagation();
+                        commitRename(c.id, e.currentTarget.value);
+                      } else if (e.key === "Escape") {
+                        e.stopPropagation();
+                        setRenamingId(null);
+                      }
+                    }}
+                  />
+                </div>
+              ) : confirmingId === c.id ? (
                 // Inline confirm (interaction-spec s1 pattern - never a modal).
                 <div key={c.id} className="sb-item sb-confirm">
                   <span>Delete this chat?</span>
@@ -191,13 +254,41 @@ export function Sidebar({
                   </Link>
                   <button
                     type="button"
-                    className="sb-del"
-                    // Two conversations can share a title, so a short id suffix keeps each delete label's accessible name unique.
-                    aria-label={`Delete ${c.title} (${c.id.slice(0, 8)})`}
-                    onClick={() => setConfirmingId(c.id)}
+                    className="sb-kebab"
+                    aria-haspopup="menu"
+                    aria-expanded={menuId === c.id}
+                    // Two conversations can share a title, so a short id suffix keeps each options label's accessible name unique.
+                    aria-label={`Options for ${c.title} (${c.id.slice(0, 8)})`}
+                    onClick={() => setMenuId((m) => (m === c.id ? null : c.id))}
                   >
-                    &times;
+                    <KebabIcon />
                   </button>
+                  {menuId === c.id ? (
+                    <div className="sb-menu" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="sb-menu-item"
+                        onClick={() => {
+                          setMenuId(null);
+                          setRenamingId(c.id);
+                        }}
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="sb-menu-item danger"
+                        onClick={() => {
+                          setMenuId(null);
+                          setConfirmingId(c.id);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               ),
             )

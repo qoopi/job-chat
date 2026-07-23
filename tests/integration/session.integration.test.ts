@@ -395,6 +395,55 @@ describe.skipIf(!hasCreds)("session service against real Postgres", () => {
     });
   });
 
+  // renameConversation is ownership-gated exactly like deleteConversation, plus a bounded title (non-owner
+  // reads as not_found; empty/over-long title is invalid_input). The owner's rename persists the TRIMMED title.
+  describe("renameConversation ownership + title bound (039)", () => {
+    function svc() {
+      return createSessionService({
+        store,
+        guards: { guestCap: 10, dailyBudget: HUGE },
+        mintToken: okMintToken(),
+        now: () => new Date(),
+      });
+    }
+
+    it("Should_RefuseRename_When_NotOwner: a cross-caller cannot rename another's conversation", async () => {
+      const owner = freshGuestId();
+      const attacker = freshGuestId();
+      await store.getOrCreateUser(owner);
+      await store.getOrCreateUser(attacker);
+      const conv = await store.createConversation(owner, "owner's thread");
+
+      expect(await svc().renameConversation(conv.id, "hijacked", attacker)).toEqual({ ok: false, reason: "not_found" });
+      expect((await store.getConversation(conv.id))?.conversation.title).toBe("owner's thread"); // unchanged
+    });
+
+    it("renames the caller's OWN conversation, persisting the trimmed title", async () => {
+      const owner = freshGuestId();
+      await store.getOrCreateUser(owner);
+      const conv = await store.createConversation(owner, "before");
+
+      expect(await svc().renameConversation(conv.id, "  After the rename  ", owner)).toEqual({ ok: true, title: "After the rename" });
+      expect((await store.getConversation(conv.id))?.conversation.title).toBe("After the rename"); // trimmed value stored
+    });
+
+    it("refuses an empty/whitespace or over-long (>120) title with invalid_input (title never changes)", async () => {
+      const owner = freshGuestId();
+      await store.getOrCreateUser(owner);
+      const conv = await store.createConversation(owner, "keep me");
+
+      expect(await svc().renameConversation(conv.id, "   ", owner)).toEqual({ ok: false, reason: "invalid_input" });
+      expect(await svc().renameConversation(conv.id, "x".repeat(121), owner)).toEqual({ ok: false, reason: "invalid_input" });
+      expect((await store.getConversation(conv.id))?.conversation.title).toBe("keep me");
+    });
+
+    it("returns not_found for an unknown/malformed id", async () => {
+      const g = freshGuestId();
+      expect(await svc().renameConversation(crypto.randomUUID(), "x", g)).toEqual({ ok: false, reason: "not_found" });
+      expect(await svc().renameConversation("not-a-uuid", "x", g)).toEqual({ ok: false, reason: "not_found" });
+    });
+  });
+
   // The sign-in reconciliation that resolves every request's chat identity (adoption). Runs against the
   // real store: the three branches the epic pins - stamp (first sign-in), no-op (returning same device),
   // adopt (returning new device).

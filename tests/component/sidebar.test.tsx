@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { Conversation } from "@shared/store";
+import { setAuthDialogOpen, setMenuOpen } from "@/lib/layers";
 
 // next/link needs the app-router context, absent in a bare component render; a plain anchor is a faithful
 // stand-in for the href + accessible-name assertions here.
@@ -41,7 +42,14 @@ const convs: Pick<Conversation, "id" | "title" | "created_at">[] = [
   },
 ];
 
-afterEach(cleanup);
+const pressEsc = () =>
+  act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+
+afterEach(() => {
+  cleanup();
+  setAuthDialogOpen(false);
+  setMenuOpen(false); // the sidebar publishes its kebab-menu state to this module singleton
+});
 
 describe("signed-in history (AC-12)", () => {
   test("lists conversations in the given (newest-first) order with title + relative date, active highlighted", () => {
@@ -188,9 +196,84 @@ describe("logo (AC-20)", () => {
   });
 });
 
-// Signed-in rows carry a delete affordance behind an inline confirm (never a modal); guests get none.
-describe("delete conversation (AC-21)", () => {
-  test("a signed-in row deletes via an inline confirm - onDeleteConversation fires only on confirm", () => {
+// Signed-in rows carry a kebab (three-dots) menu with Rename + Delete (039); Delete keeps the existing
+// inline confirm (never a modal); guests get no kebab.
+const openKebab = (titlePrefix: string) =>
+  fireEvent.click(
+    screen.getByRole("button", { name: new RegExp(`^Options for ${titlePrefix}`) }),
+  );
+
+describe("kebab menu (039)", () => {
+  test("the kebab opens a Rename/Delete menu; one open at a time; outside-click and Esc close it", () => {
+    render(
+      <Sidebar
+        signedIn
+        conversations={convs}
+        activeId={convs[0].id}
+        onDeleteConversation={vi.fn()}
+        onRenameConversation={vi.fn()}
+      />,
+    );
+    const kebabA = screen.getByRole("button", { name: /^Options for Top companies hiring/ });
+    const kebabB = screen.getByRole("button", { name: /^Options for Data Engineer pay in SF/ });
+
+    expect(screen.queryByRole("menuitem")).toBeNull(); // closed initially
+    fireEvent.click(kebabA);
+    expect(kebabA.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+
+    // Opening B closes A - only one menu at a time.
+    fireEvent.click(kebabB);
+    expect(kebabA.getAttribute("aria-expanded")).toBe("false");
+    expect(kebabB.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByRole("menuitem", { name: "Rename" })).toHaveLength(1);
+
+    // Outside-click closes.
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menuitem")).toBeNull();
+
+    // Esc closes too, but yields while the auth dialog is above it (layer priority).
+    fireEvent.click(kebabA);
+    setAuthDialogOpen(true);
+    pressEsc();
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeTruthy(); // yielded
+    setAuthDialogOpen(false);
+    pressEsc();
+    expect(screen.queryByRole("menuitem")).toBeNull();
+  });
+
+  test("Rename opens an inline input seeded with the title; Enter saves the trimmed value, Esc cancels", () => {
+    const onRenameConversation = vi.fn();
+    render(
+      <Sidebar
+        signedIn
+        conversations={convs}
+        activeId={convs[0].id}
+        onRenameConversation={onRenameConversation}
+      />,
+    );
+
+    openKebab("Top companies hiring");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByRole("textbox", { name: /Rename Top companies hiring/ }) as HTMLInputElement;
+    expect(input.value).toBe("Top companies hiring"); // seeded with the current title
+
+    // Esc cancels: no save, input gone.
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onRenameConversation).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: /Rename/ })).toBeNull();
+
+    // Re-open, edit, Enter saves the trimmed title.
+    openKebab("Top companies hiring");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const input2 = screen.getByRole("textbox", { name: /Rename Top companies hiring/ }) as HTMLInputElement;
+    fireEvent.change(input2, { target: { value: "  Hiring leaders  " } });
+    fireEvent.keyDown(input2, { key: "Enter" });
+    expect(onRenameConversation).toHaveBeenCalledWith(convs[0].id, "Hiring leaders");
+  });
+
+  test("Delete from the kebab opens the inline confirm - onDeleteConversation fires only on confirm", () => {
     const onDeleteConversation = vi.fn();
     render(
       <Sidebar
@@ -201,30 +284,24 @@ describe("delete conversation (AC-21)", () => {
       />,
     );
 
-    // The affordance opens an inline confirm - not a modal, and nothing deletes yet. The accessible
-    // name carries a short id suffix (disambiguates same-titled rows), so match on the title prefix.
-    fireEvent.click(
-      screen.getByRole("button", { name: /^Delete Top companies hiring/ }),
-    );
-    expect(screen.getByText("Delete this chat?")).toBeTruthy();
+    openKebab("Top companies hiring");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByText("Delete this chat?")).toBeTruthy(); // inline, not a modal
     expect(onDeleteConversation).not.toHaveBeenCalled();
 
-    // Cancel backs out with no delete.
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText("Delete this chat?")).toBeNull();
     expect(onDeleteConversation).not.toHaveBeenCalled();
 
-    // Re-open and confirm -> the delete fires with the row's id.
-    fireEvent.click(
-      screen.getByRole("button", { name: /^Delete Top companies hiring/ }),
-    );
+    openKebab("Top companies hiring");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(onDeleteConversation).toHaveBeenCalledWith(convs[0].id);
   });
 
-  test("a guest sidebar has no delete affordance", () => {
+  test("a guest sidebar has no kebab affordance", () => {
     render(<Sidebar signedIn={false} />);
-    expect(screen.queryByRole("button", { name: /^Delete / })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Options for / })).toBeNull();
   });
 });
 

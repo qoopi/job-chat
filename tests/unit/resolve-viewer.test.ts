@@ -50,6 +50,7 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     adoptGuest: boom,
     listConversations: boom,
     deleteConversation: boom,
+    renameConversation: boom,
     deleteTrailingAssistant: boom,
     appendProfileCard: boom,
     getProfile: boom,

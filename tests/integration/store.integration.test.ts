@@ -328,6 +328,21 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(owner);
   });
 
+  // renameConversation sets the title verbatim (validation/ownership are the caller's job, mirroring
+  // deleteConversation) and is a no-op on a malformed id - never a DB error.
+  it("renameConversation sets the title and is a no-op on a malformed id (039)", async () => {
+    const owner = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(owner);
+    const conv = await store.createConversation(owner, "original title");
+
+    await store.renameConversation(conv.id, "renamed title");
+    expect((await store.getConversation(conv.id))?.conversation.title).toBe("renamed title");
+
+    await expect(store.renameConversation("not-a-uuid", "x")).resolves.toBeUndefined();
+
+    await purge(owner);
+  });
+
   // A regenerate supersedes the row it re-answers. deleteTrailingAssistant is the
   // narrow durable mirror of the SDK's trailing-assistant pop - it removes ONLY the assistant row(s)
   // trailing the LAST user message, leaving earlier turns intact. Validates the (created_at, id) tuple

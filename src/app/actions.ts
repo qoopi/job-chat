@@ -21,6 +21,7 @@ import {
   type Identity,
   type MintResult,
   type MintToken,
+  type RenameResult,
   type SendResult,
   type SessionResult,
 } from "../../trigger/session";
@@ -175,6 +176,16 @@ export async function deleteConversation(
   const identity = await resolveCaller();
   if (!identity) return { ok: false, reason: "not_found" };
   return service().deleteConversation(conversationId, identity.userId);
+}
+
+/** Rename one of the caller's OWN conversations (non-owner reads as not_found); returns the stored (trimmed) title. */
+export async function renameConversation(
+  conversationId: string,
+  title: string,
+): Promise<RenameResult> {
+  const identity = await resolveCaller();
+  if (!identity) return { ok: false, reason: "not_found" };
+  return service().renameConversation(conversationId, title, identity.userId);
 }
 
 // Server cap on the DECODED resume PDF (a hair over ~4MB so a legit file isn't rejected). next.config raises

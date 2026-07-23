@@ -319,9 +319,11 @@ a:hover {
   font-size: var(--fs-sm);
   color: var(--shell-fg);
   cursor: pointer;
+  /* Each history row reads as a card at rest (operator 039), not bare text on the shell. */
+  background: var(--shell-hover);
 }
 .sb-item:hover {
-  background: var(--shell-hover);
+  background: var(--shell-active);
 }
 .sb-item.active {
   background: var(--shell-active);
@@ -349,31 +351,85 @@ a:hover {
   font-size: var(--fs-sm);
   color: var(--shell-fg-dim);
 }
-/* Per-row delete affordance + inline confirm (never a modal). */
+/* Per-row kebab (rename / delete) + inline confirm (never a modal). */
 .sb-item-row {
   position: relative;
 }
-.sb-del {
+.sb-kebab {
   position: absolute;
   top: 6px;
   right: 6px;
   border: 0;
   background: transparent;
   color: var(--shell-fg-dim);
-  font-size: 15px;
-  line-height: 1;
-  padding: 2px 7px;
+  padding: 4px;
   border-radius: var(--r-sm);
   cursor: pointer;
   opacity: 0;
+  display: grid;
+  place-items: center;
 }
-.sb-item-row:hover .sb-del,
-.sb-del:focus-visible {
+.sb-item-row:hover .sb-kebab,
+.sb-kebab:focus-visible,
+.sb-kebab[aria-expanded="true"] {
   opacity: 1;
 }
-.sb-del:hover {
+.sb-kebab:hover {
   color: var(--shell-strong);
-  background: var(--shell-hover);
+  background: var(--shell-active);
+}
+/* The kebab dropdown (Rename / Delete) - a surface popover over the shell, one open at a time. */
+.sb-menu {
+  position: absolute;
+  top: 30px;
+  right: 6px;
+  z-index: 40;
+  min-width: 132px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sb-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.sb-menu-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.sb-menu-item.danger {
+  color: var(--danger);
+}
+.sb-menu-item.danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+/* Inline rename input (replaces the row in place; accent ring like the composer/field focus). */
+.sb-rename {
+  width: 100%;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 7px 9px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  outline: 0;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .sb-confirm {
   display: flex;

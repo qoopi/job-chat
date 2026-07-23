@@ -30,8 +30,12 @@ export type MintResult = { ok: true; token: string } | { ok: false; reason: "not
 
 export type DeleteResult = { ok: true } | { ok: false; reason: "not_found" };
 
+export type RenameResult = { ok: true; title: string } | { ok: false; reason: "not_found" | "invalid_input" };
+
 // Input bounds at the trust boundary (MAX_INPUT_CHARS, shared with the agent-run backstop); trim is only for the empty check - the ORIGINAL text is persisted.
 const TextSchema = z.string().trim().min(1).max(MAX_INPUT_CHARS);
+// A rename title is user-chosen (unlike deriveTitle's auto-cut at 60): trimmed, non-empty, capped at 120; the TRIMMED value is what persists.
+const TitleSchema = z.string().trim().min(1).max(120);
 const ConversationIdSchema = z.string().uuid();
 
 /** Public-token scope: read+write to EXACTLY this conversation, never broader. */
@@ -48,6 +52,8 @@ export interface SessionService {
   mintChatToken(conversationId: string, callerUserId: string): Promise<MintResult>;
   /** Delete only the caller's OWN conversation (non-owner reads as not_found); messages cascade in the store. */
   deleteConversation(conversationId: string, callerUserId: string): Promise<DeleteResult>;
+  /** Rename only the caller's OWN conversation (non-owner reads as not_found); title bound + trimmed. Returns the stored title. */
+  renameConversation(conversationId: string, title: string, callerUserId: string): Promise<RenameResult>;
 }
 
 export type Identity = { userId: string; kind: CallerKind };
@@ -124,6 +130,17 @@ export function createSessionService(deps: SessionDeps): SessionService {
       if (!owner || owner.user_id !== callerUserId) return { ok: false, reason: "not_found" };
       await store.deleteConversation(conversationId);
       return { ok: true };
+    },
+
+    async renameConversation(conversationId, title, callerUserId) {
+      if (!ConversationIdSchema.safeParse(conversationId).success) return { ok: false, reason: "not_found" };
+      // Bound the title BEFORE ownership (same order as sendMessage guards text) so an over-long payload never reaches the store.
+      const parsed = TitleSchema.safeParse(title);
+      if (!parsed.success) return { ok: false, reason: "invalid_input" };
+      const owner = await store.getConversationOwner(conversationId);
+      if (!owner || owner.user_id !== callerUserId) return { ok: false, reason: "not_found" };
+      await store.renameConversation(conversationId, parsed.data);
+      return { ok: true, title: parsed.data };
     },
   };
 }
