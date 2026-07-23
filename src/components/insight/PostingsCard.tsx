@@ -121,9 +121,8 @@ export function PostingsCard({
             <button className="chip" type="button" disabled={pending} onClick={() => onFollowup?.("Include one level up")}>
               Include one level up
             </button>
-            <button className="chip" type="button" disabled={pending} onClick={() => onFollowup?.("Broaden location")}>
-              Broaden location
-            </button>
+            {/* AC-3 (register #12): the "Broaden location" chip was removed - city is only a score addend,
+                not a filter, so re-asking with it broadened recall by nothing. Left: two chips that act. */}
             <button className="chip" type="button" onClick={onEdit}>
               Edit profile
             </button>
