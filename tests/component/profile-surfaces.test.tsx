@@ -243,17 +243,20 @@ describe("PostingsCard", () => {
     expect(onOpenPanel).toHaveBeenCalled();
   });
 
-  // AC-3 (register #12): "Broaden location" was a recall no-op by construction (city is only a score
-  // addend, never a filter), so it is REMOVED. The honest way-out set is the two chips that do something
-  // real: "Include one level up" (band relaxation - a real follow-up) and "Edit profile".
-  test("no-matches variant: near-miss verdict + the two REAL way-out chips (no dishonest 'Broaden location')", () => {
+  // A 0-result search renders a COMPACT notice - an honest sentence plus the two way-out chips - never the
+  // hollow chart-card frame (no table, no chart shell, no "0" headline). The two chips do something real:
+  // "Include one level up" (band relaxation) and "Edit profile"; "Broaden location" was a no-op and is gone.
+  test("no-matches variant: compact notice with an honest sentence + the two REAL way-out chips", () => {
     const onEdit = vi.fn();
-    render(<PostingsCard rows={[{ ...postingsRows[0], company: "Google", city: "Zurich" }]} total={0} onEdit={onEdit} />);
-    expect(screen.getByText(/No strong matches yet/)).toBeTruthy();
-    expect(screen.getByText(/Closest:/)).toBeTruthy();
+    const { container } = render(<PostingsCard rows={[]} total={0} onEdit={onEdit} onFollowup={vi.fn()} />);
+    expect(screen.getByText(/No strong matches/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Include one level up" })).toBeTruthy();
-    // The removed chip is gone - it never did anything (city is a score addend, not a filter).
     expect(screen.queryByRole("button", { name: "Broaden location" })).toBeNull();
+    // no hollow chart-card frame, no table, no bold "0" headline
+    expect(container.querySelector(".insight")).toBeNull();
+    expect(container.querySelector("table")).toBeNull();
+    expect(container.querySelector(".postings-empty")).not.toBeNull();
+    expect(screen.queryByText("0")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
     expect(onEdit).toHaveBeenCalled();
   });

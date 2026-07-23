@@ -95,39 +95,21 @@ export function PostingsCard({
     [rows, onlyRemote, onlySalary],
   );
 
-  // No-matches variant: the rows present ARE the near-misses (rows[0] is the closest); no dedicated near-miss field.
+  // No-matches variant: a COMPACT notice (an honest line + the two way-out chips), never the hollow
+  // chart-card frame. The two chips do something real - "Include one level up" relaxes the seniority band
+  // and "Edit profile" opens the editor; "Broaden location" was dropped (city is a score addend, not a
+  // filter, so re-asking with it widened recall by nothing).
   if (total === 0) {
-    const near = rows.length;
-    const closest = rows[0];
-    const verdict =
-      near > 0
-        ? `No strong matches yet — ${near} near-miss${near === 1 ? "" : "es"} sit just outside your profile.`
-        : "No strong matches yet.";
     return (
-      <div className="insight" style={{ maxWidth: 640 }}>
-        <div className="insight-head">
-          <Verdict text={verdict} />
-        </div>
-        {closest ? (
-          <div className="insight-body">
-            <div style={{ fontSize: 13, color: "var(--text-2)", padding: "2px 0 6px" }}>
-              Closest: {closest.title} at {closest.company}
-              {closest.city ? `, ${closest.city}` : ""}.
-            </div>
-          </div>
-        ) : null}
-        <div className="insight-foot">
-          <div className="followups">
-            <button className="chip" type="button" disabled={pending} onClick={() => onFollowup?.("Include one level up")}>
-              Include one level up
-            </button>
-            {/* The "Broaden location" chip was removed - city is only a score addend,
-                not a filter, so re-asking with it broadened recall by nothing. Left: two chips that act. */}
-            <button className="chip" type="button" onClick={onEdit}>
-              Edit profile
-            </button>
-          </div>
-          <span className="src">matched against your profile</span>
+      <div className="postings-empty">
+        <p className="verdict">No strong matches for your profile yet.</p>
+        <div className="followups">
+          <button className="chip" type="button" disabled={pending} onClick={() => onFollowup?.("Include one level up")}>
+            Include one level up
+          </button>
+          <button className="chip" type="button" onClick={onEdit}>
+            Edit profile
+          </button>
         </div>
       </div>
     );

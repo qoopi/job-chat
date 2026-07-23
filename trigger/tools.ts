@@ -172,12 +172,18 @@ const SearchPostingsToolInput = z
   .object({
     titleTerms: z.array(z.string().min(1)).max(10).optional(),
     cities: z.array(z.string().min(1)).max(20).optional(),
+    // A company scope for "am I a fit at X" - the named companies (trimmed, capped at 5) constrain the
+    // ranked set to those companies only. Absent = rank the whole open set against the profile.
+    companies: z.array(z.string().trim().min(1)).max(5).optional(),
     remoteOk: z.boolean().optional(),
   })
   .strict();
 type SearchToolInput = z.infer<typeof SearchPostingsToolInput>;
 
-// Generic title tokens that must never become a standalone search term (they'd match the whole board).
+// Tokens too generic to stand alone as a search term: a bare role word or a bare connector word each
+// match most of the board, so they are dropped and only distinctive tokens survive. "software" recalls
+// roughly one posting in six and "in" (a connector that appears inside "Software Engineer in Test")
+// recalls well over half - each would swamp a scored fit with near-everything.
 const GENERIC_TITLE_TOKENS = new Set([
   "full",
   "engineer",
@@ -188,6 +194,8 @@ const GENERIC_TITLE_TOKENS = new Set([
   "junior",
   "principal",
   "lead",
+  "software",
+  "in",
 ]);
 
 // Family-crossing tokens: distinctive enough to survive the generic stoplist, but bare they match across
@@ -245,6 +253,9 @@ export function mergeSearchParams(input: SearchToolInput, profile: Profile) {
     titleTerms: expandTitleTerms(baseTitles), // recall-broadened before the scorer sees them
     experience: profile.seniority ?? undefined, // authoritative - never from the model
     cities: input.cities && input.cities.length > 0 ? input.cities : profile.locations,
+    // A company scope comes ONLY from the model's read of the question (the profile has no company field);
+    // absent means no scope. It is a hard filter downstream, not a score addend.
+    companies: input.companies && input.companies.length > 0 ? input.companies : undefined,
     remoteOk: input.remoteOk ?? profile.remotePref ?? undefined,
     salaryMin: profile.salaryMin ?? undefined, // authoritative - never from the model
     limit: 50, // the inherited contract: carry ALL matches up to the hard cap of 50
@@ -268,7 +279,8 @@ function searchPostingsTool(deps: CatalogDeps) {
       if (!deps.profile) {
         return { error: "No profile on file - call request_profile so the user can create one." };
       }
-      const params = mergeSearchParams(rawInput as SearchToolInput, deps.profile);
+      // Re-validate the model's input here (trim + caps) before merging - the runtime never trusts the raw call.
+      const params = mergeSearchParams(SearchPostingsToolInput.parse(rawInput), deps.profile);
       try {
         const { rows, total } = await deps.analytics.searchPostings(params);
         deps.emit({ type: "data-postings", id, data: { kind: "postings", rows, total } });

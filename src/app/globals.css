@@ -1295,6 +1295,24 @@ a:hover {
   flex-shrink: 0;
 }
 
+/* the no-match postings result: a compact notice (honest line + the two way-out chips), never a hollow
+   chart-card shell with an empty body */
+.postings-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 480px;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.postings-empty .verdict {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
 /* The guest cap -> register moment. An accent-soft card (not red, not a bubble) that
    invites a free account; the composer stays enabled and a send opens the dialog with the draft queued. */
 .register-card {

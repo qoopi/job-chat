@@ -19,6 +19,7 @@ import { persistedSessionIsStreaming } from "@/lib/chat-session-store";
 import {
   classifyCardData,
   dataParts,
+  dedupeDataPartsById,
   dedupeInviteCards,
   isStreaming,
   messageText,
@@ -508,8 +509,12 @@ export function ChatClient({
 
   // Reconcile by id at the merge seam: reconnecting to a live run re-receives the already-present assistant tail
   // (SDK session replay, same id); fold those duplicates (replace in place, order kept) so each turn renders once and keys stay unique.
-  // Then dedupeInviteCards: the idempotent invite cards arrive from uncoordinated sources under DIFFERENT ids, so only a presentation pass collapses them.
-  const view = useMemo(() => dedupeInviteCards(reconcileMessagesById(messages)), [messages]);
+  // Then dedupeDataPartsById: a replayed card re-emitted under its SAME part id in a NEW message survives the id-fold, so a
+  // part-level pass drops the copy. Then dedupeInviteCards: the idempotent invite cards arrive under DIFFERENT ids, collapsed by kind.
+  const view = useMemo(
+    () => dedupeInviteCards(dedupeDataPartsById(reconcileMessagesById(messages))),
+    [messages],
+  );
 
   // The open detail panel's body, re-resolved from the current (immutable) messages. The EXPENSIVE resolve (classify +
   // Zod safeParse -> a fresh insight whose new `rows` ref re-sorts the DataTable) is memoized on the target

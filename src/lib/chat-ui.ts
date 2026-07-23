@@ -173,6 +173,43 @@ export function dedupeInviteCards(messages: UIMessage[]): UIMessage[] {
   return out;
 }
 
+/** Presentation pass (AFTER reconcileMessagesById): a persisted data card carries a STABLE id, and a
+ *  stalled run that reconnects cursor-less replays the `.out` tail - re-emitting an already-hydrated turn's
+ *  card under that SAME part id inside a DIFFERENT message, a copy the message-id fold cannot collapse. Keep
+ *  the FIRST message's copy of each data-part id, drop a later message's repeat, and drop an assistant
+ *  message the drop left with nothing to render. Ids commit per message, so a part id repeated WITHIN one
+ *  message (the skeleton->filled reconciliation) is never compared against its own message and always
+ *  survives. Distinct cards of the same kind carry different ids and are untouched. Unchanged messages keep
+ *  identity (memo-safe). */
+export function dedupeDataPartsById(messages: UIMessage[]): UIMessage[] {
+  const seen = new Set<string>();
+  const out: UIMessage[] = [];
+  for (const m of messages) {
+    const committed: string[] = [];
+    let dropped = false;
+    const parts = m.parts.filter((p) => {
+      if (typeof p.type !== "string" || !p.type.startsWith("data-")) return true; // not a card part
+      const id = (p as { id?: string }).id;
+      if (id === undefined) return true; // unkeyed part - cannot dedupe by id
+      if (seen.has(id)) {
+        dropped = true;
+        return false; // a copy an earlier message already showed
+      }
+      committed.push(id);
+      return true;
+    });
+    // Commit AFTER the filter so a within-message repeat of an id is never dropped as its own duplicate.
+    for (const id of committed) seen.add(id);
+    if (!dropped) {
+      out.push(m); // identity preserved so the MessageList memo still bails
+      continue;
+    }
+    if (parts.length === 0) continue; // the duplicate was this message's whole content - drop the empty message
+    out.push({ ...m, parts } as UIMessage);
+  }
+  return out;
+}
+
 export function messageText(message: Pick<UIMessage, "parts">): string {
   const texts = message.parts
     .filter((p): p is { type: "text"; text: string } => p.type === "text" && typeof (p as { text?: unknown }).text === "string")

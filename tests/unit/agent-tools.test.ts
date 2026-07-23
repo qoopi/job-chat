@@ -241,6 +241,13 @@ describe("mergeSearchParams (server-authoritative profile merge)", () => {
     expect(refined.titleTerms).toEqual(["Backend Engineer", "Backend"]);
   });
 
+  it("passes a model-supplied company scope through as the hard-filter list; absent otherwise", () => {
+    const scoped = mergeSearchParams({ titleTerms: ["staff engineer"], companies: ["ClickHouse"] }, PROFILE);
+    expect(scoped.companies).toEqual(["ClickHouse"]);
+    // no company named -> no scope (rank the whole open set against the profile)
+    expect(mergeSearchParams({ titleTerms: ["staff engineer"] }, PROFILE).companies).toBeUndefined();
+  });
+
   // Mutation check: the tool schema's `.strict()` blocks an injected experience/salaryMin key BEFORE it
   // reaches mergeSearchParams in production - but that is a schema-layer guarantee, not a merge-logic one.
   // This forces a model-supplied value THROUGH the merge itself (a raw cast, as if a differently-shaped
@@ -262,7 +269,7 @@ describe("mergeSearchParams (server-authoritative profile merge)", () => {
 // III, Full Stack") that a whole-phrase match misses. The generic-token stoplist keeps a bare "Engineer"/
 // "Developer" from widening the match to the whole board.
 describe("expandTitleTerms (F4 recall broadening)", () => {
-  const GENERIC = ["full", "engineer", "developer", "manager", "senior", "staff", "junior", "principal", "lead"];
+  const GENERIC = ["full", "engineer", "developer", "manager", "senior", "staff", "junior", "principal", "lead", "software", "in"];
 
   it.each([
     // [input, expected expansion]
@@ -273,6 +280,10 @@ describe("expandTitleTerms (F4 recall broadening)", () => {
     [["Backend Engineer"], ["Backend Engineer", "Backend"]],
     [["staff engineer"], ["staff engineer"]], // both tokens generic -> only the phrase survives
     [["backend"], ["backend"]], // a distinctive single token: phrase == token, deduped
+    // A bare "software" matches ~1 in 6 postings (whole-board recall), so it is dropped: only the phrase survives.
+    [["Senior Software Engineer"], ["Senior Software Engineer"]],
+    // A bare connector word ("in") matches most of the board too - dropped; the distinctive "Test" survives.
+    [["Senior Software Engineer in Test"], ["Senior Software Engineer in Test", "Test"]],
   ])("expands %j -> %j", (input, expected) => {
     expect(expandTitleTerms(input)).toEqual(expected);
   });
@@ -332,6 +343,28 @@ describe("Should_EmitPostingsPart_When_SearchPostingsRuns (AC-7)", () => {
     expect(passed).toMatchObject({ titleTerms: ["backend"], experience: "senior", salaryMin: 120000, limit: 50 });
     // The card is the whole answer (the model view carries the count, not prose).
     expect((out as { total: number }).total).toBe(23);
+  });
+
+  it("carries a company scope to the scorer, trimmed and capped at five", async () => {
+    const analytics = searchAnalytics([], 3);
+    const tools = buildCatalogTools({ analytics, emit: () => {}, profile: PROFILE });
+    await tools.search_postings.execute!(
+      { titleTerms: ["backend"], companies: ["  ClickHouse  ", "Databricks"] },
+      opts,
+    );
+    const passed = (analytics.searchPostings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(passed.companies).toEqual(["ClickHouse", "Databricks"]); // trimmed
+  });
+
+  it("rejects a company scope longer than five (schema cap)", async () => {
+    const analytics = searchAnalytics([], 0);
+    const tools = buildCatalogTools({ analytics, emit: () => {}, profile: PROFILE });
+    await expect(
+      tools.search_postings.execute!(
+        { titleTerms: ["backend"], companies: ["a", "b", "c", "d", "e", "f"] },
+        opts,
+      ),
+    ).rejects.toThrow();
   });
 
   it("emits no card and signals request_profile when there is no profile on file", async () => {
