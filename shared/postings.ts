@@ -60,7 +60,9 @@ export interface PostingRow {
   ingested_at: string;
 }
 
-function toChDateTime(input: string | Date): string {
+/** Format a date to ClickHouse DateTime text form (UTC, "YYYY-MM-DD HH:MM:SS"). One home for the row
+ *  timestamps and the delisting-delete predicate. */
+export function toChDateTime(input: string | Date): string {
   return new Date(input).toISOString().slice(0, 19).replace("T", " ");
 }
 

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ClickHouseClient } from "@clickhouse/client";
 import { applyClickhouseMigrations, createWriterClient } from "@shared/clickhouse";
-import { ingestPostings, type RowSink } from "@shared/ingest";
+import { createClickhouseRowSink, ingestPostings, type RowSink } from "@shared/ingest";
 import { page, pageOf, posting, scriptedClient } from "../fixtures/ingest.fixture";
 
 // Integration: real ClickHouse. Skipped when creds are absent (e.g. CI without secrets).
@@ -29,7 +29,7 @@ describe.skipIf(!hasCreds)("ingestPostings against real ClickHouse", () => {
 
   beforeAll(async () => {
     ch = createWriterClient();
-    sink = { insert: (params) => ch.insert(params) };
+    sink = createClickhouseRowSink(ch);
     await applyClickhouseMigrations(ch); // ensure base `postings` exists
   });
 
