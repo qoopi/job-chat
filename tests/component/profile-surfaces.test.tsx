@@ -228,6 +228,48 @@ describe("PostingsCard", () => {
     expect(screen.getByRole("button", { name: "Open top 50 of 51 in panel" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Open all 51 in panel" })).toBeNull();
   });
+
+  // Item 1 (register 19/20): the "Only remote" / "Only with salary" chips are CLIENT-SIDE toggles over
+  // the delivered rows - they NEVER send a chat turn (the old behavior re-derived search params and
+  // returned MORE rows). Counts are honest to the delivered set; composable (AND); toggling off restores.
+  // postingsRows: 12 rows, remote at i%3==0 (=4), salary listed at i%2==0 (=6), remote&salary at i∈{0,6} (=2).
+  test("chip toggles filter the delivered rows locally and NEVER send a chat turn (honest counts)", () => {
+    const onFollowup = vi.fn();
+    render(<PostingsCard rows={postingsRows} total={23} onFollowup={onFollowup} onOpenPanel={vi.fn()} />);
+    // Chip labels carry the honest live count of matching delivered rows.
+    const remoteChip = screen.getByRole("button", { name: /Only remote · 4/ });
+    const salaryChip = screen.getByRole("button", { name: /Only with salary · 6/ });
+    // Baseline: full delivered set, 8 shown of the 23 server total.
+    expect(document.querySelectorAll("tbody tr").length).toBe(8);
+    expect(screen.getByText("8 of 23 matches")).toBeTruthy();
+
+    // Toggle remote: 4 remote rows, all shown; aria-pressed; footer honest to the delivered subset.
+    fireEvent.click(remoteChip);
+    expect(remoteChip.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelectorAll("tbody tr").length).toBe(4);
+    expect(screen.getByText("4 of 4 shown")).toBeTruthy();
+    // Composable (AND) with salary: remote AND salary-listed = 2 rows.
+    fireEvent.click(salaryChip);
+    expect(document.querySelectorAll("tbody tr").length).toBe(2);
+    expect(screen.getByText("2 of 2 shown")).toBeTruthy();
+
+    // Toggling both off restores the full delivered set + the server-total footer.
+    fireEvent.click(remoteChip);
+    fireEvent.click(salaryChip);
+    expect(document.querySelectorAll("tbody tr").length).toBe(8);
+    expect(screen.getByText("8 of 23 matches")).toBeTruthy();
+
+    // Never a chat turn - the whole point of the fix.
+    expect(onFollowup).not.toHaveBeenCalled();
+  });
+
+  test("empty-filter-result: a filter that matches nothing shows a message, not an empty table", () => {
+    const noRemote = postingsRows.map((r) => ({ ...r, remote: false }));
+    render(<PostingsCard rows={noRemote} total={23} onOpenPanel={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Only remote · 0/ }));
+    expect(document.querySelectorAll("tbody tr").length).toBe(0);
+    expect(screen.getByText(/None of these 12 match that filter/)).toBeTruthy();
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------
