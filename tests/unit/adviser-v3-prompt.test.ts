@@ -41,6 +41,17 @@ describe("adviser-v3 system prompt (044)", () => {
     expect(p).toMatch(/do not call a tool|will return nothing|returns nothing/);
   });
 
+  it("treats country as a SAMPLE, not a COMPLETE family (044 review fix)", () => {
+    // Only experience_level/employment_type/location_kind are declared COMPLETE. `country` is capped
+    // (top-N) in buildCorpusSql, so calling it COMPLETE would falsely refuse a country ranked past the
+    // cap that DOES have data. Country joins cities as a busiest/sample list instead.
+    const p = ADVISER_V3;
+    expect(p).toContain("experience_level, employment_type, and location_kind lists are the COMPLETE set");
+    expect(p).not.toMatch(/location_kind, and country lists are the COMPLETE set/);
+    // The absent-value refusal must NOT be keyed on country; an unshown country is query-anyway like a city.
+    expect(p.toLowerCase()).toMatch(/a city or country not shown may still have data/);
+  });
+
   it("draws filter spellings from the note and keeps case-insensitive matching guidance (AC-4)", () => {
     const p = ADVISER_V3.toLowerCase();
     expect(p).toMatch(/filter spellings|spellings from/);

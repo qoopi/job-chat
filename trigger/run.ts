@@ -87,17 +87,22 @@ function dataScopeNote(p: CoverageProfile): string {
 function corpusNote(c: CorpusSummary): string {
   const snapshot = c.freshestAt.slice(0, 10); // YYYY-MM-DD
   const salaryPct = Math.round(c.salaryCoverage * 100);
+  // Defense-in-depth (044 review): corpus values are ingest-sourced free text entering a prompt - collapse
+  // any whitespace/newlines and cap length so a pathological value can't inject line structure into the note.
+  const clean = (v: string) => v.replace(/\s+/g, " ").trim().slice(0, 60);
   const lines = [
     `CORPUS: the live data you answer from right now - ${c.total.toLocaleString()} open postings, snapshot ${snapshot}.` +
       ` These are the values that EXIST; filter matching is case-insensitive (use any casing).`,
   ];
   if (c.sources.length)
-    lines.push(`Sources: ${c.sources.map((s) => `${s.source} ${Math.round(s.share * 100)}%`).join(", ")}.`);
-  if (c.topCities.length) lines.push(`Busiest cities: ${c.topCities.join(", ")}.`);
-  if (c.countries.length) lines.push(`Countries: ${c.countries.join(", ")}.`);
-  if (c.experienceLevels.length) lines.push(`experience_level values: ${c.experienceLevels.join(", ")}.`);
-  if (c.employmentTypes.length) lines.push(`employment_type values: ${c.employmentTypes.join(", ")}.`);
-  if (c.locationKinds.length) lines.push(`location_kind values: ${c.locationKinds.join(", ")}.`);
+    lines.push(`Sources: ${c.sources.map((s) => `${clean(s.source)} ${Math.round(s.share * 100)}%`).join(", ")}.`);
+  // Countries, like cities, are a top-N sample (buildCorpusSql caps both) - label them "busiest" so v3 does
+  // not falsely refuse a country ranked past the cap.
+  if (c.topCities.length) lines.push(`Busiest cities: ${c.topCities.map(clean).join(", ")}.`);
+  if (c.countries.length) lines.push(`Busiest countries: ${c.countries.map(clean).join(", ")}.`);
+  if (c.experienceLevels.length) lines.push(`experience_level values: ${c.experienceLevels.map(clean).join(", ")}.`);
+  if (c.employmentTypes.length) lines.push(`employment_type values: ${c.employmentTypes.map(clean).join(", ")}.`);
+  if (c.locationKinds.length) lines.push(`location_kind values: ${c.locationKinds.map(clean).join(", ")}.`);
   lines.push(`Salary present on ~${salaryPct}% of postings.`);
   return lines.join(" ");
 }

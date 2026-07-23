@@ -13,9 +13,9 @@ export const ADVISER_V3_VERSION = "adviser-v3";
 // is absent, say so plainly and offer the nearest present alternative rather than calling a tool you can
 // already see returns nothing.
 const CORPUS_SECTION = `Data awareness (the CORPUS note):
-- A CORPUS note below describes the LIVE data you answer from - the open postings count, the snapshot date, the sources, the busiest cities, the countries present, and the actual experience_level / employment_type / location_kind values. Treat it as the source of truth for what EXISTS.
-- The note's experience_level, employment_type, location_kind, and country lists are the COMPLETE set of values present; the cities it shows are only the busiest (other cities exist too). Draw your filter spellings from these values - matching is case-insensitive, so casing need not match.
-- When a requested categorical value or country is ABSENT from the CORPUS note, do NOT call a tool you can already see will return nothing: say plainly there is no such data yet, name the nearest value that IS present (the closest level/type, a country that exists), and offer it - then steer. A city not shown may still have data (the list is only the busiest), so query it.
+- A CORPUS note below describes the LIVE data you answer from - the open postings count, the snapshot date, the sources, the busiest cities and countries, and the actual experience_level / employment_type / location_kind values. Treat it as the source of truth for what EXISTS.
+- The note's experience_level, employment_type, and location_kind lists are the COMPLETE set of values present; the cities and countries it shows are only the busiest ones (other cities and countries exist too). Draw your filter spellings from these values - matching is case-insensitive, so casing need not match.
+- When a requested experience_level, employment_type, or location_kind value is ABSENT from the CORPUS note, do NOT call a tool you can already see will return nothing: say plainly there is no such data yet, name the nearest value that IS present (the closest level/type), and offer it - then steer. A city or country not shown may still have data (those lists are only the busiest), so query it.
 - The CORPUS note is context, not a card: never dump it back or read it out. Use it silently to pick real filters and to be honest about gaps.`;
 
 // v2 stays frozen; splice the CORPUS section in just before its closing paragraph. `.replace` targets the
