@@ -65,7 +65,7 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export function DetailProfile({
+export function ProfilePanel({
   conversationId,
   e2e = false,
   onClose,
@@ -199,7 +199,7 @@ export function DetailProfile({
     void onProfileSaved(outcome.profile);
   }, [conversationId, e2e, githubInput, resumeText, onProfileSaved]);
 
-  // Delete the profile ROW; the streamed profile card stays in the thread as history (041 req 3). The panel
+  // Delete the profile ROW; the streamed profile card stays in the thread as history. The panel
   // returns to the empty/upload form so the user can build a fresh profile.
   const remove = useCallback(async () => {
     if (!e2e) await deleteProfile().catch(() => ({ ok: false }));
@@ -214,7 +214,7 @@ export function DetailProfile({
   }, [e2e]);
 
   // A successful inline edit: adopt the returned row as the new truth and remount the editor to re-seed. This
-  // NEVER re-injects the thread card or fires the F3 auto-continue - inline edits do not auto-send (req 4).
+  // NEVER re-injects the thread card or fires the auto-continue - inline edits do not auto-send.
   const onEditorSaved = useCallback((saved: Profile) => {
     setProfile(saved);
     setProfileEpoch((n) => n + 1);
@@ -430,10 +430,10 @@ function saveErrorCopy(reason: "not_found" | "invalid_input"): string {
     : "Couldn’t save — your profile may have changed. Reopen and try again.";
 }
 
-// The post-parse FULL profile (operator 039) made editable (041): identity header + editable target-salary
+// The post-parse FULL profile made editable: identity header + editable target-salary
 // and location prefs + editable skill chips (add/remove) + the read-only remainder (Sources, experience,
 // OSS). "Save changes" persists prefs + skills in ONE round; it NEVER re-injects the thread card or fires
-// the F3 auto-continue (inline edits do not auto-send). Delete/Find/Edit&re-save stay wired.
+// the auto-continue (inline edits do not auto-send). Delete/Find/Edit&re-save stay wired.
 function ProfileEditor({
   profile,
   e2e,

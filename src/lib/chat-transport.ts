@@ -13,7 +13,7 @@ import type { jobChatAgent } from "../../trigger/chat";
 export interface JobChatTransport extends ChatTransport<UIMessage> {
   // Stop must reach the backend after a RESUMED mount: `useChat.stop()` aborts only the local reader, so onStop pairs it with `stopGeneration` ({kind:"stop"} on `.in`).
   stopGeneration(chatId: string): Promise<boolean>;
-  // Cold-start warm (register #11): eagerly create the session + boot its run for a chatId BEFORE the first
+  // Cold-start warm: eagerly create the session + boot its run for a chatId BEFORE the first
   // send, so the ~cold agent boot overlaps mount/typing instead of stacking after the send. The real
   // transport runs `startSession` (createStartSessionAction) - a Trigger session only, NEVER a PG row.
   // Optional: the e2e mock owns no real session, so there is nothing to warm and it simply omits it.

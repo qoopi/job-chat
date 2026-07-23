@@ -7,7 +7,7 @@ import { createSearchnapplyClient, searchnapplyConfigFromEnv } from "@shared/sea
 // Idempotent by table key (ReplacingMergeTree); the run's timestamp is the version.
 export const ingestPostingsTask = schedules.task({
   id: "ingest-postings",
-  // Hourly, on the hour (operator ruling 2026-07-23): a 30-min cadence woke ClickHouse ~48x/day and
+  // Hourly, on the hour: a 30-min cadence woke ClickHouse ~48x/day and
   // defeated idling; hourly keeps the corpus fresh while letting the service idle for credit control.
   cron: "0 * * * *",
   retry: { maxAttempts: 3, factor: 2, minTimeoutInMs: 1_000, maxTimeoutInMs: 30_000 },

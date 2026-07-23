@@ -11,6 +11,8 @@ import {
 import type { Store, MessageRole } from "@shared/store";
 import { MAX_INPUT_CHARS } from "./guard";
 
+// Message persistence for the durable run: incoming user parts + persistable assistant payloads become id-idempotent store writes; hydrateHistory reads prior turns back as model-ready text.
+
 type MessagePartLike = { type: string; text?: string; id?: string; data?: unknown };
 type MessageLike = { id?: string; parts?: MessagePartLike[] };
 

@@ -1,6 +1,6 @@
 // System prompt v3 for the adviser agent. Same versioning convention as v2: a NEW file, never an edit to a
 // shipped prompt (runs pin their version). v3 = v2's full content plus a Data-awareness (CORPUS note)
-// section - the 044 addition teaching the agent to treat the runtime CORPUS note as the source of truth
+// section - the addition teaching the agent to treat the runtime CORPUS note as the source of truth
 // for what the live data contains. v2 stays FROZEN on disk; v3 composes from it so the shared content can
 // never silently drift (the content test pins every v2 block present in v3).
 
@@ -8,7 +8,7 @@ import { ADVISER_V2 } from "./adviser-v2";
 
 export const ADVISER_V3_VERSION = "adviser-v3";
 
-// The corpus-awareness section (044 AC-4). The SF/NYC/LA abbreviation expansions stay in v2 as the belt;
+// The corpus-awareness section. The SF/NYC/LA abbreviation expansions stay in v2 as the belt;
 // this is the additional guidance: draw filter spellings from the CORPUS note, and when a requested value
 // is absent, say so plainly and offer the nearest present alternative rather than calling a tool you can
 // already see returns nothing.

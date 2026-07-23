@@ -39,7 +39,7 @@ export interface ChatRunDeps<R> {
   coverageProfile?: () => Promise<CoverageProfile>;
   /** The owner's structured profile, resolved PER TURN (never memoized); a failure never blocks the turn. */
   profile?: (chatId: string) => Promise<Profile | null>;
-  /** The live corpus summary for the CORPUS note (044 AC-2/3), fetched ONCE per conversation and reused
+  /** The live corpus summary for the CORPUS note, fetched ONCE per conversation and reused
    *  across its turns (createChatRun memoizes by chatId); a failure degrades to NO note, never a turn failure. */
   corpus?: (chatId: string) => Promise<CorpusSummary | null>;
   streamModel: StreamModel<R>;
@@ -81,13 +81,13 @@ function dataScopeNote(p: CoverageProfile): string {
   );
 }
 
-/** The CORPUS note (044 AC-2): a compact text block listing what the live data actually contains, so the
+/** The CORPUS note: a compact text block listing what the live data actually contains, so the
  *  agent draws filter spellings from real values and can be honest when a requested value is absent.
  *  Omitted line = that dimension had no values. Prompt v3 teaches how to use it. */
 function corpusNote(c: CorpusSummary): string {
   const snapshot = c.freshestAt.slice(0, 10); // YYYY-MM-DD
   const salaryPct = Math.round(c.salaryCoverage * 100);
-  // Defense-in-depth (044 review): corpus values are ingest-sourced free text entering a prompt - collapse
+  // Defense-in-depth: corpus values are ingest-sourced free text entering a prompt - collapse
   // any whitespace/newlines and cap length so a pathological value can't inject line structure into the note.
   const clean = (v: string) => v.replace(/\s+/g, " ").trim().slice(0, 60);
   const lines = [
@@ -108,7 +108,7 @@ function corpusNote(c: CorpusSummary): string {
 }
 
 export function createChatRun<R>(deps: ChatRunDeps<R>) {
-  // AC-2/3: the CORPUS summary is fetched ONCE per conversation and reused across its turns, so the note
+  // The CORPUS summary is fetched ONCE per conversation and reused across its turns, so the note
   // (and the cached system prefix it rides in) stays byte-stable while a chat is active; a NEW chat
   // (new chatId) re-fetches fresh corpus facts. Held for the life of this run factory (a module singleton
   // in trigger/chat.ts). A rejected fetch is NOT pinned - a later turn retries.

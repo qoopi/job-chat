@@ -282,7 +282,7 @@ export async function getMyProfile(): Promise<MyProfile | null> {
 }
 
 /** Delete the caller's profile row (idempotent). The profile CARD already streamed into any conversation
- *  STAYS as history - deleting your profile does not rewrite past turns (041 req 3). The PROFILE note simply
+ *  STAYS as history - deleting your profile does not rewrite past turns. The PROFILE note simply
  *  leaves the agent's context on the next turn: owner-context (trigger/chat.ts) re-reads the profile per
  *  turn, so once the row is gone the next turn carries no note. The panel returns to its empty/upload state. */
 export async function deleteProfile(): Promise<{ ok: boolean }> {
@@ -292,7 +292,7 @@ export async function deleteProfile(): Promise<{ ok: boolean }> {
   return { ok: true };
 }
 
-// The profile-edit bounds (041): server-authoritative caps mirrored loosely by the client inputs.
+// The profile-edit bounds: server-authoritative caps mirrored loosely by the client inputs.
 const MAX_SALARY = 10_000_000;
 const MAX_LOCATION_TEXT = 120;
 
@@ -303,7 +303,7 @@ export type UpdateProfileResult =
   | { ok: true; profile: Profile }
   | { ok: false; reason: "not_found" | "invalid_input" };
 
-/** Edit the caller's OWN salary/location preferences (the 041 inline edit). Validates server-side (salary a
+/** Edit the caller's OWN salary/location preferences (the inline edit). Validates server-side (salary a
  *  positive int capped, location text trimmed + capped, both clearable), parses the free-text location into
  *  {locations, remotePref}, and persists via the store's targeted jsonb merge. Returns the updated row so
  *  the view re-renders from server truth. These fields feed searchPostings - the NEXT match run reflects them. */
@@ -339,7 +339,7 @@ const SkillsEditSchema = z.array(
   z.object({ name: z.string(), source: z.enum(["resume", "github", "both"]) }),
 );
 
-/** Replace the caller's OWN skills array (the 041 chip add/remove). The client supplies the full array with
+/** Replace the caller's OWN skills array (the chip add/remove). The client supplies the full array with
  *  each chip's source preserved (a newly ADDED chip carries source "resume"); the server validates (names
  *  trimmed non-empty <= 60, max 40, case-insensitively deduped) and persists. Removing a github-proven chip
  *  is allowed - the user owns their profile. Returns the updated row. */
