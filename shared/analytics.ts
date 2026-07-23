@@ -508,6 +508,9 @@ const SearchPostingsParams = z
     titleTerms: z.array(z.string().min(1)).max(10).default([]),
     experience: z.string().min(1).nullish(),
     cities: z.array(z.string().min(1)).max(20).default([]),
+    // "at company X for me": the named companies constrain the scored set as a HARD filter (never a score
+    // addend). Capped at 5; empty means no company constraint (rank the whole open set).
+    companies: z.array(z.string().min(1)).max(5).default([]),
     remoteOk: z.boolean().optional(),
     salaryMin: z.number().int().positive().max(1_000_000_000).optional(),
     limit: z.number().int().positive().max(50).default(10),
@@ -543,6 +546,9 @@ export function buildSearchPostingsSql(
   const p = SearchPostingsParams.parse(rawParams);
   const score = scoreExpr(p);
   const openSet = openSetFilter(table);
+  // A company scope narrows the ranked set to those companies only, applied alongside the open-set predicate
+  // in BOTH inner queries so the honest total counts just the named companies.
+  const scope = p.companies.length > 0 ? `${openSet} AND ${inCI("company", p.companies)}` : openSet;
   const rowsSql = assemble([
     "SELECT",
     "  title,",
@@ -567,7 +573,7 @@ export function buildSearchPostingsSql(
     "    published_at,",
     `    ${score} AS score`,
     `  FROM ${table} FINAL`,
-    `  WHERE ${openSet}`,
+    `  WHERE ${scope}`,
     ")",
     "WHERE score > 0",
     // Deterministic tie-break within equal scores - salary-listed rows first, then
@@ -586,7 +592,7 @@ export function buildSearchPostingsSql(
     "    ingested_at,",
     `    ${score} AS score`,
     `  FROM ${table} FINAL`,
-    `  WHERE ${openSet}`,
+    `  WHERE ${scope}`,
     ")",
     "WHERE score > 0",
     "GROUP BY company",

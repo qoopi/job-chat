@@ -194,6 +194,43 @@ describe("Should_MatchCaseInsensitively_When_CategoricalFilter (044 AC-1, lowerU
   });
 });
 
+// "at company X for me": a company-scoped fit constrains the scored set to those companies BEFORE ranking -
+// a HARD WHERE filter (case-insensitive via inCI), never an additive score term. Applied to both the rows
+// query and the per-company meta query so the honest total counts only the named companies.
+describe("search_postings company scope (hard filter)", () => {
+  it("adds a case-insensitive inCI company filter to BOTH the rows and meta inner WHERE", () => {
+    const { rowsSql, metaSql } = buildSearchPostingsSql(
+      { titleTerms: ["engineer"], companies: ["ClickHouse", "Databricks"] },
+      "postings",
+    );
+    const filter = "AND lowerUTF8(company) IN (lowerUTF8('ClickHouse'), lowerUTF8('Databricks'))";
+    expect(rowsSql).toContain(filter);
+    expect(metaSql).toContain(filter);
+  });
+
+  it("keeps the company constraint OUT of the additive score (it is a filter, not an addend)", () => {
+    const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["engineer"], companies: ["ClickHouse"] }, "postings");
+    // the score line multiplies title/experience/city/remote/salary only - never company
+    expect(rowsSql).not.toMatch(/\*\s*\(lowerUTF8\(company\)/);
+  });
+
+  it("adds no company filter when companies is absent or empty", () => {
+    expect(buildSearchPostingsSql({ titleTerms: ["engineer"] }, "postings").rowsSql).not.toContain("lowerUTF8(company)");
+    expect(buildSearchPostingsSql({ titleTerms: ["engineer"], companies: [] }, "postings").rowsSql).not.toContain("lowerUTF8(company)");
+  });
+
+  it("escapes a company value as a string literal (injection-safe)", () => {
+    const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["engineer"], companies: ["x' OR '1'='1"] }, "postings");
+    expect(rowsSql).toContain("lowerUTF8('x\\' OR \\'1\\'=\\'1')");
+  });
+
+  it("rejects more than five companies (the cap)", () => {
+    expect(() =>
+      buildSearchPostingsSql({ titleTerms: ["engineer"], companies: ["a", "b", "c", "d", "e", "f"] }, "postings"),
+    ).toThrow();
+  });
+});
+
 // Salary aggregates are filtered to the DOMINANT currency (never a mixed-currency median)
 // and flagged `salary` so executeBuilt resolves the base currency for the source line + money formatter.
 describe("Should_FilterToDominantCurrency_When_SalaryAggregate (018 strand 3)", () => {

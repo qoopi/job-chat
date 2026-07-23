@@ -58,6 +58,17 @@ describe("adviser-v3 system prompt (044)", () => {
     expect(p).toContain("case-insensitive");
   });
 
+  it("routes a company-scoped personal fit to search_postings WITH its companies parameter", () => {
+    const p = ADVISER_V3;
+    expect(p.toLowerCase()).toContain("company-scoped fit");
+    expect(p).toContain("search_postings");
+    expect(p.toLowerCase()).toMatch(/companies parameter/);
+    // the section sits before the closing paragraph like the corpus section (spliced, not appended)
+    expect(p.indexOf("Company-scoped fit")).toBeLessThan(p.indexOf("Keep it brief, useful, and honest."));
+    // a general company question that is NOT personal fit stays a data answer, not search_postings
+    expect(p.toLowerCase()).toMatch(/not about personal fit|not personal fit/);
+  });
+
   // The SF/NYC/LA abbreviation belt from v2 stays as belt alongside the CORPUS note.
   it("keeps the v2 city-abbreviation expansions as belt", () => {
     expect(ADVISER_V3).toContain("SF -> San Francisco");

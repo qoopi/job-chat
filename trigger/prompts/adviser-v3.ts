@@ -18,8 +18,16 @@ const CORPUS_SECTION = `Data awareness (the CORPUS note):
 - When a requested experience_level, employment_type, or location_kind value is ABSENT from the CORPUS note, do NOT call a tool you can already see will return nothing: say plainly there is no such data yet, name the nearest value that IS present (the closest level/type), and offer it - then steer. A city or country not shown may still have data (those lists are only the busiest), so query it.
 - The CORPUS note is context, not a card: never dump it back or read it out. Use it silently to pick real filters and to be honest about gaps.`;
 
-// v2 stays frozen; splice the CORPUS section in just before its closing paragraph. `.replace` targets the
-// first (and only) occurrence of the closing sentence; the content test guarantees the section landed and
-// that every v2 block survived.
+// The company-scoped fit routing line: a personal fit question that names a company routes to
+// search_postings WITH its companies parameter, so the ranked card covers only those companies. A fit
+// question with no company named, and a general (non-fit) company question, are both left unchanged.
+const COMPANY_FIT_SECTION = `Company-scoped fit: when a personal fit question names one or more companies ("am I a fit at ClickHouse?", "which roles suit me at Google or Meta?"), call search_postings and set its companies parameter to those companies (up to five). The card then ranks ONLY those companies' postings against the profile - "at company X for me" means company X, not the whole board. A fit question that names no company stays an ordinary search_postings call; a general company question that is NOT about personal fit ("who is hiring the most at Google", "salaries at Meta") is still a DATA answer, so route it to a data tool, never search_postings.`;
+
+// v2 stays frozen; splice the CORPUS and company-fit sections in just before its closing paragraph.
+// `.replace` targets the first (and only) occurrence of the closing sentence; the content test guarantees
+// the sections landed and that every v2 block survived.
 const CLOSING = "Keep it brief, useful, and honest.";
-export const ADVISER_V3 = ADVISER_V2.replace(CLOSING, `${CORPUS_SECTION}\n\n${CLOSING}`);
+export const ADVISER_V3 = ADVISER_V2.replace(
+  CLOSING,
+  `${CORPUS_SECTION}\n\n${COMPANY_FIT_SECTION}\n\n${CLOSING}`,
+);
