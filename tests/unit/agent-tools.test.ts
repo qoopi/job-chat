@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Analytics } from "@shared/analytics";
 import type { Profile } from "@shared/profile";
-import { buildCatalogTools, CATALOG_TOOL_NAMES, mergeSearchParams } from "../../trigger/tools";
+import { buildCatalogTools, CATALOG_TOOL_NAMES, expandTitleTerms, mergeSearchParams } from "../../trigger/tools";
 import type { EmitPart } from "../../trigger/tools";
 
 const opts = { toolCallId: "call-1", messages: [] } as unknown as Parameters<
@@ -232,7 +232,8 @@ describe("mergeSearchParams (server-authoritative profile merge)", () => {
     const refined = mergeSearchParams({ cities: ["Munich"], remoteOk: false }, PROFILE);
     expect(refined.cities).toEqual(["Munich"]);
     expect(refined.remoteOk).toBe(false);
-    expect(refined.titleTerms).toEqual(["Backend Engineer"]); // no model terms -> the profile's titles
+    // no model terms -> the profile's titles, F4-expanded (phrase + distinctive "Backend"; generic "Engineer" dropped)
+    expect(refined.titleTerms).toEqual(["Backend Engineer", "Backend"]);
   });
 
   // Mutation check: the tool schema's `.strict()` blocks an injected experience/salaryMin key BEFORE it
@@ -249,6 +250,43 @@ describe("mergeSearchParams (server-authoritative profile merge)", () => {
     const merged = mergeSearchParams(hostileInput, PROFILE);
     expect(merged.experience).toBe("senior"); // the profile's band, NOT the injected "junior"
     expect(merged.salaryMin).toBe(120000); // the profile's floor, NOT the injected 1
+  });
+});
+
+// F4: deterministic title-term expansion so the ILIKE scorer recalls real-world titles ("Software Engineer
+// III, Full Stack") that a whole-phrase match misses. The generic-token stoplist keeps a bare "Engineer"/
+// "Developer" from widening the match to the whole board.
+describe("expandTitleTerms (F4 recall broadening)", () => {
+  const GENERIC = ["full", "engineer", "developer", "manager", "senior", "staff", "junior", "principal", "lead"];
+
+  it.each([
+    // [input, expected expansion]
+    [["Full-Stack Developer"], ["Full-Stack Developer", "Full Stack Developer", "Stack"]],
+    [["QA Automation Engineer"], ["QA Automation Engineer", "QA", "Automation"]],
+    [["Backend Engineer"], ["Backend Engineer", "Backend"]],
+    [["staff engineer"], ["staff engineer"]], // both tokens generic -> only the phrase survives
+    [["backend"], ["backend"]], // a distinctive single token: phrase == token, deduped
+  ])("expands %j -> %j", (input, expected) => {
+    expect(expandTitleTerms(input)).toEqual(expected);
+  });
+
+  it("NEVER emits a bare generic token as a NEW standalone term", () => {
+    const out = expandTitleTerms(["Senior Full-Stack Developer", "Principal QA Automation Engineer"]);
+    for (const t of out) {
+      // any standalone (single-word) output term must not be a generic token
+      if (!t.includes(" ") && !t.includes("-")) expect(GENERIC).not.toContain(t.toLowerCase());
+    }
+    // the distinctive tokens still make it through
+    expect(out).toContain("Stack");
+    expect(out).toContain("QA");
+    expect(out).toContain("Automation");
+  });
+
+  it("dedupes case-insensitively and caps at the analytics limit of 10", () => {
+    const out = expandTitleTerms(Array.from({ length: 20 }, (_, i) => `Distinct${i} Role`));
+    expect(out.length).toBeLessThanOrEqual(10);
+    const lowered = out.map((t) => t.toLowerCase());
+    expect(new Set(lowered).size).toBe(lowered.length); // no case-insensitive duplicates
   });
 });
 
@@ -338,5 +376,22 @@ describe("Should_EmitInvitePart_When_RequestProfileRuns (AC-1, callerKind branch
     const tools = buildCatalogTools({ analytics: {} as Analytics, emit: (p) => emitted.push(p) }); // no callerKind
     await tools.request_profile.execute!({}, opts);
     expect(emitted[0]).toMatchObject({ type: "data-auth-invite" });
+  });
+
+  // F7: the live wrong beat - an account owner WITH a saved profile asked "find me a job that fits" and the
+  // model still called request_profile, emitting an invite (a dead end - it already has a profile). The tool
+  // must guardrail on the profile already in deps: emit NO card and steer to search_postings in the same turn.
+  it("emits NO card and steers to search_postings when a profile is already on file (F7)", async () => {
+    const emitted: EmitPart[] = [];
+    const tools = buildCatalogTools({
+      analytics: {} as Analytics,
+      emit: (p) => emitted.push(p),
+      callerKind: "account",
+      profile: PROFILE,
+    });
+    const out = await tools.request_profile.execute!({}, opts);
+    expect(emitted).toEqual([]); // never an invite when a profile exists
+    expect((out as { invite: unknown }).invite).toBeNull();
+    expect(String((out as { note: string }).note)).toMatch(/search_postings/i);
   });
 });

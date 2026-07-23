@@ -40,9 +40,7 @@ export interface Conversation {
 export type ConversationSummary = Pick<
   Conversation,
   "id" | "title" | "created_at"
-> & {
-  preview: string;
-};
+>;
 
 export interface Message {
   id: string;
@@ -238,13 +236,7 @@ export function createStore(sql: Sql): Store {
 
     async listConversations(userId) {
       const rows = await sql<ConversationSummary[]>`
-        SELECT c.id, c.title, c.created_at,
-          COALESCE((
-            SELECT m.content FROM messages m
-            WHERE m.conversation_id = c.id AND m.role = 'user'
-            ORDER BY m.created_at ASC, m.id ASC
-            LIMIT 1
-          ), '') AS preview
+        SELECT c.id, c.title, c.created_at
         FROM conversations c
         WHERE c.user_id = ${userId}
         ORDER BY c.created_at DESC, c.id DESC`;

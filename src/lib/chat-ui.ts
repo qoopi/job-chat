@@ -133,6 +133,46 @@ export function reconcileMessagesById(messages: UIMessage[]): UIMessage[] {
   return out;
 }
 
+/** The fit-intent invite kind of a `data-*` part, or null. One home so the dedup pass and the renderer agree. */
+function invitePartKind(part: UIMessage["parts"][number]): "auth-invite" | "profile-invite" | null {
+  if (typeof part.type !== "string" || !part.type.startsWith("data-")) return null;
+  const kind = classifyCardData((part as { data?: unknown }).data).kind;
+  return kind === "auth-invite" || kind === "profile-invite" ? kind : null;
+}
+
+/** Presentation pass AFTER reconcileMessagesById: the idempotent invite cards are re-emitted from several
+ *  uncoordinated sources under DIFFERENT ids (client inject, resume re-stream, .out cursor replay), so an
+ *  id-fold can't collapse them. Keep the FIRST card of each invite kind; drop later duplicate invite parts,
+ *  and drop an assistant message the drop left with nothing to render. Unchanged messages keep identity (memo-safe). */
+export function dedupeInviteCards(messages: UIMessage[]): UIMessage[] {
+  const seen = new Set<string>();
+  const out: UIMessage[] = [];
+  for (const m of messages) {
+    if (m.role !== "assistant") {
+      out.push(m);
+      continue;
+    }
+    let dropped = false;
+    const parts = m.parts.filter((p) => {
+      const kind = invitePartKind(p);
+      if (kind === null) return true; // not an invite part - untouched
+      if (seen.has(kind)) {
+        dropped = true;
+        return false; // a later duplicate of a kind already shown
+      }
+      seen.add(kind);
+      return true;
+    });
+    if (!dropped) {
+      out.push(m); // identity preserved so the MessageList memo still bails
+      continue;
+    }
+    if (parts.length === 0) continue; // the invite was this message's whole content - drop the empty message
+    out.push({ ...m, parts } as UIMessage);
+  }
+  return out;
+}
+
 export function messageText(message: Pick<UIMessage, "parts">): string {
   const texts = message.parts
     .filter((p): p is { type: "text"; text: string } => p.type === "text" && typeof (p as { text?: unknown }).text === "string")

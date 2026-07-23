@@ -119,6 +119,30 @@ describe("mapPostingToRow", () => {
     expect(row.city).toBeNull();
   });
 
+  // F6: the DEPLOYED searchnapply API returns location.kind = null on real rows (probed live), and a kind 3
+  // it never documented. The strict boundary rejected the nulls and failed the whole page. Relax `kind` to
+  // nullish; mapPostingToRow already degrades null/undefined/unknown to onsite (the `?? 0` + unknown fallback).
+  it("validates a location with kind null and maps it to onsite (deployed-API reality)", () => {
+    const result = PostingSchema.safeParse({
+      ...base,
+      locations: [{ city: "Austin", region: "Texas", country: "United States", kind: null }],
+    });
+    expect(result.success).toBe(true);
+    const row = mapPostingToRow(result.data as Posting, ingestedAt);
+    expect(row.location_kind).toBe("onsite");
+    expect(row.city).toBe("Austin");
+  });
+
+  it("validates an undocumented kind 3 and degrades it to onsite (never fails a batch)", () => {
+    const result = PostingSchema.safeParse({
+      ...base,
+      locations: [{ city: "Austin", region: "Texas", country: "United States", kind: 3 }],
+    });
+    expect(result.success).toBe(true);
+    const row = mapPostingToRow(result.data as Posting, ingestedAt);
+    expect(row.location_kind).toBe("onsite");
+  });
+
   it("coerces a missing employment_type/experience_level to an empty string (CH columns are non-nullable)", () => {
     const row = mapPostingToRow(
       { ...base, employmentType: null, experienceLevel: null },

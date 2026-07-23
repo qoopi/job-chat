@@ -27,4 +27,11 @@ test("profile-invite -> detail panel form -> profile card in thread", async ({ p
   // ...and the profile card is injected into the thread (its "Find me a job that fits" chip is unique
   // to the card, not the form).
   await expect(page.getByRole("button", { name: "Find me a job that fits" })).toBeVisible();
+  // F3 (biting): the invite interrupted the "Find me a job that fits" ask, so saving the profile
+  // auto-continues it - a SECOND user bubble with that exact text appears (the original ask + the one
+  // auto-resend). A regression that dropped the auto-continue leaves only ONE user bubble and fails here;
+  // this is the guard the old chip-visibility line did not provide (the chip is a button, not a bubble).
+  await expect(
+    page.locator(".bubble.user").filter({ hasText: "Find me a job that fits" }),
+  ).toHaveCount(2);
 });

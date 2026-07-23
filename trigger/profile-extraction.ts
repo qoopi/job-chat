@@ -19,12 +19,16 @@ const SYSTEM = [
   "You extract a structured job-seeker profile from a resume and/or public GitHub signals.",
   "Return ONLY what the sources support - never invent titles, skills, employers, or numbers.",
   "Skill provenance: mark a skill `resume` if only the resume shows it, `github` if only the GitHub",
-  "signals do, `both` if both. Seniority is one of junior|mid|senior|lead, or null if unclear.",
+  "signals do, `both` if both - tag the source HONESTLY, never claim a source the evidence does not show.",
+  "Seniority is one of junior|mid|senior|lead, or null if unclear.",
   "salaryMin/yearsExp are numbers only when stated or clearly implied, else null. remotePref is true",
   "only when the resume states a remote preference, false when it states onsite, else null.",
-  "domains are the industries/problem areas the person works in; ossHighlights are concrete open-source",
-  "contributions (a maintained project, a notable merged PR area). experience is the resume's roles,",
-  "each with short one-line achievement bullets (never a paragraph).",
+  "domains are the industries/problem areas the person works in.",
+  "experience is the person's EMPLOYMENT HISTORY, taken ONLY from the resume - extract EVERY position it",
+  "lists, exhaustively (never collapse, summarize away, or skip a role), each with title, company, years,",
+  "and short one-line achievement bullets (never a paragraph).",
+  "ossHighlights are concrete open-source contributions (a maintained project, a notable merged PR area);",
+  "a GitHub repository belongs in ossHighlights and is NEVER an experience entry.",
 ].join(" ");
 
 /** Serialize the GitHub signals into a compact block the model reads alongside the resume. */

@@ -6,10 +6,8 @@ import type { Conversation } from "@shared/store";
 import { PlusIcon, ChevronLeftIcon } from "@/components/icons";
 import { freshnessLabel } from "@/lib/insight-format";
 
-// A history row: the stored fields + an optional first-message preview.
-type HistoryItem = Pick<Conversation, "id" | "title" | "created_at"> & {
-  preview?: string;
-};
+// A history row: the stored fields only (title + date - the design contract's whole row, no preview line).
+type HistoryItem = Pick<Conversation, "id" | "title" | "created_at">;
 
 // The shell sidebar: guest teaser + Sign in, or the signed-in history list. Identity lives in the title bar, not here.
 function BrandCredit() {
@@ -186,11 +184,9 @@ export function Sidebar({
                     className={c.id === activeId ? "sb-item active" : "sb-item"}
                     href={`/chat/${c.id}`}
                   >
-                    {c.title}
-                    {/* A muted first-message preview distinguishes duplicate titles. */}
-                    {c.preview ? (
-                      <span className="sb-preview">{c.preview}</span>
-                    ) : null}
+                    {/* Single-line title (ellipsis via .sb-title); the active highlight wraps the whole row
+                        including the date. Fallback guard: an empty/whitespace title never renders as a bare pill. */}
+                    <span className="sb-title">{c.title.trim() || "New chat"}</span>
                     <time>{relativeDate(c.created_at)}</time>
                   </Link>
                   <button
