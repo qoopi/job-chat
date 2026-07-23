@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Profile } from "@shared/profile";
 import { deleteProfile, getMyProfile, getProfileRunStatus, saveProfile } from "@/app/actions";
 import { pollProfileSave } from "@/lib/profile-poll";
-import { isGithubSkipped, profileSubline, profileSummary, profileTitle } from "@/lib/profile-format";
+import { isGithubSkipped, profileTitle } from "@/lib/profile-format";
+import { ProfileExpanded } from "@/components/insight/ProfileCard";
 
 // The account's profile form in the detail panel (five states: empty/saving/saved/github-skipped/error). Save polls
 // getMyProfile until extraction terminates (profile-poll.ts closes the re-save edge), then injects the card into the live thread.
@@ -61,12 +62,15 @@ export function DetailProfile({
   conversationId,
   e2e = false,
   onClose,
+  onFindJob,
   onProfileSaved,
   onProfileDeleted,
 }: {
   conversationId: string;
   e2e?: boolean;
   onClose: () => void;
+  /** "Find me a job that fits" from the saved full-profile view - sends the fit question as a chat turn. */
+  onFindJob?: () => void;
   /** Inject / replace the profile card in the live thread after a successful save. */
   onProfileSaved: (profile: Profile) => void | Promise<void>;
   /** Remove the profile card from the live thread after a delete. */
@@ -76,7 +80,6 @@ export function DetailProfile({
   // state asynchronously below.
   const [status, setStatus] = useState<Status>(e2e ? "form" : "loading");
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [savedGithub, setSavedGithub] = useState<string | null>(null); // the SAVED github username
   // The error copy gate = the POLL OUTCOME's `hadPriorProfile` (not local state, which can diverge in a multi-tab race).
   const [errorHadPriorProfile, setErrorHadPriorProfile] = useState(false);
 
@@ -106,7 +109,6 @@ export function DetailProfile({
       if (!alive) return;
       if (my?.profile && my.extractedAt) {
         setProfile(my.profile);
-        setSavedGithub(my.githubUsername);
         setGithubInput(my.githubUsername ?? "");
         // github-skipped: a username was given but nothing came back proven in code.
         const skipped = my.githubUsername != null && isGithubSkipped(my.profile);
@@ -141,7 +143,6 @@ export function DetailProfile({
 
     if (e2e) {
       setProfile(E2E_PROFILE);
-      setSavedGithub(gh || null);
       setStatus("saved");
       void onProfileSaved(E2E_PROFILE);
       return;
@@ -187,7 +188,6 @@ export function DetailProfile({
       return;
     }
     setProfile(outcome.profile);
-    setSavedGithub(outcome.githubUsername);
     setStatus(outcome.outcome);
     void onProfileSaved(outcome.profile);
   }, [conversationId, e2e, githubInput, resumeText, onProfileSaved]);
@@ -196,7 +196,6 @@ export function DetailProfile({
     if (!e2e) await deleteProfile(conversationId).catch(() => ({ ok: false }));
     if (!mounted.current) return;
     setProfile(null);
-    setSavedGithub(null);
     setResumeText("");
     setGithubInput("");
     setPdfName(null);
@@ -234,7 +233,7 @@ export function DetailProfile({
         ) : status === "saved" && profile ? (
           <SavedState
             profile={profile}
-            github={savedGithub}
+            onFindJob={() => onFindJob?.()}
             onEdit={() => setStatus("form")}
             onDelete={() => void remove()}
           />
@@ -401,41 +400,36 @@ function SavingState({
   );
 }
 
+// The post-parse FULL profile (operator 039): the confirmation heading + the display-only expanded profile
+// (identity header, source ticks, skills split by source, experience, OSS) + the two actions to keep wired.
 function SavedState({
   profile,
-  github,
+  onFindJob,
   onEdit,
   onDelete,
 }: {
   profile: Profile;
-  github: string | null;
+  onFindJob: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   return (
     <div className="profile-form">
       <h3>Profile saved ✓</h3>
-      <div style={{ fontSize: 13, color: "var(--text-2)" }}>
-        <strong style={{ color: "var(--text)" }}>{profileTitle(profile)}</strong>
-        {profileSubline(profile) ? ` — ${profileSubline(profile)}` : ""}
-        <br />
-        {profileSummary(profile)}
+      {/* Identity header - the headline role (the profile schema carries no name field). */}
+      <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text)" }}>
+        {profileTitle(profile)}
       </div>
-      <div className="file-row">
-        <span style={{ flex: 1 }}>Resume</span>
-        <span style={{ color: "var(--accent-ink)", fontWeight: 500 }}>Parsed ✓</span>
-      </div>
-      {github ? (
-        <div className="file-row">
-          <span style={{ flex: 1 }}>github.com/{github}</span>
-          <span style={{ color: "var(--accent-ink)", fontWeight: 500 }}>Read ✓</span>
-        </div>
-      ) : null}
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <button className="btn btn-outline" type="button" onClick={onEdit}>
+      {/* The read-only full profile: subline, Sources (ticks), skills split by source, experience, OSS. */}
+      <ProfileExpanded profile={profile} />
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button className="chip chip-accent" type="button" onClick={onFindJob}>
+          Find me a job that fits
+        </button>
+        <button className="chip" type="button" onClick={onEdit}>
           Edit &amp; re-save
         </button>
-        <button className="btn btn-ghost" type="button" style={{ color: "var(--danger)", marginLeft: "auto" }} onClick={onDelete}>
+        <button className="btn btn-ghost btn-sm" type="button" style={{ color: "var(--danger)", marginLeft: "auto" }} onClick={onDelete}>
           Delete
         </button>
       </div>

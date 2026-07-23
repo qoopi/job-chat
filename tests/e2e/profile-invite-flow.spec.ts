@@ -22,11 +22,11 @@ test("profile-invite -> detail panel form -> profile card in thread", async ({ p
   await page.getByLabel(/GitHub username/).fill("mkoval");
   await page.getByRole("button", { name: "Build my profile" }).click();
 
-  // The form reaches its saved state...
+  // The form reaches its saved (full-profile) state...
   await expect(page.getByText("Profile saved ✓")).toBeVisible();
-  // ...and the profile card is injected into the thread (its "Find me a job that fits" chip is unique
-  // to the card, not the form).
-  await expect(page.getByRole("button", { name: "Find me a job that fits" })).toBeVisible();
+  // ...and the profile card is injected into the thread. "Open in panel →" is unique to the in-chat card
+  // (the saved full-profile panel also carries a "Find me a job that fits" action now - 039 item 3).
+  await expect(page.getByRole("button", { name: "Open in panel →" })).toBeVisible();
   // F3 (biting): the invite interrupted the "Find me a job that fits" ask, so saving the profile
   // auto-continues it - a SECOND user bubble with that exact text appears (the original ask + the one
   // auto-resend). A regression that dropped the auto-continue leaves only ONE user bubble and fails here;

@@ -209,9 +209,9 @@ a:hover {
   min-width: 0;
 }
 .canvas {
-  /* Fills the main alone; when the detail panel opens (.docked) flex-grow animates to 0 so the chat docks to a
-     360px right rail over 240ms (interaction-spec section 1). flex-basis is the docked rail width. */
-  flex: 1 1 360px;
+  /* Fills the main alone (~chat 80vw); when the detail panel opens (.docked) flex-grow animates to 0 so the
+     chat docks to a 35vw right rail over 240ms (operator 039: sidebar 20 / detail 45 / chat 35). flex-basis is the docked rail width. */
+  flex: 1 1 35vw;
   transition: flex-grow 240ms ease-out;
   background: var(--canvas-bg);
   border-radius: var(--r-lg);
@@ -279,7 +279,9 @@ a:hover {
 
 /* ---------- sidebar ---------- */
 .sidebar {
-  width: 248px;
+  /* 20vw with a floor so a narrow window never crushes the history (operator 039). */
+  width: 20vw;
+  min-width: 220px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -317,9 +319,11 @@ a:hover {
   font-size: var(--fs-sm);
   color: var(--shell-fg);
   cursor: pointer;
+  /* Each history row reads as a card at rest (operator 039), not bare text on the shell. */
+  background: var(--shell-hover);
 }
 .sb-item:hover {
-  background: var(--shell-hover);
+  background: var(--shell-active);
 }
 .sb-item.active {
   background: var(--shell-active);
@@ -347,31 +351,85 @@ a:hover {
   font-size: var(--fs-sm);
   color: var(--shell-fg-dim);
 }
-/* Per-row delete affordance + inline confirm (never a modal). */
+/* Per-row kebab (rename / delete) + inline confirm (never a modal). */
 .sb-item-row {
   position: relative;
 }
-.sb-del {
+.sb-kebab {
   position: absolute;
   top: 6px;
   right: 6px;
   border: 0;
   background: transparent;
   color: var(--shell-fg-dim);
-  font-size: 15px;
-  line-height: 1;
-  padding: 2px 7px;
+  padding: 4px;
   border-radius: var(--r-sm);
   cursor: pointer;
   opacity: 0;
+  display: grid;
+  place-items: center;
 }
-.sb-item-row:hover .sb-del,
-.sb-del:focus-visible {
+.sb-item-row:hover .sb-kebab,
+.sb-kebab:focus-visible,
+.sb-kebab[aria-expanded="true"] {
   opacity: 1;
 }
-.sb-del:hover {
+.sb-kebab:hover {
   color: var(--shell-strong);
-  background: var(--shell-hover);
+  background: var(--shell-active);
+}
+/* The kebab dropdown (Rename / Delete) - a surface popover over the shell, one open at a time. */
+.sb-menu {
+  position: absolute;
+  top: 30px;
+  right: 6px;
+  z-index: 40;
+  min-width: 132px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sb-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.sb-menu-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.sb-menu-item.danger {
+  color: var(--danger);
+}
+.sb-menu-item.danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+/* Inline rename input (replaces the row in place; accent ring like the composer/field focus). */
+.sb-rename {
+  width: 100%;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 7px 9px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  outline: 0;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .sb-confirm {
   display: flex;
@@ -414,6 +472,7 @@ a:hover {
 }
 .sidebar.collapsed {
   width: 64px;
+  min-width: 0; /* clear the expanded 220px floor so the icon rail stays 64px */
   align-items: center;
   padding: var(--sp-5) var(--sp-2);
 }

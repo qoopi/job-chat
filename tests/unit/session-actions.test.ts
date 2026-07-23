@@ -87,4 +87,19 @@ describe("session core input bounds (must-fix B)", () => {
     expect(await service.mintChatToken("not-a-uuid", "u1")).toEqual({ ok: false, reason: "not_found" });
     expect(mintToken).not.toHaveBeenCalled();
   });
+
+  // renameConversation guards its title at the trust boundary exactly like sendMessage guards text:
+  // empty/whitespace and over-long (>120) titles are refused BEFORE ownership/store access, and a
+  // non-UUID id reads as not_found. The exploding store proves nothing is touched on a bad title.
+  it("renameConversation refuses empty/whitespace + over-long titles with invalid_input, and a non-UUID id with not_found", async () => {
+    const { service } = svc();
+    const uuid = crypto.randomUUID();
+    expect(await service.renameConversation(uuid, "   ", "u1")).toEqual({ ok: false, reason: "invalid_input" });
+    expect(await service.renameConversation(uuid, "", "u1")).toEqual({ ok: false, reason: "invalid_input" });
+    expect(await service.renameConversation(uuid, "x".repeat(121), "u1")).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(await service.renameConversation("not-a-uuid", "New title", "u1")).toEqual({ ok: false, reason: "not_found" });
+  });
 });

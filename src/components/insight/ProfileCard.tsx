@@ -184,7 +184,21 @@ export function ProfileCard({
   );
 }
 
-const MAX_BULLETS = 3; // experience bullets shown before "Show N more"
+const MAX_BULLETS = 3; // experience bullets shown before "Show N more" (per role)
+const MAX_ROLES = 2; // experience entries shown before "Show N more" (operator 039)
+
+/** The quiet accent "Show N more" text-button, shared by the per-role bullet toggle and the experience-list toggle. */
+const showMoreStyle: React.CSSProperties = {
+  alignSelf: "flex-start",
+  border: 0,
+  background: "none",
+  padding: 0,
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 500,
+  color: "var(--accent-ink)",
+  cursor: "pointer",
+};
 
 /** One experience role: header line + up to 3 bullets, the rest behind a per-role toggle. */
 function ExperienceEntry({ entry }: { entry: Experience }) {
@@ -202,22 +216,27 @@ function ExperienceEntry({ entry }: { entry: Experience }) {
         <span key={i}>· {b}</span>
       ))}
       {hidden > 0 ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          style={{
-            alignSelf: "flex-start",
-            border: 0,
-            background: "none",
-            padding: 0,
-            font: "inherit",
-            fontSize: 12,
-            fontWeight: 500,
-            color: "var(--accent-ink)",
-            cursor: "pointer",
-          }}
-        >
+        <button type="button" onClick={() => setOpen(true)} style={showMoreStyle}>
           Show {hidden} more ↓
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** The experience list: the first 2 roles, the rest behind a "Show N more" collapse (operator 039). */
+function ExperienceList({ entries }: { entries: Experience[] }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? entries : entries.slice(0, MAX_ROLES);
+  const hidden = entries.length - shown.length;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13, color: "var(--text-2)" }}>
+      {shown.map((e, i) => (
+        <ExperienceEntry key={i} entry={e} />
+      ))}
+      {hidden > 0 ? (
+        <button type="button" onClick={() => setOpen(true)} style={showMoreStyle}>
+          Show {hidden} more role{hidden === 1 ? "" : "s"} ↓
         </button>
       ) : null}
     </div>
@@ -288,11 +307,7 @@ export function ProfileExpanded({ profile }: { profile: Profile }) {
 
       {profile.experience.length > 0 ? (
         <Section label="Experience — from the resume">
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13, color: "var(--text-2)" }}>
-            {profile.experience.map((e, i) => (
-              <ExperienceEntry key={i} entry={e} />
-            ))}
-          </div>
+          <ExperienceList entries={profile.experience} />
         </Section>
       ) : null}
 

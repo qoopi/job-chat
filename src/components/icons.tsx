@@ -136,6 +136,23 @@ export function MoonIcon({ size = 15 }: { size?: number }) {
   );
 }
 
+export function KebabIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden
+      style={{ flexShrink: 0 }}
+    >
+      <circle cx="8" cy="3" r="1.4" />
+      <circle cx="8" cy="8" r="1.4" />
+      <circle cx="8" cy="13" r="1.4" />
+    </svg>
+  );
+}
+
 export function SignOutIcon({ size = 15 }: { size?: number }) {
   return (
     <svg

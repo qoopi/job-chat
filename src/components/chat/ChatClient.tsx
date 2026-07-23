@@ -39,6 +39,7 @@ import {
 import {
   clearGuestSession,
   deleteConversation as deleteConversationAction,
+  renameConversation as renameConversationAction,
   sendMessage as sendMessageAction,
   startConversation as startConversationAction,
 } from "@/app/actions";
@@ -484,6 +485,18 @@ export function ChatClient({
     [conversationId, startNewChat],
   );
 
+  // Rename a conversation from the sidebar (the action re-checks ownership + trims/caps the title): patch the
+  // list to the STORED title, and if it's the OPEN one update the title bar too. A refusal leaves both untouched.
+  const onRenameConversation = useCallback(
+    async (id: string, title: string) => {
+      const r = await renameConversationAction(id, title);
+      if (!r.ok) return;
+      setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title: r.title } : c)));
+      if (id === conversationId) setTitleState(r.title);
+    },
+    [conversationId],
+  );
+
   // Reconcile by id at the merge seam: reconnecting to a live run re-receives the already-present assistant tail
   // (SDK session replay, same id); fold those duplicates (replace in place, order kept) so each turn renders once and keys stay unique.
   // Then dedupeInviteCards (F1): the idempotent invite cards arrive from uncoordinated sources under DIFFERENT ids, so only a presentation pass collapses them.
@@ -541,6 +554,7 @@ export function ChatClient({
         onNewChat={startNewChat}
         onSignIn={openAuthDialog}
         onDeleteConversation={(id) => void onDeleteConversation(id)}
+        onRenameConversation={(id, title) => void onRenameConversation(id, title)}
       />
       <main className="main">
         {/* The detail panel takes the middle of the canvas (table OR profile); the chat docks to the right rail. */}
@@ -549,6 +563,7 @@ export function ChatClient({
             conversationId={conversationId}
             e2e={e2e}
             onClose={closeProfile}
+            onFindJob={() => void send("Find me a job that fits")}
             onProfileSaved={onProfileSaved}
             onProfileDeleted={onProfileDeleted}
           />

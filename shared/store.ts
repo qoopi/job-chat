@@ -103,6 +103,8 @@ export interface Store {
   listConversations(userId: string): Promise<ConversationSummary[]>;
   /** Delete a conversation and its messages in one transaction. Ownership is enforced by the CALLER. */
   deleteConversation(conversationId: string): Promise<void>;
+  /** Set a conversation's title. Ownership + title validation are enforced by the CALLER (mirrors deleteConversation). */
+  renameConversation(conversationId: string, title: string): Promise<void>;
   /** Count user-turn messages since `sinceUtcMidnight`. No `userId` => global (the daily budget). */
   messageCounts(args: {
     userId?: string;
@@ -250,6 +252,11 @@ export function createStore(sql: Sql): Store {
         await tx`DELETE FROM messages WHERE conversation_id = ${conversationId}`;
         await tx`DELETE FROM conversations WHERE id = ${conversationId}`;
       });
+    },
+
+    async renameConversation(conversationId, title) {
+      if (!UUID_RE.test(conversationId)) return;
+      await sql`UPDATE conversations SET title = ${title} WHERE id = ${conversationId}`;
     },
 
     async deleteTrailingAssistant(conversationId) {
