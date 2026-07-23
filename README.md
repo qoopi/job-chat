@@ -25,12 +25,17 @@ Live: https://jobchat.dev
   postings columns can express; no free-form or generative SQL.
 - **Durable chat agent** - one Trigger.dev `chat.agent()` run per conversation orchestrates Bedrock
   and the ClickHouse tool catalog, streaming structured data parts to the UI in real time.
+- **Data-aware agent** - each conversation is grounded in a live corpus note (row count, snapshot
+  date, source mix, and the categorical values actually present), and every categorical filter matches
+  case-insensitively - so the agent answers from what the data really holds instead of guessing.
 - **Guardrails in the run** - per-caller message caps, a daily budget, and turn/step ceilings are
   enforced inside the agent run itself.
 - **Guests and accounts** - guests chat with no sign-in; signing in (Google via Better Auth) adopts
-  the guest's conversations, adds cross-device sidebar history, and raises the message cap.
-- **Resume profiles** - a signed-in user uploads a resume PDF and a durable Trigger.dev task
-  extracts a schema-validated structured profile (Bedrock).
+  the guest's conversations, adds cross-device sidebar history (rename or delete any conversation),
+  and raises the message cap.
+- **Resume profiles** - a signed-in user uploads a resume PDF and a durable Trigger.dev task extracts
+  a schema-validated structured profile (Bedrock). The profile is editable: salary and location
+  preferences feed the next match run, skill chips add/remove, and the whole profile can be deleted.
 - **GitHub enrichment** - the extraction folds in public GitHub signals (languages, topics, repos,
   merged-PR count); deeper with a read-only PAT, gracefully capped without one.
 - **Fit matching** - fit-intent questions route by identity: guest -> sign-in invite,
@@ -48,13 +53,26 @@ Live: https://jobchat.dev
 | Agent | Trigger.dev `chat.agent()` - durable runs, Realtime streaming |
 | OLAP database | ClickHouse Cloud - `postings` + every analytical read |
 | OLTP database | ClickHouse Managed Postgres - users, conversations, messages, profiles |
-| LLM | Claude via AWS Bedrock - Sonnet 4.5 (chat), Haiku 4.5 (profile extraction) |
+| LLM | Claude via AWS Bedrock - Sonnet 4.5 (chat + profile extraction) |
 | Auth | Better Auth (Google OAuth) |
 | Charts | Recharts |
 | Validation | Zod |
 | Tests | Vitest (unit + integration), Playwright (e2e), Bedrock eval harness |
 
 ## Architecture
+
+How the entry maps to the rubric:
+
+- **ClickHouse depth** - `postings` is the OLAP core (ReplacingMergeTree with dedup-correct FINAL
+  reads); every analytical read is parameterized SQL through the analytics catalog, categorical
+  filters match case-insensitively, and each conversation carries a live corpus note so answers stay
+  grounded in the real data - and every card's "Show query" reveals the exact executed ClickHouse SQL.
+- **Trigger.dev depth** - `chat.agent()` IS the product: one durable run per conversation
+  orchestrates Bedrock and the tool catalog and streams structured data parts to the UI via Trigger
+  Realtime. Resume profile extraction and scheduled ingestion are Trigger tasks too.
+- **OLTP + OLAP bonus path** - ClickHouse Managed Postgres (transactional: `users`, `conversations`,
+  `messages`, `profiles`) runs alongside ClickHouse (analytics), with the `users` table mirrored into
+  ClickHouse via the built-in CDC ClickPipe.
 
 ```
 Next.js (this repo, Vercel)          Trigger.dev cloud                Data
@@ -82,7 +100,7 @@ Next.js (this repo, Vercel)          Trigger.dev cloud                Data
   in adopts any guest conversations into the account (sidebar history, any device) and raises the
   per-user message cap.
 - **LLM**: Claude via AWS Bedrock (`@ai-sdk/amazon-bedrock`, `eu.` inference profile) - Sonnet 4.5
-  for the chat agent, Haiku 4.5 for profile extraction.
+  for both the chat agent and profile extraction (the extraction task imports the same `MODEL_ID`).
 
 ### About searchnapply.com
 
@@ -109,19 +127,6 @@ Wall of Text", asks for a chat agent whose response is the product - visual, int
 - judged on the ratio of insight to words ("text is the garnish, not the meal"). Job.Chat answers
 every market question with a verdict-plus-chart insight card, never a paragraph.
 
-How the entry maps to the rubric:
-
-- **ClickHouse depth** - `postings` is the OLAP core (ReplacingMergeTree with dedup-correct FINAL
-  reads); every analytical read is parameterized SQL through the analytics catalog (six fixed
-  templates + a schema-validated composed-query builder, no generative SQL), and every card's "Show
-  query" reveals the exact executed ClickHouse SQL.
-- **Trigger.dev depth** - `chat.agent()` IS the product: one durable run per conversation
-  orchestrates Bedrock and the tool catalog and streams structured data parts to the UI via Trigger
-  Realtime. Resume profile extraction and scheduled ingestion are Trigger tasks too.
-- **OLTP + OLAP bonus path** - ClickHouse Managed Postgres (transactional: `users`, `conversations`,
-  `messages`, `profiles`) runs alongside ClickHouse (analytics), with the `users` table mirrored into
-  ClickHouse via the built-in CDC ClickPipe.
-
 ## Run it
 
 ```bash
@@ -146,14 +151,15 @@ provisioned, so skip the two `*:migrate` steps:
 
 ```bash
 bun install
-# create your own free Trigger.dev project, then set its ref as the `project` field in trigger.config.ts
-bunx trigger.dev@latest dev  # chat.agent() runs in YOUR Trigger project (the judge .env carries no Trigger key)
+# Create your own free Trigger.dev project. In the judge .env, paste that project's dev secret key into
+# the blank TRIGGER_SECRET_KEY, and set the project's ref as the `project` field in trigger.config.ts.
+bunx trigger.dev@latest dev  # chat.agent() runs in YOUR Trigger project
 bun run dev                  # http://localhost:3000
 ```
 
 `chat.agent()` runs execute in Trigger's cloud against the project named in `trigger.config.ts`, so
-the chat path needs a Trigger project you own: create a free one and swap the `project` ref before
-running `bun run dev`.
+the chat path needs a Trigger project you own: create a free one, paste its dev `TRIGGER_SECRET_KEY`
+into the blank var in the judge `.env`, and set the `project` ref before running `bun run dev`.
 
 ## Checks
 

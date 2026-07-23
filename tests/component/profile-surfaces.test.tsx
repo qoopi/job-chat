@@ -31,7 +31,7 @@ vi.mock("@/lib/auth-client", () => ({
   authClient: { signIn: { social: vi.fn() }, signOut: vi.fn(), useSession: () => ({ data: null, isPending: false }) },
 }));
 // The poll's own contract (attempt ceiling, the re-save edge) is exhaustively unit-tested in
-// profile-poll.test.ts; here it is mocked so DetailProfile's ERROR-STATE RENDERING (which copy, gated on
+// profile-poll.test.ts; here it is mocked so ProfilePanel's ERROR-STATE RENDERING (which copy, gated on
 // whether a prior profile existed) is tested in isolation from the poll's real timers.
 vi.mock("@/lib/profile-poll", () => ({ pollProfileSave: vi.fn() }));
 
@@ -39,7 +39,7 @@ import { ChatClient } from "@/components/chat/ChatClient";
 import { ProfileCard, ProfileExpanded } from "@/components/insight/ProfileCard";
 import { PostingsCard } from "@/components/insight/PostingsCard";
 import { InlinePromptCard } from "@/components/insight/InlinePromptCard";
-import { DetailProfile } from "@/components/chat/DetailProfile";
+import { ProfilePanel } from "@/components/chat/ProfilePanel";
 import {
   deleteProfile,
   getMyProfile,
@@ -359,7 +359,7 @@ describe("part rendering (AC-1 render, AC-6)", () => {
 });
 
 describe("invite wiring (AC-2)", () => {
-  test("Should_OpenDetailProfileForm_When_InviteClicked", async () => {
+  test("Should_OpenProfilePanelForm_When_InviteClicked", async () => {
     renderChat([assistantPart("data-profile-invite", { kind: "profile-invite" })]);
     fireEvent.click(screen.getByRole("button", { name: "Add your profile" }));
     // the detail panel profile form opens (empty state)
@@ -389,11 +389,11 @@ describe("detail panel routing per new card", () => {
 // ---------------------------------------------------------------------------------------------------
 // The form + save injection
 // ---------------------------------------------------------------------------------------------------
-describe("DetailProfile form", () => {
+describe("ProfilePanel form", () => {
   test("Should_AppendProfileCardMessage_When_SaveCompletes (e2e build injects the card via onProfileSaved)", async () => {
     const onProfileSaved = vi.fn();
     render(
-      <DetailProfile
+      <ProfilePanel
         conversationId={CONVERSATION_ID}
         e2e
         onClose={vi.fn()}
@@ -410,7 +410,7 @@ describe("DetailProfile form", () => {
   });
 
   test("delete from the saved state returns to the empty form (e2e: local reset, no server call)", async () => {
-    render(<DetailProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+    render(<ProfilePanel conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} />);
     fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
     fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete profile" }));
@@ -418,7 +418,7 @@ describe("DetailProfile form", () => {
   });
 
   test("empty build with no inputs shows a validation message, never a save", () => {
-    render(<DetailProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+    render(<ProfilePanel conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toMatch(/Add a resume or a GitHub username/);
@@ -429,7 +429,7 @@ describe("DetailProfile form", () => {
   // would otherwise clear it silently with no warning shown.
   test("Should_PrefillGithubAndIndicateResumeOnFile_When_EditingASavedProfile", async () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+    render(<ProfilePanel conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit & re-save" }));
     expect((screen.getByLabelText(/GitHub username/) as HTMLInputElement).value).toBe("octocat");
     expect(screen.getByText("A resume is on file. Re-upload to replace it.")).toBeTruthy();
@@ -685,7 +685,7 @@ describe("profile editor (041 inline edits)", () => {
       profile: { ...profile, salaryMin: 150000, locations: ["SF"], remotePref: true },
     });
     vi.mocked(updateProfileSkills).mockResolvedValueOnce({ ok: true, profile: returned });
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+    render(<ProfilePanel conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
 
     // The editor loads seeded from the saved row.
     const salary = (await screen.findByLabelText(/salary/i)) as HTMLInputElement;
@@ -706,7 +706,7 @@ describe("profile editor (041 inline edits)", () => {
   test("a failed save shows an error, keeps the previous truth, and never partially applies (skills untried)", async () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
     vi.mocked(updateProfilePrefs).mockResolvedValueOnce({ ok: false, reason: "invalid_input" });
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+    render(<ProfilePanel conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
 
     const salary = (await screen.findByLabelText(/salary/i)) as HTMLInputElement;
     fireEvent.change(salary, { target: { value: "-5" } });
@@ -720,7 +720,7 @@ describe("profile editor (041 inline edits)", () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
     vi.mocked(updateProfilePrefs).mockResolvedValueOnce({ ok: true, profile });
     vi.mocked(updateProfileSkills).mockResolvedValueOnce({ ok: true, profile });
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+    render(<ProfilePanel conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
     await screen.findByLabelText(/salary/i);
 
     // Removing a github-proven chip is allowed (the user owns their profile).
@@ -748,7 +748,7 @@ describe("profile editor (041 inline edits)", () => {
     vi.mocked(updateProfilePrefs).mockResolvedValueOnce({ ok: true, profile });
     vi.mocked(updateProfileSkills).mockResolvedValueOnce({ ok: true, profile });
     const onProfileSaved = vi.fn();
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={onProfileSaved} />);
+    render(<ProfilePanel conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={onProfileSaved} />);
     await screen.findByLabelText(/salary/i);
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(updateProfileSkills).toHaveBeenCalled());
@@ -757,12 +757,12 @@ describe("profile editor (041 inline edits)", () => {
 });
 
 // ---------------------------------------------------------------------------------------------------
-// The poll's error outcome -> DetailProfile's error-state copy (gated on whether a prior profile existed)
+// The poll's error outcome -> ProfilePanel's error-state copy (gated on whether a prior profile existed)
 // ---------------------------------------------------------------------------------------------------
-describe("DetailProfile error state (poll contract)", () => {
+describe("ProfilePanel error state (poll contract)", () => {
   test("Should_ShowNothingWasSaved_When_FreshExtractionFailsWithNoPriorProfile", async () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(freshFailureMyProfile);
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+    render(<ProfilePanel conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
     expect(await screen.findByText("Couldn’t build the profile")).toBeTruthy();
     expect(screen.getByText("Nothing was saved.")).toBeTruthy();
     expect(screen.queryByText("Your previous profile is untouched.")).toBeNull();
@@ -774,7 +774,7 @@ describe("DetailProfile error state (poll contract)", () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile).mockResolvedValueOnce(savedMyProfile);
     vi.mocked(saveProfile).mockResolvedValueOnce({ ok: true, taskState: "queued", runId: "run_x" });
     vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "error", hadPriorProfile: true });
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+    render(<ProfilePanel conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit & re-save" })); // github already prefilled -> passes the build() guard
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
@@ -791,7 +791,7 @@ describe("DetailProfile error state (poll contract)", () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(null); // this tab's initial load: no profile known locally
     vi.mocked(saveProfile).mockResolvedValueOnce({ ok: true, taskState: "queued", runId: "run_y" });
     vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "error", hadPriorProfile: true });
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
+    render(<ProfilePanel conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
 
     await screen.findByText("No profile yet"); // confirms local state resolved empty (profile stays null)
     fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
@@ -814,7 +814,7 @@ describe("post-parse full profile (039 item 3)", () => {
     vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "saved", profile, githubUsername: "octocat" });
     const onFindJob = vi.fn();
     render(
-      <DetailProfile
+      <ProfilePanel
         conversationId={CONVERSATION_ID}
         onClose={vi.fn()}
         onFindJob={onFindJob}

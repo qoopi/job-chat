@@ -82,7 +82,7 @@ export function PostingsCard({
   onEdit?: () => void;
   pending?: boolean;
 }) {
-  // Item 1: the chips are CLIENT-SIDE toggles over the DELIVERED rows - never a chat turn (the old
+  // The chips are CLIENT-SIDE toggles over the DELIVERED rows - never a chat turn (the old
   // follow-up re-derived search params and returned MORE rows). Composable (AND). Counts are honest to
   // the delivered set only; the server `total` is never re-queried (that re-query is out of scope).
   // Hooks run before the no-matches early return (rules-of-hooks) - unused on that path.
@@ -121,7 +121,7 @@ export function PostingsCard({
             <button className="chip" type="button" disabled={pending} onClick={() => onFollowup?.("Include one level up")}>
               Include one level up
             </button>
-            {/* AC-3 (register #12): the "Broaden location" chip was removed - city is only a score addend,
+            {/* The "Broaden location" chip was removed - city is only a score addend,
                 not a filter, so re-asking with it broadened recall by nothing. Left: two chips that act. */}
             <button className="chip" type="button" onClick={onEdit}>
               Edit profile
@@ -139,7 +139,7 @@ export function PostingsCard({
     <div className="insight" style={{ maxWidth: 760 }}>
       <div className="insight-head">
         {/* Under an active filter the "showing the best N" tail would contradict the filtered table
-            (item 1 honesty). Pass shown=total to suppress the tail while the honest server total stays;
+            (honesty). Pass shown=total to suppress the tail while the honest server total stays;
             the full headline restores when the filter clears. */}
         <Verdict text={postingsVerdict(total, filtering ? total : shownCount(rows))} />
       </div>

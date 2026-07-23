@@ -11,7 +11,7 @@ import { TitleBar } from "./TitleBar";
 import { Composer, type ComposerState } from "./Composer";
 import { MessageList } from "./MessageList";
 import { DetailPanel } from "./DetailPanel";
-import { DetailProfile } from "./DetailProfile";
+import { ProfilePanel } from "./ProfilePanel";
 import { AuthDialog } from "@/components/auth/AuthDialog";
 import { authClient } from "@/lib/auth-client";
 import { useJobChatTransport } from "@/lib/chat-transport";
@@ -80,7 +80,7 @@ export function ChatClient({
    *  queued draft; a later ordinary signed-in mount that finds a stale (shared "/chat/new") key must not auto-send it. */
   fromAuth?: boolean;
   /** SSR-resolved: the returning account already has a completed profile. On the post-auth arrival this
-   *  skips the form and auto-continues the queued fit question directly (item 2). */
+   *  skips the form and auto-continues the queued fit question directly. */
   hasProfile?: boolean;
 }) {
   const router = useRouter();
@@ -109,7 +109,7 @@ export function ChatClient({
   const freshChatRef = useRef(newChat);
   // Bumped on New chat to move focus to the composer (Composer watches this).
   const [focusNonce, setFocusNonce] = useState(0);
-  const [used, setUsed] = useState<Set<string>>(new Set());
+  const [usedFollowups, setUsedFollowups] = useState<Set<string>>(new Set());
   const [failed, setFailed] = useState<string | null>(null);
   // Auth is client-driven after mount: seeds from the SSR resolve, then an in-page sign-in/sign-out flips it.
   const [signedIn, setSignedIn] = useState(signedInInitial);
@@ -123,7 +123,7 @@ export function ChatClient({
   // `status` off "ready". `pending = isStreaming(status) || awaiting`; the send/attach `finally` clears it, never stuck.
   const [awaiting, setAwaiting] = useState(false);
   const started = useRef(false);
-  // Cold-start warm (AC-2, register #11): once per mount, warm the Trigger session for the conversation the
+  // Cold-start warm: once per mount, warm the Trigger session for the conversation the
   // first send will use, so the agent's boot overlaps mount/typing rather than stacking after the send.
   // Skipped where it would be junk or pointless: e2e (the mock owns no session), a `/chat/new` shell (its id
   // is a placeholder the first send discards when it mints the real conversation), and a resuming mount
@@ -137,7 +137,7 @@ export function ChatClient({
     void transport.preload?.(conversationId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // F3 auto-continue: the fit question an invite card interrupted. Armed ONLY when an invite is the trailing
+  // Auto-continue: the fit question an invite card interrupted. Armed ONLY when an invite is the trailing
   // assistant turn at the moment the profile flow starts; consumed exactly once (nulled BEFORE the send).
   const autoContinueRef = useRef<string | null>(null);
   // Latest turns for the arm-time trailing-card read, so the arm helper stays a stable ([]) callback (no memo
@@ -160,7 +160,7 @@ export function ChatClient({
     setProfileOpen(true);
   }, []);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
-  // F3 abandon-clear (single home): ANY profile-panel close that is NOT a save clears the one-shot ref, so a
+  // Abandon-clear (single home): ANY profile-panel close that is NOT a save clears the one-shot ref, so a
   // later save can never fire a stale question. This covers every close path off one flag - the X button
   // (closeProfile), Esc (the window handler), New chat (startNewChat), and switching to a detail panel - which
   // all set `profileOpen=false`. A SAVE keeps the panel open (the saved state), so `onProfileSaved` still reads
@@ -169,7 +169,7 @@ export function ChatClient({
     if (!profileOpen) autoContinueRef.current = null;
   }, [profileOpen]);
 
-  // F3: arm the one-shot replay IF an invite card is the trailing assistant turn right now (the invite
+  // Arm the one-shot replay IF an invite card is the trailing assistant turn right now (the invite
   // interrupted a fit question). Capture that question; a non-invite trailing card (an Edit from the profile
   // card, the title-bar profile entry) leaves the ref untouched, so those never auto-continue.
   const armAutoContinue = useCallback(() => {
@@ -330,7 +330,7 @@ export function ChatClient({
               showRefusal(r.reason, text);
               return;
             }
-            failSend(text); // invalid_input / not_found -> toast + preserved draft (interaction-spec section 4)
+            failSend(text); // invalid_input / not_found -> toast + preserved draft
             return;
           }
           // DELIVER + WATCH via the transport's `sendMessages` (useChat.sendMessage): one primitive appends the
@@ -359,9 +359,9 @@ export function ChatClient({
     ],
   );
 
-  // Fire the armed one-shot fit question (F3). Null the ref BEFORE the send so a double-fire can never send
+  // Fire the armed one-shot fit question. Null the ref BEFORE the send so a double-fire can never send
   // twice; `send` still enforces the reentrancy + cap guards. One home for both firing sites: a profile save
-  // and the profile-already-on-file post-auth auto-continue (item 2).
+  // and the profile-already-on-file post-auth auto-continue.
   const fireAutoContinue = useCallback(() => {
     const question = autoContinueRef.current;
     autoContinueRef.current = null;
@@ -379,7 +379,7 @@ export function ChatClient({
         parts: [{ type: "data-profile-card", id: `${id}-card`, data: { kind: "profile-card", profile } }],
       } as UIMessage;
       setMessages((prev) => (prev.some((m) => m.id === id) ? prev.map((m) => (m.id === id ? card : m)) : [...prev, card]));
-      // F3: if an invite started this flow, re-run the fit question it interrupted.
+      // If an invite started this flow, re-run the fit question it interrupted.
       fireAutoContinue();
     },
     [conversationId, setMessages, fireAutoContinue],
@@ -424,9 +424,9 @@ export function ChatClient({
         const queued = takeQueuedDraft(conversationId);
         const pendingInvite = takePendingProfileInvite(conversationId);
         if (queued && fromAuth) void send(queued);
-        // F3: this is the guest continuation of onAuthInvite across the redirect - arm the fit question the
-        // SSR thread's trailing invite interrupted. Item 2: if a profile is ALREADY on file, skip the form and
-        // auto-continue the queued fit question NOW; otherwise F2 opens the form and the save fires it.
+        // This is the guest continuation of onAuthInvite across the redirect - arm the fit question the
+        // SSR thread's trailing invite interrupted. If a profile is ALREADY on file, skip the form and
+        // auto-continue the queued fit question NOW; otherwise the form opens and the save fires it.
         else if (pendingInvite && fromAuth) {
           armAutoContinue();
           if (hasProfile) fireAutoContinue();
@@ -440,7 +440,7 @@ export function ChatClient({
   const onFollowup = useCallback(
     (cardId: string, text: string) => {
       // One-shot - mark this card's chip used (stays disabled) and send its text as the next turn.
-      setUsed((prev) => new Set(prev).add(`${cardId}::${text}`));
+      setUsedFollowups((prev) => new Set(prev).add(`${cardId}::${text}`));
       void send(text);
     },
     [send],
@@ -508,7 +508,7 @@ export function ChatClient({
 
   // Reconcile by id at the merge seam: reconnecting to a live run re-receives the already-present assistant tail
   // (SDK session replay, same id); fold those duplicates (replace in place, order kept) so each turn renders once and keys stay unique.
-  // Then dedupeInviteCards (F1): the idempotent invite cards arrive from uncoordinated sources under DIFFERENT ids, so only a presentation pass collapses them.
+  // Then dedupeInviteCards: the idempotent invite cards arrive from uncoordinated sources under DIFFERENT ids, so only a presentation pass collapses them.
   const view = useMemo(() => dedupeInviteCards(reconcileMessagesById(messages)), [messages]);
 
   // The open detail panel's body, re-resolved from the current (immutable) messages. The EXPENSIVE resolve (classify +
@@ -568,7 +568,7 @@ export function ChatClient({
       <main className="main">
         {/* The detail panel takes the middle of the canvas (table OR profile); the chat docks to the right rail. */}
         {profileOpen ? (
-          <DetailProfile
+          <ProfilePanel
             conversationId={conversationId}
             e2e={e2e}
             onClose={closeProfile}
@@ -592,7 +592,7 @@ export function ChatClient({
             <MessageList
               messages={view}
               pending={pending}
-              usedFollowups={used}
+              usedFollowups={usedFollowups}
               onFollowup={onFollowup}
               onRetry={onRetry}
               onOpenDetailPanel={openDetailPanel}

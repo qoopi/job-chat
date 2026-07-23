@@ -191,12 +191,12 @@ const GENERIC_TITLE_TOKENS = new Set([
 ]);
 
 // Family-crossing tokens: distinctive enough to survive the generic stoplist, but bare they match across
-// unrelated job families (a bare "Automation" recalled "UX Designer, Tools Automation and Infrastructure" -
-// register 17). Never emit them alone: pair with the phrase's preceding distinctive token AND a canonical
+// unrelated job families (a bare "Automation" recalled "UX Designer, Tools Automation and Infrastructure").
+// Never emit them alone: pair with the phrase's preceding distinctive token AND a canonical
 // pairing (so "QA Automation Engineer" contributes "QA Automation" + "Test Automation", never "Automation").
 const CONTEXT_REQUIRED_TOKENS: Record<string, string> = { automation: "Test Automation" };
 
-/** F4: broaden title terms for the whole-phrase ILIKE scorer, which recalls almost nothing against
+/** Broaden title terms for the whole-phrase ILIKE scorer, which recalls almost nothing against
  *  real-world titles ("Software Engineer III, Full Stack" never matches '%Full-Stack Developer%'). Per term
  *  emit the phrase, its hyphen->space normalization, and its DISTINCTIVE tokens (the generic-token stoplist
  *  dropped, so a bare "Engineer"/"Developer" never widens the match). Deterministic, case-insensitively
@@ -242,7 +242,7 @@ export function expandTitleTerms(terms: string[]): string[] {
 export function mergeSearchParams(input: SearchToolInput, profile: Profile) {
   const baseTitles = input.titleTerms && input.titleTerms.length > 0 ? input.titleTerms : profile.titles;
   return {
-    titleTerms: expandTitleTerms(baseTitles), // F4: recall-broadened before the scorer sees them
+    titleTerms: expandTitleTerms(baseTitles), // recall-broadened before the scorer sees them
     experience: profile.seniority ?? undefined, // authoritative - never from the model
     cities: input.cities && input.cities.length > 0 ? input.cities : profile.locations,
     remoteOk: input.remoteOk ?? profile.remotePref ?? undefined,
@@ -299,7 +299,7 @@ function requestProfileTool(deps: CatalogDeps) {
     inputSchema: z.object({}).strict(),
     execute: async (_input, { toolCallId }) => {
       const id = toolCallId;
-      // F7 guardrail: a profile is already on file (the PROFILE note forbids reaching here, but the model
+      // Guardrail: a profile is already on file (the PROFILE note forbids reaching here, but the model
       // sometimes does). Emit NO card and steer to search_postings so the owner is matched in THIS turn -
       // reuse the profile already in deps, never a second DB read.
       if (deps.profile) {

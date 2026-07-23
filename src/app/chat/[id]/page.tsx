@@ -42,7 +42,7 @@ export default async function ChatPage({
   let conversations: ConversationSummary[] = [];
   let accountName: string | undefined;
   let accountEmail: string | undefined;
-  // Item 2: whether the returning account already has a profile - only the post-auth arrival consumes it,
+  // Whether the returning account already has a profile - only the post-auth arrival consumes it,
   // so it is read (via the existing store, no new endpoint) only on that path.
   let hasProfile = false;
 

@@ -46,7 +46,7 @@ function whereClause(filters: string[]): string {
   return filters.length ? `WHERE ${filters.join(" AND ")}` : "";
 }
 
-// Case-insensitive categorical matching (044 AC-1). ONE home: `eqCI`/`inCI` wrap lowerUTF8 around BOTH
+// Case-insensitive categorical matching. ONE home: `eqCI`/`inCI` wrap lowerUTF8 around BOTH
 // the column and the value so a filter value's casing never changes which rows match
 // ("senior"/"Senior"/"SENIOR" are identical). All three query families (fixed templates, composed
 // builder, searchPostings) route their categorical equality/IN through here. Only free-text categorical
@@ -570,7 +570,7 @@ export function buildSearchPostingsSql(
     `  WHERE ${openSet}`,
     ")",
     "WHERE score > 0",
-    // Item 4 (register 20): deterministic tie-break within equal scores - salary-listed rows first, then
+    // Deterministic tie-break within equal scores - salary-listed rows first, then
     // freshest. Stops a listed-salary US row sinking below an unlisted India row on a score tie.
     "ORDER BY score DESC, (salary_min IS NOT NULL OR salary_max IS NOT NULL) DESC, published_at DESC",
     `LIMIT ${p.limit}`,
@@ -620,7 +620,7 @@ export interface CoverageProfile {
   salaryCoverage: number; // fraction of postings carrying a salary range (0..1)
 }
 
-/** The compact "what the live data contains" summary for the per-conversation CORPUS note (044 AC-2):
+/** The compact "what the live data contains" summary for the per-conversation CORPUS note:
  *  size, snapshot, source mix, top cities, countries, and the canonical (most-frequent casing) values of
  *  each free-text categorical dimension, plus salary coverage. Rendered to text in trigger/run.ts. */
 export interface CorpusSummary {
@@ -629,13 +629,13 @@ export interface CorpusSummary {
   salaryCoverage: number; // fraction of postings carrying a salary range (0..1)
   sources: { source: string; share: number }[]; // source mix, top-first, shares 0..1
   topCities: string[]; // up to 15, most-frequent first
-  countries: string[]; // countries present, most-frequent first
+  countries: string[]; // top-40 country sample, most-frequent first
   experienceLevels: string[]; // canonical spellings (most frequent casing per value), most-frequent first
   employmentTypes: string[];
   locationKinds: string[];
 }
 
-/** The corpus summary query (044 AC-2): ONE read over the current open set. Pure/unit-testable like the
+/** The corpus summary query: ONE read over the current open set. Pure/unit-testable like the
  *  other builders. Free-text categorical values dedupe by lowerUTF8 group and pick the most frequent
  *  casing (argMax over per-casing counts) so "Senior"/"senior" collapse to one canonical spelling; source
  *  names + shares come back as parallel arrays (identical ORDER BY) to avoid tuple serialization. */
@@ -675,7 +675,7 @@ export interface Analytics {
   /** Corpus shape for the DATA SCOPE note. Memoized on the per-process analytics singleton (once per isolate,
    *  not per turn); only a fulfilled result is cached, a transient failure is retried. */
   coverageProfile(): Promise<CoverageProfile>;
-  /** The compact corpus summary for the per-conversation CORPUS note (044 AC-2). One read, NOT memoized
+  /** The compact corpus summary for the per-conversation CORPUS note. One read, NOT memoized
    *  here - the per-conversation memo lives in trigger/run.ts so a NEW conversation gets fresh facts. */
   corpusSummary(): Promise<CorpusSummary>;
 }

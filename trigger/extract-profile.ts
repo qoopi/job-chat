@@ -11,7 +11,7 @@ import { withStore } from "./store-session";
 
 // The background extraction task (durable, not a Vercel action, to survive the latency + 4MB PDF); the pure pipeline is profile-extraction.ts.
 
-// F5b: default = the SAME shipped eu Sonnet 4.5 profile chat + evals already use (import, so no drift/second
+// Default = the SAME shipped eu Sonnet 4.5 profile chat + evals already use (import, so no drift/second
 // literal). Haiku 4.5 failed the n=1 extraction quality bar; Sonnet is the cheapest model that clears it.
 // Enablement is proven by chat's live use. EXTRACTION_MODEL_ID still overrides.
 const DEFAULT_EXTRACTION_MODEL_ID = MODEL_ID;

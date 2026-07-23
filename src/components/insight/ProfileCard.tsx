@@ -185,7 +185,7 @@ export function ProfileCard({
 }
 
 const MAX_BULLETS = 3; // experience bullets shown before "Show N more" (per role)
-const MAX_ROLES = 2; // experience entries shown before "Show N more" (operator 039)
+const MAX_ROLES = 2; // experience entries shown before "Show N more"
 
 /** The quiet accent "Show N more" text-button, shared by the per-role bullet toggle and the experience-list toggle. */
 const showMoreStyle: React.CSSProperties = {
@@ -224,7 +224,7 @@ function ExperienceEntry({ entry }: { entry: Experience }) {
   );
 }
 
-/** The experience list: the first 2 roles, the rest behind a "Show N more" collapse (operator 039). */
+/** The experience list: the first 2 roles, the rest behind a "Show N more" collapse. */
 function ExperienceList({ entries }: { entries: Experience[] }) {
   const [open, setOpen] = useState(false);
   const shown = open ? entries : entries.slice(0, MAX_ROLES);
@@ -253,7 +253,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-/** The read-only detail-panel profile. `extrasOnly` (041) drops the subline + both skills sections so the
+/** The read-only detail-panel profile. `extrasOnly` drops the subline + both skills sections so the
  *  editable saved view can render salary/location/skills itself and reuse this ONLY for the non-editable
  *  remainder (Sources, domains, experience, OSS) - keeping one home for those sections. */
 export function ProfileExpanded({ profile, extrasOnly = false }: { profile: Profile; extrasOnly?: boolean }) {

@@ -71,7 +71,7 @@ export interface ProfileInputs {
   githubUsername: string | null;
 }
 
-/** The user-editable preference fields on an extracted profile (the 041 edit surface). A null salary or
+/** The user-editable preference fields on an extracted profile (the edit surface). A null salary or
  *  remotePref is "unknown"; empty locations clears them. These feed searchPostings via mergeSearchParams. */
 export interface ProfilePrefs {
   salaryMin: number | null;

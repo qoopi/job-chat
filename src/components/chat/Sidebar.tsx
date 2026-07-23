@@ -221,7 +221,7 @@ export function Sidebar({
                   />
                 </div>
               ) : confirmingId === c.id ? (
-                // Inline confirm (interaction-spec s1 pattern - never a modal).
+                // Inline confirm (never a modal).
                 <div key={c.id} className="sb-item sb-confirm">
                   <span>Delete this chat?</span>
                   <div className="sb-confirm-actions">
