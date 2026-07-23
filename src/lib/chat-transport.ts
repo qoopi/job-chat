@@ -9,10 +9,15 @@ import { MockChatTransport } from "@/lib/e2e-transport";
 import { readPersistedSession, writePersistedSession } from "./chat-session-store";
 import type { jobChatAgent } from "../../trigger/chat";
 
-// The transport surface (ChatTransport + stopGeneration); session state is owned by the transport (hydrated, token-refreshed on 401, lazily started).
+// The transport surface (ChatTransport + stopGeneration + preload); session state is owned by the transport (hydrated, token-refreshed on 401, lazily started).
 export interface JobChatTransport extends ChatTransport<UIMessage> {
   // Stop must reach the backend after a RESUMED mount: `useChat.stop()` aborts only the local reader, so onStop pairs it with `stopGeneration` ({kind:"stop"} on `.in`).
   stopGeneration(chatId: string): Promise<boolean>;
+  // Cold-start warm (register #11): eagerly create the session + boot its run for a chatId BEFORE the first
+  // send, so the ~cold agent boot overlaps mount/typing instead of stacking after the send. The real
+  // transport runs `startSession` (createStartSessionAction) - a Trigger session only, NEVER a PG row.
+  // Optional: the e2e mock owns no real session, so there is nothing to warm and it simply omits it.
+  preload?(chatId: string): Promise<void>;
 }
 
 // Transport seam. Prod: the Trigger.dev transport (token via our ownership-checked `mintChatToken`). E2E: a scripted mock, CONSTRUCTED only under the e2e flag - no test/server code ships to the client.
