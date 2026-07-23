@@ -37,7 +37,7 @@ Live: https://jobchat.dev
   signed-in-without-profile -> profile invite, profile-on-file -> `search_postings` ranks live
   postings against the profile.
 - **Scheduled ingestion** - a Trigger.dev cron task pulls postings from the searchnapply REST API
-  into ClickHouse every 6 hours.
+  into ClickHouse hourly.
 
 ## Tech stack
 

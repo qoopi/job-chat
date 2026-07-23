@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ClickHouseClient } from "@clickhouse/client";
 import {
   buildComposedSql,
+  buildCorpusSql,
   buildSearchPostingsSql,
   buildTemplateSql,
   createAnalytics,
@@ -18,7 +19,7 @@ describe("buildTemplateSql", () => {
       "postings",
     );
     expect(sql).toContain("FROM postings FINAL");
-    expect(sql).toContain("city IN ('San Francisco', 'Los Angeles')");
+    expect(sql).toContain("lowerUTF8(city) IN (lowerUTF8('San Francisco'), lowerUTF8('Los Angeles'))");
     expect(sql).toContain("title ILIKE '%Engineer%'");
     expect(sql).toContain("quantileExact(0.5)");
   });
@@ -67,10 +68,11 @@ describe("buildTemplateSql", () => {
   it("escapes a trailing backslash so it cannot swallow the closing quote", () => {
     // `company`/`role` are wrapped as `%...%` before escaping, so a trailing backslash there always
     // has a literal `%` between it and the closing quote - not the adjacency this bug needs. `city`
-    // is escaped bare (`city = ${chStr(p.city)}`), so a trailing backslash sits immediately before
-    // the quote chStr appends: the exact position where an unescaped backslash would swallow it.
+    // is escaped inside the lowerUTF8 wrap (`lowerUTF8(city) = lowerUTF8(${chStr(p.city)})`), so a
+    // trailing backslash sits immediately before the quote chStr appends: the exact position where an
+    // unescaped backslash would swallow it. The lowerUTF8 wrap does not change the chStr escaping.
     const { sql } = buildTemplateSql("salary_distribution", { city: "trail\\" }, "postings");
-    expect(sql).toContain("city = 'trail\\\\'");
+    expect(sql).toContain("lowerUTF8(city) = lowerUTF8('trail\\\\')");
   });
 
   it("neutralizes a quote+backslash break-out attempt as a single escaped literal", () => {
@@ -116,17 +118,79 @@ describe("buildTemplateSql", () => {
   // serve (latest_postings is an entity list; salary_distribution is the v1-only histogram shape).
   it("adds a country equality filter to latest_postings (same shape as city)", () => {
     const { sql } = buildTemplateSql("latest_postings", { country: "United States" }, "postings");
-    expect(sql).toContain("country = 'United States'");
+    expect(sql).toContain("lowerUTF8(country) = lowerUTF8('United States')");
   });
 
   it("adds a country equality filter to salary_distribution", () => {
     const { sql } = buildTemplateSql("salary_distribution", { country: "Germany" }, "postings");
-    expect(sql).toContain("country = 'Germany'");
+    expect(sql).toContain("lowerUTF8(country) = lowerUTF8('Germany')");
   });
 
   it("escapes a quote in the country filter (no literal break-out)", () => {
     const { sql } = buildTemplateSql("latest_postings", { country: "Cote d'Ivoire" }, "postings");
-    expect(sql).toContain("country = 'Cote d\\'Ivoire'");
+    expect(sql).toContain("lowerUTF8(country) = lowerUTF8('Cote d\\'Ivoire')");
+  });
+});
+
+// 044 AC-1: categorical FILTER matching is case-insensitive - lowerUTF8 wraps BOTH the column and the
+// value, so a value's casing never changes which rows match. One home (eqCI/inCI); all THREE query
+// families inherit (fixed templates, composed builder, search_postings). The matrix asserts the emitted
+// SQL lowers both sides for each dimension x family x casing; the behavioural "senior == Senior == SENIOR
+// hits the same rows" proof runs against real ClickHouse in analytics.integration.test.ts. stored data +
+// display (SELECT / GROUP BY) casing stay untouched - only the equality/IN comparisons are wrapped.
+describe("Should_MatchCaseInsensitively_When_CategoricalFilter (044 AC-1, lowerUTF8 both sides)", () => {
+  const CASINGS = ["senior", "Senior", "SENIOR"] as const;
+
+  // family+dimension -> (value) -> the emitted SQL, and the exact lowered comparison it must contain.
+  const EQ_CASES: [string, (v: string) => string, (v: string) => string][] = [
+    ["template salary_distribution.city", (v) => buildTemplateSql("salary_distribution", { city: v }, "postings").sql, (v) => `lowerUTF8(city) = lowerUTF8('${v}')`],
+    ["template salary_distribution.country", (v) => buildTemplateSql("salary_distribution", { country: v }, "postings").sql, (v) => `lowerUTF8(country) = lowerUTF8('${v}')`],
+    ["template top_companies.city", (v) => buildTemplateSql("top_companies", { city: v }, "postings").sql, (v) => `lowerUTF8(city) = lowerUTF8('${v}')`],
+    ["template latest_postings.experience_level", (v) => buildTemplateSql("latest_postings", { level: v }, "postings").sql, (v) => `lowerUTF8(experience_level) = lowerUTF8('${v}')`],
+    ["template latest_postings.country", (v) => buildTemplateSql("latest_postings", { country: v }, "postings").sql, (v) => `lowerUTF8(country) = lowerUTF8('${v}')`],
+    ["composed city", (v) => buildComposedSql({ measures: ["count"], city: v }, "postings").sql, (v) => `lowerUTF8(city) = lowerUTF8('${v}')`],
+    ["composed region", (v) => buildComposedSql({ measures: ["count"], region: v }, "postings").sql, (v) => `lowerUTF8(region) = lowerUTF8('${v}')`],
+    ["composed country", (v) => buildComposedSql({ measures: ["count"], country: v }, "postings").sql, (v) => `lowerUTF8(country) = lowerUTF8('${v}')`],
+    ["composed experience_level", (v) => buildComposedSql({ measures: ["count"], experience_level: v }, "postings").sql, (v) => `lowerUTF8(experience_level) = lowerUTF8('${v}')`],
+    ["composed employment_type", (v) => buildComposedSql({ measures: ["count"], employment_type: v }, "postings").sql, (v) => `lowerUTF8(employment_type) = lowerUTF8('${v}')`],
+  ];
+
+  it.each(EQ_CASES)("%s lowers both sides of the equality for every casing", (_label, build, expected) => {
+    for (const v of CASINGS) expect(build(v)).toContain(expected(v));
+  });
+
+  // The IN-list families: salary_compare (template), composed cities, and search_postings' city score
+  // term - each lowers the column and every listed value, so a mixed-casing list still matches literally.
+  it("salary_compare cities IN lowers both sides for a mixed-casing list", () => {
+    const { sql } = buildTemplateSql("salary_compare", { cities: ["berlin", "MUNICH"] }, "postings");
+    expect(sql).toContain("lowerUTF8(city) IN (lowerUTF8('berlin'), lowerUTF8('MUNICH'))");
+  });
+
+  it("composed cities IN lowers both sides for a mixed-casing list", () => {
+    const { sql } = buildComposedSql({ measures: ["count"], cities: ["berlin", "MUNICH"] }, "postings");
+    expect(sql).toContain("lowerUTF8(city) IN (lowerUTF8('berlin'), lowerUTF8('MUNICH'))");
+  });
+
+  it("search_postings city score term lowers both sides (the third family)", () => {
+    const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["engineer"], cities: ["berlin", "MUNICH"] }, "postings");
+    expect(rowsSql).toContain("(lowerUTF8(city) IN (lowerUTF8('berlin'), lowerUTF8('MUNICH')))");
+  });
+
+  // The SELECT / GROUP BY projections keep the ORIGINAL casing (display + stored data untouched) - only
+  // the comparison is lowered. A location_kind dimension still serializes via toString, not lowerUTF8.
+  it("does not wrap the SELECT/GROUP BY dimension projection (display casing preserved)", () => {
+    const { sql } = buildComposedSql({ measures: ["count"], dimensions: ["experience_level"], experience_level: "Senior" }, "postings");
+    expect(sql).toContain("GROUP BY experience_level"); // grouped by the raw column, not lowerUTF8
+    expect(sql).toContain("lowerUTF8(experience_level) = lowerUTF8('Senior')"); // only the FILTER is lowered
+    expect(sql).not.toContain("lowerUTF8(experience_level) AS"); // the projection is never lowered
+  });
+
+  // location_kind is an Enum8 with Zod-validated canonical values - a direct equality (no lowerUTF8 wrap)
+  // is intentional and correct; wrapping it would need an Enum->String cast for a semantic no-op.
+  it("leaves the Zod-validated location_kind enum equality unwrapped", () => {
+    const { sql } = buildComposedSql({ measures: ["count"], location_kind: "remote" }, "postings");
+    expect(sql).toContain("location_kind = 'remote'");
+    expect(sql).not.toContain("lowerUTF8(location_kind)");
   });
 });
 
@@ -268,7 +332,7 @@ describe("Should_RejectUnknownParams_When_ComposedQueryBuilt (AC-2)", () => {
 
   it("escapes a bare city equality break-out attempt", () => {
     const { sql } = buildComposedSql({ measures: ["count"], city: "trail\\" }, "postings");
-    expect(sql).toContain("city = 'trail\\\\'");
+    expect(sql).toContain("lowerUTF8(city) = lowerUTF8('trail\\\\')");
   });
 
   // `city` and `cities` coexisting used to AND (`city = X AND city IN (...)`),
@@ -280,13 +344,13 @@ describe("Should_RejectUnknownParams_When_ComposedQueryBuilt (AC-2)", () => {
       { measures: ["count"], city: "Berlin", cities: ["Los Angeles", "New York"] },
       "postings",
     );
-    expect(sql).toContain("city IN ('Los Angeles', 'New York')");
-    expect(sql).not.toContain("city = 'Berlin'"); // the single city loses to the list
+    expect(sql).toContain("lowerUTF8(city) IN (lowerUTF8('Los Angeles'), lowerUTF8('New York'))");
+    expect(sql).not.toContain("lowerUTF8(city) = lowerUTF8('Berlin')"); // the single city loses to the list
   });
 
   it("still applies a single city when no cities list is present", () => {
     const { sql } = buildComposedSql({ measures: ["count"], city: "Berlin" }, "postings");
-    expect(sql).toContain("city = 'Berlin'");
+    expect(sql).toContain("lowerUTF8(city) = lowerUTF8('Berlin')");
   });
 });
 
@@ -341,7 +405,7 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
       { measures: ["count"], dimensions: ["company"], country: "United States" },
       "postings",
     );
-    expect(sql).toContain("country = 'United States'");
+    expect(sql).toContain("lowerUTF8(country) = lowerUTF8('United States')");
     expect(sql).toContain("GROUP BY company");
   });
 
@@ -439,7 +503,7 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
       { measures: ["count"], cities: ["Los Angeles", "New York"] },
       "postings",
     );
-    expect(sql).toContain("city IN ('Los Angeles', 'New York')");
+    expect(sql).toContain("lowerUTF8(city) IN (lowerUTF8('Los Angeles'), lowerUTF8('New York'))");
   });
 
   it("escapes a quote break-out inside the cities IN-list", () => {
@@ -447,7 +511,7 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
       { measures: ["count"], cities: ["x' OR '1'='1"] },
       "postings",
     );
-    expect(sql).toContain("city IN ('x\\' OR \\'1\\'=\\'1')");
+    expect(sql).toContain("lowerUTF8(city) IN (lowerUTF8('x\\' OR \\'1\\'=\\'1'))");
   });
 
   // Escaping must be applied PER-ELEMENT across a multi-city list - a bug that escaped only cities[0]
@@ -458,7 +522,9 @@ describe("Should_BuildExpectedSql_When_ValidCombos (AC-2)", () => {
       { measures: ["count"], cities: ["Los Angeles", "x' OR '1'='1", "New York"] },
       "postings",
     );
-    expect(sql).toContain("city IN ('Los Angeles', 'x\\' OR \\'1\\'=\\'1', 'New York')");
+    expect(sql).toContain(
+      "lowerUTF8(city) IN (lowerUTF8('Los Angeles'), lowerUTF8('x\\' OR \\'1\\'=\\'1'), lowerUTF8('New York'))",
+    );
   });
 
   it("a location_kind equality filter is accepted for the three enum values", () => {
@@ -565,8 +631,8 @@ describe("Should_ScoreByFixedFormula_When_SearchPostingsBuilt (AC-7/AC-8)", () =
     // 2 * experienceMatch (the posting's mapped band = the requested band)
     expect(rowsSql).toContain("2 * (multiIf(");
     expect(rowsSql).toContain("= 'senior')");
-    // 2 * cityMatch
-    expect(rowsSql).toContain("2 * (city IN ('Berlin', 'Munich'))");
+    // 2 * cityMatch (case-insensitive: lowerUTF8 both sides - 044 AC-1, the search_postings family)
+    expect(rowsSql).toContain("2 * (lowerUTF8(city) IN (lowerUTF8('Berlin'), lowerUTF8('Munich')))");
     // 1 * (remoteOk AND remote)
     expect(rowsSql).toContain("1 * (location_kind = 'remote')");
     // 1 * salaryFloorMet (the posting ceiling reaches the requested floor; NULL salary is never a match)
@@ -613,7 +679,7 @@ describe("Should_ScoreByFixedFormula_When_SearchPostingsBuilt (AC-7/AC-8)", () =
       "postings",
     );
     expect(rowsSql).toContain("title ILIKE '%x\\' OR \\'1\\'=\\'1%'");
-    expect(rowsSql).toContain("city IN ('y\\' OR \\'1\\'=\\'1')");
+    expect(rowsSql).toContain("lowerUTF8(city) IN (lowerUTF8('y\\' OR \\'1\\'=\\'1'))");
   });
 
   it("computes the meta over the matched set (total, freshestAt, dominant company)", () => {
@@ -840,5 +906,81 @@ describe("executeBuilt fires the rows and meta queries concurrently (perf)", () 
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }
+  });
+});
+
+// 044 AC-2: the per-conversation CORPUS summary query - ONE read over the open set describing what the
+// live data contains. Pure builder (shape pinned here); the note it feeds is rendered/tested in run-scope.
+describe("buildCorpusSql (044 AC-2 corpus summary query)", () => {
+  const sql = buildCorpusSql("postings_test");
+
+  it("reads the open set once with the headline aggregates", () => {
+    expect(sql).toContain("count() AS total");
+    expect(sql).toContain("toString(max(ingested_at)) AS freshestAt");
+    expect(sql).toContain("countIf(salary_min IS NOT NULL AND salary_max IS NOT NULL) / count()");
+    // The top-level read AND every subquery scope to the open set (latest ingest snapshot).
+    expect(sql).toContain("ingested_at = (SELECT max(ingested_at) FROM postings_test)");
+    expect(sql).toContain("FROM postings_test FINAL");
+  });
+
+  it("selects top cities and countries by frequency, non-null only", () => {
+    expect(sql).toContain("groupArray(city)");
+    expect(sql).toContain("city IS NOT NULL AND city != ''");
+    expect(sql).toContain("ORDER BY count() DESC, city ASC LIMIT 15");
+    expect(sql).toContain("groupArray(country)");
+    expect(sql).toContain("country IS NOT NULL AND country != ''");
+    expect(sql).toContain("LIMIT 40");
+  });
+
+  it("dedupes each free-text categorical by lowercased group, keeping the most frequent casing", () => {
+    // canonical spelling = argMax(value, per-casing count) within each lowerUTF8 group.
+    expect(sql).toContain("argMax(experience_level, c)");
+    expect(sql).toContain("GROUP BY lowerUTF8(experience_level)");
+    expect(sql).toContain("argMax(employment_type, c)");
+    expect(sql).toContain("GROUP BY lowerUTF8(employment_type)");
+  });
+
+  it("serializes location_kind by name and returns source names + shares as aligned parallel arrays", () => {
+    expect(sql).toContain("toString(location_kind) AS v");
+    expect(sql).toContain("AS locationKinds");
+    expect(sql).toContain("groupArray(source)");
+    expect(sql).toContain("AS sourceNames");
+    expect(sql).toContain("AS sourceShares");
+    expect(sql).toContain("round(count() / (SELECT count()"); // share denominator = open-set total
+  });
+});
+
+describe("analytics.corpusSummary parses the corpus row (044 AC-2)", () => {
+  it("maps the single JSON row into a CorpusSummary, pairing source names with shares by index", async () => {
+    const row = {
+      total: 3488,
+      freshestAt: "2026-07-18 06:00:00",
+      salaryCoverage: 0.65,
+      topCities: ["San Francisco", "Los Angeles"],
+      countries: ["United States", "Germany"],
+      experienceLevels: ["Senior", "Junior", "Staff"],
+      employmentTypes: ["full-time", "contract"],
+      locationKinds: ["onsite", "remote", "hybrid"],
+      sourceNames: ["searchnapply", "fixture"],
+      sourceShares: [0.98, 0.02],
+    };
+    const client = {
+      query: async () => ({ json: async () => [row] }),
+    } as unknown as ClickHouseClient;
+    const analytics = createAnalytics({ client, table: "postings_test" });
+
+    const c = await analytics.corpusSummary();
+    expect(c.total).toBe(3488);
+    expect(c.freshestAt).toBe("2026-07-18 06:00:00");
+    expect(c.salaryCoverage).toBe(0.65);
+    expect(c.topCities).toEqual(["San Francisco", "Los Angeles"]);
+    expect(c.countries).toEqual(["United States", "Germany"]);
+    expect(c.experienceLevels).toEqual(["Senior", "Junior", "Staff"]);
+    expect(c.employmentTypes).toEqual(["full-time", "contract"]);
+    expect(c.locationKinds).toEqual(["onsite", "remote", "hybrid"]);
+    expect(c.sources).toEqual([
+      { source: "searchnapply", share: 0.98 },
+      { source: "fixture", share: 0.02 },
+    ]);
   });
 });

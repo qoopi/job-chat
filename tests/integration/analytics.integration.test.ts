@@ -156,6 +156,41 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
     expect(profile.freshestAt).toBe(FIXTURE_INGESTED_AT);
   });
 
+  // 044 AC-1: the lowerUTF8-both-sides normalization proven against the REAL parser, not just the SQL
+  // text. Every casing of a categorical filter value must hit the SAME rows. The fixture stores
+  // experience_level "Senior" (5 rows, canonical casing) and city "San Francisco" (6 rows); a lower /
+  // upper / mixed spelling of either must return the identical count, and the stored casing is untouched.
+  it("matches a categorical filter case-insensitively across casings (044 AC-1)", async () => {
+    const countFor = (params: Record<string, unknown>) =>
+      analytics.runComposedQuery({ measures: ["count"], ...params }).then((r) => Number(r.rows[0].count));
+
+    const levelCounts = await Promise.all(
+      ["senior", "Senior", "SENIOR"].map((experience_level) => countFor({ experience_level })),
+    );
+    expect(levelCounts).toEqual([5, 5, 5]); // all three casings hit the same 5 "Senior" rows
+
+    const cityCounts = await Promise.all(
+      ["san francisco", "SAN FRANCISCO", "San Francisco"].map((city) => countFor({ city })),
+    );
+    expect(cityCounts).toEqual([6, 6, 6]); // all three casings hit the same 6 "San Francisco" rows
+  });
+
+  // 044 AC-2: the ONE corpus-summary query runs against real ClickHouse and parses. Set/membership
+  // assertions (not exact array order) - the note needs the value SET, and this proves the argMax
+  // canonical-casing dedup and the parallel source-name/share arrays execute and parse end to end.
+  it("corpusSummary summarizes the seeded fixture (044 AC-2)", async () => {
+    const c = await analytics.corpusSummary();
+    expect(c.total).toBe(10);
+    expect(c.freshestAt).toBe(FIXTURE_INGESTED_AT);
+    expect(c.salaryCoverage).toBeCloseTo(0.8, 5);
+    expect(new Set(c.experienceLevels)).toEqual(new Set(["Senior", "Junior", "Staff"]));
+    expect(new Set(c.employmentTypes)).toEqual(new Set(["full-time"]));
+    expect(new Set(c.locationKinds)).toEqual(new Set(["onsite", "remote", "hybrid"]));
+    expect(new Set(c.topCities)).toEqual(new Set(["San Francisco", "Los Angeles"]));
+    expect(new Set(c.countries)).toEqual(new Set(["United States"]));
+    expect(c.sources).toEqual([{ source: "fixture", share: 1 }]);
+  });
+
   // The dominant-currency GROUP BY / ORDER BY count() DESC selection must execute against genuinely
   // mixed currencies on real ClickHouse (the shared fixture is all-USD; string-shape unit tests use a
   // mocked client). Seeds its own table (3 USD rows, 1 EUR row) and proves the salary aggregate
