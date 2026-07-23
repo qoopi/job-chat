@@ -30,6 +30,9 @@
   --shell-hover: #dededf;
   --shell-active: #d6d6db;
   --shell-strong: #18181b;
+  /* history card (sidebar) hover: shell-active lifted one notch toward strong. Derived from the shell
+     tokens so it flips with the theme automatically - no dark override needed (043). */
+  --sb-hover: color-mix(in oklab, var(--shell-active) 88%, var(--shell-strong));
 
   /* partner brand colors (hackathon credit) */
   --clickhouse: #ca8a04;
@@ -314,19 +317,35 @@ a:hover {
   overflow: auto;
 }
 .sb-item {
+  /* .sb-item is an <a>; the global a{} rule leaves it display:inline, which paints the row fill as a
+     thin left sliver instead of a filled card (043 sliver + "reads as bare text" root cause). flex
+     makes it a real block card AND stacks the title + date. */
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   padding: 8px 10px;
   border-radius: var(--r-sm);
   font-size: var(--fs-sm);
   color: var(--shell-fg);
   cursor: pointer;
-  /* Each history row reads as a card at rest (operator 039), not bare text on the shell. */
-  background: var(--shell-hover);
+  /* REST: a visible card - a clear step off the sidebar bg (#111113) + a hairline border (operator 043). */
+  background: var(--shell-active);
+  border: 1px solid var(--shell-border);
+  transition:
+    background 0.13s ease,
+    border-color 0.13s ease;
 }
 .sb-item:hover {
-  background: var(--shell-active);
+  /* HOVER: the surface lifts a notch and the edge sharpens - distinct from both rest and active. */
+  background: var(--sb-hover);
+  border-color: var(--border-strong);
 }
 .sb-item.active {
-  background: var(--shell-active);
+  /* ACTIVE: the open conversation is accent-tied (the app's selected-state language), strong title -
+     clearly distinct from hover (039 review nit: hover must not equal active). Ordered after :hover so
+     it wins at equal specificity when the active row is also hovered. */
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
   color: var(--shell-strong);
 }
 .sb-item time {
@@ -681,6 +700,9 @@ a:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Reserve the kebab's top-right corner so a long title ellipsizes before it, never under it, and a
+     short "#1" title still sits clear of the kebab (043 requirement 3). */
+  padding-right: 20px;
 }
 
 /* ---------- buttons ---------- */
