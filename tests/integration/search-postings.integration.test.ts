@@ -38,6 +38,7 @@ function row(over: Partial<PostingRow> & Pick<PostingRow, "external_id" | "title
     salary_max: null,
     salary_currency: null,
     published_at: "2026-07-10 10:00:00",
+    apply_url: "",
     ingested_at: INGESTED,
     ...over,
   };
@@ -45,7 +46,7 @@ function row(over: Partial<PostingRow> & Pick<PostingRow, "external_id" | "title
 
 const ROWS: PostingRow[] = [
   // A: title 3 hits (cap 2 -> 6) + senior(2) + Berlin(2) + remote(1) + salary 200k>=150k(1) = 12
-  row({ external_id: "A", title: "Senior Backend Engineer", company: "Google", city: "Berlin", location_kind: "remote", experience_level: "Senior", salary_min: 160000, salary_max: 200000, salary_currency: "USD", published_at: "2026-07-18 10:00:00" }),
+  row({ external_id: "A", title: "Senior Backend Engineer", company: "Google", city: "Berlin", location_kind: "remote", experience_level: "Senior", salary_min: 160000, salary_max: 200000, salary_currency: "USD", published_at: "2026-07-18 10:00:00", apply_url: "https://careers.google.com/jobs/results/A" }),
   // B: title 2 hits (6) + Staff->lead != senior(0) + Berlin(2) + remote(1) + salary 210k(1) = 10
   row({ external_id: "B", title: "Backend Engineer", company: "Google", city: "Berlin", location_kind: "remote", experience_level: "Staff", salary_min: 170000, salary_max: 210000, salary_currency: "USD", published_at: "2026-07-17 10:00:00" }),
   // C: title 2 hits (6) + senior(2) + Munich != Berlin(0) + hybrid not remote(0) + salary 180k(1) = 9
@@ -101,10 +102,10 @@ describe.skipIf(!hasCreds)("searchPostings scores + orders by the fixed formula 
   it("maps the row fields (remote boolean, null salary -> null, raw experience, city passthrough)", async () => {
     const res = await analytics.searchPostings({ ...PARAMS, limit: 50 });
     const a = res.rows[0];
-    expect(a).toMatchObject({ company: "Google", city: "Berlin", remote: true, salaryMin: 160000, salaryMax: 200000, experience: "Senior" });
-    // Cloud Engineer (G): remote, null salary reads null (never 0), Berlin.
+    expect(a).toMatchObject({ company: "Google", city: "Berlin", remote: true, salaryMin: 160000, salaryMax: 200000, experience: "Senior", applyUrl: "https://careers.google.com/jobs/results/A" });
+    // Cloud Engineer (G): remote, null salary reads null (never 0), Berlin; no apply link -> "" (never null).
     const g = res.rows.find((r) => r.title === "Cloud Engineer")!;
-    expect(g).toMatchObject({ remote: true, salaryMin: null, salaryMax: null, city: "Berlin" });
+    expect(g).toMatchObject({ remote: true, salaryMin: null, salaryMax: null, city: "Berlin", applyUrl: "" });
     // Senior Engineer (C): hybrid -> remote false; Munich passthrough.
     const c = res.rows.find((r) => r.title === "Senior Engineer")!;
     expect(c).toMatchObject({ remote: false, city: "Munich" });

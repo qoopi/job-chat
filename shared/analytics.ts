@@ -275,7 +275,8 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "  salary_min,",
         "  salary_max,",
         "  salary_currency,",
-        "  toString(published_at) AS published_at",
+        "  toString(published_at) AS published_at,",
+        "  apply_url",
         `FROM ${table} FINAL`,
         where,
         "ORDER BY published_at DESC, external_id DESC",
@@ -559,6 +560,7 @@ export function buildSearchPostingsSql(
     "  salary_max,",
     "  experience,",
     "  publishedAt,",
+    "  apply_url,",
     "  score",
     "FROM (",
     "  SELECT",
@@ -571,6 +573,7 @@ export function buildSearchPostingsSql(
     "    experience_level AS experience,",
     "    toString(published_at) AS publishedAt,",
     "    published_at,",
+    "    apply_url,",
     `    ${score} AS score`,
     `  FROM ${table} FINAL`,
     `  WHERE ${scope}`,
@@ -783,6 +786,7 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
       salaryMax: r.salary_max == null ? null : Number(r.salary_max),
       experience: String(r.experience),
       publishedAt: String(r.publishedAt),
+      applyUrl: r.apply_url == null ? "" : String(r.apply_url),
       score: Number(r.score),
     }));
     const total = metaRows.reduce((sum, m) => sum + Number(m.c), 0);

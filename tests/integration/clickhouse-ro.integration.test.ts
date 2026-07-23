@@ -22,6 +22,7 @@ const sampleRow: PostingRow = {
   salary_max: null,
   salary_currency: null,
   published_at: "2026-07-18 00:00:00",
+  apply_url: "",
   ingested_at: "2026-07-18 00:00:00",
 };
 
