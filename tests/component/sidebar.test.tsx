@@ -258,6 +258,9 @@ describe("kebab menu (039)", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     const input = screen.getByRole("textbox", { name: /Rename Top companies hiring/ }) as HTMLInputElement;
     expect(input.value).toBe("Top companies hiring"); // seeded with the current title
+    // 040 rider (039 nit-1): the input caps at the same 120 the server's TitleSchema enforces (no silent
+    // over-typing past the cap the store would trim anyway).
+    expect(input.maxLength).toBe(120);
 
     // Esc cancels: no save, input gone.
     fireEvent.keyDown(input, { key: "Escape" });
@@ -302,6 +305,26 @@ describe("kebab menu (039)", () => {
   test("a guest sidebar has no kebab affordance", () => {
     render(<Sidebar signedIn={false} />);
     expect(screen.queryByRole("button", { name: /^Options for / })).toBeNull();
+  });
+
+  // 040 rider (039 nit-2): the kebab's accessible name must fall back like the VISIBLE title does
+  // (an empty/whitespace title renders "New chat"), so the options button never reads "Options for  (id)".
+  test("the kebab aria-label falls back to 'New chat' for an empty title (mirrors the visible pill)", () => {
+    const emptyTitled = [
+      { id: convs[0].id, title: "", created_at: ago(3_600_000) },
+    ];
+    render(
+      <Sidebar
+        signedIn
+        conversations={emptyTitled}
+        activeId={convs[0].id}
+        onRenameConversation={vi.fn()}
+        onDeleteConversation={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /^Options for New chat/ }),
+    ).toBeTruthy();
   });
 });
 

@@ -123,6 +123,20 @@ export function ChatClient({
   // `status` off "ready". `pending = isStreaming(status) || awaiting`; the send/attach `finally` clears it, never stuck.
   const [awaiting, setAwaiting] = useState(false);
   const started = useRef(false);
+  // Cold-start warm (AC-2, register #11): once per mount, warm the Trigger session for the conversation the
+  // first send will use, so the agent's boot overlaps mount/typing rather than stacking after the send.
+  // Skipped where it would be junk or pointless: e2e (the mock owns no session), a `/chat/new` shell (its id
+  // is a placeholder the first send discards when it mints the real conversation), and a resuming mount
+  // (already live). Ref-guarded so a re-render / StrictMode double-invoke never double-warms. `preload` runs
+  // the SDK's startSession (createStartSessionAction) - a Trigger session only, so it writes no PG row.
+  const preloaded = useRef(false);
+  useEffect(() => {
+    if (preloaded.current) return;
+    preloaded.current = true;
+    if (e2e || newChat || resume) return;
+    void transport.preload?.(conversationId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // F3 auto-continue: the fit question an invite card interrupted. Armed ONLY when an invite is the trailing
   // assistant turn at the moment the profile flow starts; consumed exactly once (nulled BEFORE the send).
   const autoContinueRef = useRef<string | null>(null);
