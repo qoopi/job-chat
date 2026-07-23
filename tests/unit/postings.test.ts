@@ -193,53 +193,52 @@ describe("PostingSchema externalApplyUrl boundary", () => {
   });
 });
 
-describe("PostingSchema roles boundary (forward-compatible default)", () => {
-  it("defaults an ABSENT roles field to [] (the pre-ship payload) and projects empty arrays", () => {
-    // base carries no roles field at all - the pre-ship reality. It must parse and project to empty
-    // arrays so matching falls to the title-term path (unchanged behavior).
+describe("PostingSchema roles boundary (forward-compatible default, name-keyed)", () => {
+  it("defaults an ABSENT roles field to [] (the pre-ship payload) and projects an empty name array", () => {
+    // base carries no roles field at all - the pre-ship reality. It must parse and project to an empty
+    // array so matching falls to the title-term path (unchanged behavior).
     const result = PostingSchema.safeParse(base);
     expect(result.success).toBe(true);
     expect((result.data as Posting).roles).toEqual([]);
     const row = mapPostingToRow(result.data as Posting, ingestedAt);
-    expect(row.role_ids).toEqual([]);
     expect(row.role_names).toEqual([]);
+    expect(row).not.toHaveProperty("role_ids"); // the untrustworthy 64-bit id is never stored
   });
 
-  it("parses an explicit empty roles array (an unclassified item) to empty projections", () => {
+  it("parses an explicit empty roles array (an unclassified item) to an empty name array", () => {
     const result = PostingSchema.safeParse({ ...base, roles: [] });
     expect(result.success).toBe(true);
     const row = mapPostingToRow(result.data as Posting, ingestedAt);
-    expect(row.role_ids).toEqual([]);
     expect(row.role_names).toEqual([]);
   });
 
-  it("projects populated roles to parallel id/name arrays", () => {
+  it("projects populated roles to the role NAMES (order preserved), dropping the id", () => {
     const result = PostingSchema.safeParse({
       ...base,
       roles: [
-        { id: 12, name: "Backend Engineer" },
+        // A real-shaped 64-bit id JSON.parse would round; we ignore it and key on the name.
+        { id: 2223409607917404583, name: "Backend Engineer" },
         { id: 45, name: "Platform Engineer" },
       ],
     });
     expect(result.success).toBe(true);
     const row = mapPostingToRow(result.data as Posting, ingestedAt);
-    expect(row.role_ids).toEqual([12, 45]);
     expect(row.role_names).toEqual(["Backend Engineer", "Platform Engineer"]);
+    expect(row).not.toHaveProperty("role_ids");
   });
 
-  it("dedupes roles by id (first name per id wins), preserving order", () => {
+  it("dedupes roles by name (first wins), preserving order", () => {
     const row = mapPostingToRow(
       {
         ...base,
         roles: [
           { id: 12, name: "Backend Engineer" },
-          { id: 12, name: "Backend Engineer (dupe)" },
+          { id: 99, name: "Backend Engineer" },
           { id: 7, name: "Data Scientist" },
         ],
       },
       ingestedAt,
     );
-    expect(row.role_ids).toEqual([12, 7]);
     expect(row.role_names).toEqual(["Backend Engineer", "Data Scientist"]);
   });
 
@@ -250,7 +249,6 @@ describe("PostingSchema roles boundary (forward-compatible default)", () => {
     });
     expect(result.success).toBe(true);
     const row = mapPostingToRow(result.data as Posting, ingestedAt);
-    expect(row.role_ids).toEqual([12]);
     expect(row.role_names).toEqual(["Backend Engineer"]);
   });
 });

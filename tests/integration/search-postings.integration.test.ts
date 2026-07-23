@@ -39,7 +39,6 @@ function row(over: Partial<PostingRow> & Pick<PostingRow, "external_id" | "title
     salary_currency: null,
     published_at: "2026-07-10 10:00:00",
     apply_url: "",
-    role_ids: [],
     role_names: [],
     ingested_at: INGESTED,
     ...over,
@@ -155,23 +154,23 @@ describe.skipIf(!hasCreds)("searchPostings scores + orders by the fixed formula 
 });
 
 // The POPULATED role path (fixtures, not live data - roles are not deployed yet). A phrase resolves to a
-// canonical role id against the corpus's own role arrays, then has(role_ids, id) is the primary match
-// signal: a posting whose TITLE never mentions the role is still found via its id, an unclassified row
-// falls to the title fallback, and a differently-classified row is excluded. The SAME table also proves
-// FORWARD-COMPAT: passing role phrases with all role_ids EMPTY resolves nothing and matches title-only.
+// canonical role NAME against the corpus's own role_names arrays, then has(role_names, name) - case
+// insensitive - is the primary match signal: a posting whose TITLE never mentions the role is still found
+// via its role name, an unclassified row falls to the title fallback, and a differently-classified row is
+// excluded. The SAME table also proves FORWARD-COMPAT: passing role phrases that resolve to NO corpus name
+// resolves nothing and matches title-only.
 const ROLE_TABLE = "postings_rolematch_test";
-const BACKEND_ID = 12;
-const DATASCI_ID = 7;
 
-// role_ids/role_names populated on the classified rows; the id names ("Backend Engineer") are what the
-// resolve LIKE matches, and are DELIBERATELY absent from the titles so id-match (not title) is the signal.
+// role_names populated on the classified rows; the names ("Backend Engineer") are what the resolve LIKE
+// matches, and are DELIBERATELY absent from the titles so the role name (not the title) is the signal. A
+// mixed-casing name ("backend ENGINEER") proves the match lowers both sides.
 const ROLE_ROWS: PostingRow[] = [
-  // Classified Backend Engineer (id 12); title says "Platform Wizard" - NO "backend" token. Found via id.
-  row({ external_id: "R1", title: "Platform Wizard", company: "Google", role_ids: [BACKEND_ID], role_names: ["Backend Engineer"] }),
-  // Classified Data Scientist (id 7); must NOT match a "backend engineer" phrase (classified miss, no fallback).
-  row({ external_id: "R2", title: "Number Cruncher", company: "Meta", role_ids: [DATASCI_ID], role_names: ["Data Scientist"] }),
-  // Unclassified (empty role_ids) but the TITLE carries "Backend": found via the title-term fallback.
-  row({ external_id: "R3", title: "Backend Ninja", company: "Stripe", role_ids: [], role_names: [] }),
+  // Classified Backend Engineer (mixed casing); title says "Platform Wizard" - NO "backend" token. Found via name.
+  row({ external_id: "R1", title: "Platform Wizard", company: "Google", role_names: ["backend ENGINEER"] }),
+  // Classified Data Scientist; must NOT match a "backend engineer" phrase (classified miss, no fallback).
+  row({ external_id: "R2", title: "Number Cruncher", company: "Meta", role_names: ["Data Scientist"] }),
+  // Unclassified (empty role_names) but the TITLE carries "Backend": found via the title-term fallback.
+  row({ external_id: "R3", title: "Backend Ninja", company: "Stripe", role_names: [] }),
 ];
 
 describe.skipIf(!hasCreds)("searchPostings role-IN matching (populated fixtures)", () => {
@@ -191,15 +190,16 @@ describe.skipIf(!hasCreds)("searchPostings role-IN matching (populated fixtures)
     await writer.close();
   });
 
-  it("finds a title-mismatched posting via its resolved role id (role-IN is the primary signal)", async () => {
+  it("finds a title-mismatched posting via its resolved role NAME (role-IN is the primary signal)", async () => {
     const res = await analytics.searchPostings({ titleTerms: ["backend"], roles: ["backend engineer"], limit: 50 });
     const found = res.rows.map((r) => r.title);
-    // R1 (id-match, title has no "backend") + R3 (title fallback, unclassified). R2 (Data Scientist) excluded.
-    expect(found).toContain("Platform Wizard"); // the flagship: matched purely on role_ids, not the title
+    // R1 (name-match, title has no "backend") + R3 (title fallback, unclassified). R2 (Data Scientist) excluded.
+    expect(found).toContain("Platform Wizard"); // the flagship: matched purely on role name, not the title
     expect(found).toContain("Backend Ninja"); // unclassified -> title fallback still works
     expect(found).not.toContain("Number Cruncher"); // classified as something else -> not a role match
     expect(res.total).toBe(2);
-    // Role-IN scores at full weight-3 term (6); the title fallback hit scores 3.
+    // Role-IN scores at full weight-3 term (6); the title fallback hit scores 3. R1's stored name is
+    // "backend ENGINEER" (mixed casing) yet still matches - both sides are lowered.
     const r1 = res.rows.find((r) => r.title === "Platform Wizard")!;
     const r3 = res.rows.find((r) => r.title === "Backend Ninja")!;
     expect(r1.score).toBe(6);
@@ -217,7 +217,7 @@ describe.skipIf(!hasCreds)("searchPostings role-IN matching (populated fixtures)
     const titleOnly = await analytics.searchPostings({ titleTerms: ["backend"], limit: 50 });
     expect(withUnresolvablePhrase.rows.map((r) => r.title)).toEqual(titleOnly.rows.map((r) => r.title));
     expect(withUnresolvablePhrase.total).toBe(titleOnly.total);
-    // Only the title-bearing row matches; the id-only classified row is NOT surfaced when nothing resolved.
+    // Only the title-bearing row matches; the name-classified row is NOT surfaced when nothing resolved.
     expect(titleOnly.rows.map((r) => r.title)).toEqual(["Backend Ninja"]);
   });
 });

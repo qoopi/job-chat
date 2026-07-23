@@ -15,8 +15,10 @@ export const LocationSchema = z.object({
   kind: z.number().nullish(),
 });
 
-// A canonical role the jobs-api tags a posting with. Unknown fields on the wire are stripped (the object
-// is not .strict), so an evolving role shape never fails a batch.
+// A canonical role the jobs-api tags a posting with. The id is TOLERATED but never used for logic: it is
+// a 64-bit integer JSON.parse silently rounds past the JS safe-integer limit, so only the name (a
+// canonical unique string) is trustworthy. Unknown fields are stripped (not .strict) so an evolving role
+// shape never fails a batch.
 export const RoleSchema = z.object({
   id: z.number(),
   name: z.string(),
@@ -74,9 +76,9 @@ export interface PostingRow {
   published_at: string;
   // The apply link-out; empty string when the item carried none (the CH column is non-nullable, DEFAULT '').
   apply_url: string;
-  // The canonical role ids/names, deduped by id and kept as parallel arrays (id[i] pairs with name[i]).
-  // Empty for an unclassified posting. role_ids drives the role-IN match; both feed the roles dimension.
-  role_ids: number[];
+  // The canonical role NAMES (deduped, order preserved), empty for an unclassified posting. Names are the
+  // matching key: the role id on the wire is a 64-bit integer that JSON.parse silently rounds past the JS
+  // safe-integer limit, so it is never trustworthy - the name (a canonical unique string) drives matching.
   role_names: string[];
   ingested_at: string;
 }
@@ -91,14 +93,13 @@ export function mapPostingToRow(posting: Posting, ingestedAt: Date): PostingRow 
   // Single location columns: keep the first, drop the rest.
   const loc = posting.locations[0];
   const salary = posting.salary;
-  // Project roles to parallel id/name arrays, deduped by id (first name per id wins), order preserved.
-  const seenRole = new Set<number>();
-  const roleIds: number[] = [];
+  // Project the canonical role NAMES, deduped (first wins) and order-preserved. The wire id is a 64-bit
+  // integer JSON.parse rounds past the JS safe-integer limit, so it is dropped - the name is the key.
+  const seenRole = new Set<string>();
   const roleNames: string[] = [];
   for (const role of posting.roles) {
-    if (seenRole.has(role.id)) continue;
-    seenRole.add(role.id);
-    roleIds.push(role.id);
+    if (seenRole.has(role.name)) continue;
+    seenRole.add(role.name);
     roleNames.push(role.name);
   }
   return {
@@ -117,7 +118,6 @@ export function mapPostingToRow(posting: Posting, ingestedAt: Date): PostingRow 
     salary_currency: salary?.currency ?? null,
     published_at: toChDateTime(posting.publishedAt),
     apply_url: posting.externalApplyUrl ?? "",
-    role_ids: roleIds,
     role_names: roleNames,
     ingested_at: toChDateTime(ingestedAt),
   };
