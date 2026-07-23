@@ -281,6 +281,12 @@ function requestProfileTool(deps: CatalogDeps) {
     inputSchema: z.object({}).strict(),
     execute: async (_input, { toolCallId }) => {
       const id = toolCallId;
+      // F7 guardrail: a profile is already on file (the PROFILE note forbids reaching here, but the model
+      // sometimes does). Emit NO card and steer to search_postings so the owner is matched in THIS turn -
+      // reuse the profile already in deps, never a second DB read.
+      if (deps.profile) {
+        return { invite: null, note: "A profile is already on file - do NOT invite. Call search_postings with the profile's titles to match now." };
+      }
       // Fail-safe: an unknown identity gets the guest (sign-in) card - the server decides, never the model.
       const kind: CallerKind = deps.callerKind ?? "guest";
       if (kind === "guest") {

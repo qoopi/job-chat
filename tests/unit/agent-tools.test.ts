@@ -377,4 +377,21 @@ describe("Should_EmitInvitePart_When_RequestProfileRuns (AC-1, callerKind branch
     await tools.request_profile.execute!({}, opts);
     expect(emitted[0]).toMatchObject({ type: "data-auth-invite" });
   });
+
+  // F7: the live wrong beat - an account owner WITH a saved profile asked "find me a job that fits" and the
+  // model still called request_profile, emitting an invite (a dead end - it already has a profile). The tool
+  // must guardrail on the profile already in deps: emit NO card and steer to search_postings in the same turn.
+  it("emits NO card and steers to search_postings when a profile is already on file (F7)", async () => {
+    const emitted: EmitPart[] = [];
+    const tools = buildCatalogTools({
+      analytics: {} as Analytics,
+      emit: (p) => emitted.push(p),
+      callerKind: "account",
+      profile: PROFILE,
+    });
+    const out = await tools.request_profile.execute!({}, opts);
+    expect(emitted).toEqual([]); // never an invite when a profile exists
+    expect((out as { invite: unknown }).invite).toBeNull();
+    expect(String((out as { note: string }).note)).toMatch(/search_postings/i);
+  });
 });
