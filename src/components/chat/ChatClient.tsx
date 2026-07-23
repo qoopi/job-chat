@@ -563,6 +563,7 @@ export function ChatClient({
             conversationId={conversationId}
             e2e={e2e}
             onClose={closeProfile}
+            onFindJob={() => void send("Find me a job that fits")}
             onProfileSaved={onProfileSaved}
             onProfileDeleted={onProfileDeleted}
           />

@@ -188,6 +188,35 @@ describe("ProfileExpanded (detail panel, read-only)", () => {
     // all OSS highlights in the expanded view
     expect(screen.getByText("· ClickHouse migration CLI")).toBeTruthy();
   });
+
+  // 039: skills split by source - github/both are "proven in code" accent tags, resume-only is a claimed chip.
+  test("splits skills by source into proven-in-code vs from-the-resume", () => {
+    render(<ProfileExpanded profile={profile} />);
+    const provenSection = screen.getByText("Skills — proven in code").parentElement as HTMLElement;
+    expect(within(provenSection).getByText("ClickHouse")).toBeTruthy(); // source github
+    expect(within(provenSection).getByText("Go")).toBeTruthy(); // source both
+    expect(within(provenSection).queryByText("Python")).toBeNull();
+    const claimedSection = screen.getByText("Skills — from the resume").parentElement as HTMLElement;
+    expect(within(claimedSection).getByText("Python")).toBeTruthy(); // source resume
+  });
+
+  // 039: the experience list collapses after 2 roles behind a "Show N more".
+  test("experience list shows the first 2 roles, the rest behind a Show-N-more collapse", () => {
+    const threeRoles: Profile = {
+      ...profile,
+      experience: [
+        { title: "Role One", company: "A", years: "2024-2026", bullets: ["x"] },
+        { title: "Role Two", company: "B", years: "2022-2024", bullets: ["y"] },
+        { title: "Role Three", company: "C", years: "2020-2022", bullets: ["z"] },
+      ],
+    };
+    render(<ProfileExpanded profile={threeRoles} />);
+    expect(screen.getByText("Role One")).toBeTruthy();
+    expect(screen.getByText("Role Two")).toBeTruthy();
+    expect(screen.queryByText("Role Three")).toBeNull(); // hidden behind the collapse
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 more role ↓" }));
+    expect(screen.getByText("Role Three")).toBeTruthy();
+  });
 });
 
 describe("PostingsCard", () => {
@@ -666,6 +695,50 @@ describe("DetailProfile error state (poll contract)", () => {
 
     expect(await screen.findByText("Couldn’t build the profile")).toBeTruthy();
     expect(screen.getByText("Your previous profile is untouched.")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 039 item 3: when extraction completes while the panel is open (saving state), the panel transitions
+// to the FULL read-only profile automatically - identity header, source ticks, skills split by source,
+// experience, OSS - keeping "Find me a job that fits" + "Edit & re-save" wired; still display-only.
+// ---------------------------------------------------------------------------------------------------
+describe("post-parse full profile (039 item 3)", () => {
+  test("saving transitions to the full profile view with Find/Edit wired and no editing surfaces", async () => {
+    vi.mocked(getMyProfile).mockResolvedValue(null); // empty form, and the build()'s prior-capture read
+    vi.mocked(saveProfile).mockResolvedValueOnce({ ok: true, taskState: "queued", runId: "run_z" });
+    vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "saved", profile, githubUsername: "octocat" });
+    const onFindJob = vi.fn();
+    render(
+      <DetailProfile
+        conversationId={CONVERSATION_ID}
+        onClose={vi.fn()}
+        onFindJob={onFindJob}
+        onProfileSaved={vi.fn()}
+        onProfileDeleted={vi.fn()}
+      />,
+    );
+
+    // Kick a build from the empty form; the SavingState shows while the poll runs.
+    await screen.findByText("No profile yet");
+    fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "octocat" } });
+    fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
+
+    // Lands on the full profile: confirmation + identity header (headline role) + skills split + experience + all OSS.
+    expect(await screen.findByText("Profile saved ✓")).toBeTruthy();
+    // The identity header is the profile-form's first div (the headline role also recurs as an experience title).
+    expect((document.querySelector(".profile-form > div") as HTMLElement).textContent).toBe("Senior Backend Engineer");
+    expect(screen.getByText("Skills — proven in code")).toBeTruthy();
+    expect(screen.getByText("Skills — from the resume")).toBeTruthy();
+    expect(screen.getByText("Experience — from the resume")).toBeTruthy();
+    expect(screen.getByText("· ClickHouse migration CLI")).toBeTruthy(); // OSS list (not just the first)
+
+    // "Find me a job that fits" is wired; "Edit & re-save" is kept; display-only (no salary/location inputs).
+    fireEvent.click(screen.getByRole("button", { name: "Find me a job that fits" }));
+    expect(onFindJob).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Edit & re-save" })).toBeTruthy();
+    expect(screen.queryByLabelText(/salary/i)).toBeNull();
+    expect(screen.queryByLabelText(/location/i)).toBeNull();
   });
 });
 
