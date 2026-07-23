@@ -151,4 +151,43 @@ describe("mapPostingToRow", () => {
     expect(row.employment_type).toBe("");
     expect(row.experience_level).toBe("");
   });
+
+  it("projects a present externalApplyUrl onto apply_url (the link-out source)", () => {
+    const url = "https://www.google.com/about/careers/applications/jobs/results/1";
+    const row = mapPostingToRow({ ...base, externalApplyUrl: url }, ingestedAt);
+    expect(row.apply_url).toBe(url);
+  });
+
+  it("defaults apply_url to an empty string when the item carries no externalApplyUrl (CH column is non-nullable)", () => {
+    const row = mapPostingToRow(base, ingestedAt);
+    expect(row.apply_url).toBe("");
+  });
+});
+
+describe("PostingSchema externalApplyUrl boundary", () => {
+  it("accepts a valid https apply url", () => {
+    const result = PostingSchema.safeParse({
+      ...base,
+      externalApplyUrl: "https://careers.example.com/jobs/42",
+    });
+    expect(result.success).toBe(true);
+    const row = mapPostingToRow(result.data as Posting, ingestedAt);
+    expect(row.apply_url).toBe("https://careers.example.com/jobs/42");
+  });
+
+  it("tolerates an absent externalApplyUrl (nullish - the field is optional on the wire)", () => {
+    expect(PostingSchema.safeParse(base).success).toBe(true);
+    expect(PostingSchema.safeParse({ ...base, externalApplyUrl: null }).success).toBe(true);
+  });
+
+  it("rejects a junk (non-URL) externalApplyUrl at the boundary (never store a dead link)", () => {
+    const result = PostingSchema.safeParse({ ...base, externalApplyUrl: "not-a-url" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an over-long url past the 2048 cap (bounded-string discipline)", () => {
+    const tooLong = `https://example.com/${"a".repeat(2100)}`;
+    const result = PostingSchema.safeParse({ ...base, externalApplyUrl: tooLong });
+    expect(result.success).toBe(false);
+  });
 });

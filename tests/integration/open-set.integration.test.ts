@@ -28,6 +28,7 @@ function row(overrides: Partial<PostingRow> & Pick<PostingRow, "external_id" | "
     salary_max: 190000,
     salary_currency: "USD",
     published_at: "2026-07-17 09:00:00",
+    apply_url: "",
     ...overrides,
   };
 }

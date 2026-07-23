@@ -22,8 +22,25 @@ function formatCell(key: string, value: string | number | null, currency: string
   return value;
 }
 
+// The posting apply link rides as an ordinary row field but is NEVER its own column: it turns the role
+// cell into a new-tab link. A postings table (latest_postings) is the only one that carries it; every other
+// table lacks the key and renders exactly as before.
+const APPLY_KEY = "apply_url";
+
+/** A non-empty apply link on this row, else "". */
+function applyLinkOf(row: DataPoint): string {
+  const v = row[APPLY_KEY];
+  return typeof v === "string" ? v : "";
+}
+
 export function DataTable({ rows, currency = "USD" }: { rows: DataPoint[]; currency?: string }) {
-  const columns = useMemo(() => (rows[0] ? Object.keys(rows[0]) : []), [rows]);
+  // Drop apply_url from the visible columns; it links the role cell instead. Prefer the `title` column as
+  // the link anchor (its column in latest_postings), falling back to the first column.
+  const columns = useMemo(
+    () => (rows[0] ? Object.keys(rows[0]).filter((k) => k !== APPLY_KEY) : []),
+    [rows],
+  );
+  const linkColumn = columns.includes("title") ? "title" : columns[0];
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [dir, setDir] = useState<Dir>("none");
 
@@ -73,15 +90,27 @@ export function DataTable({ rows, currency = "USD" }: { rows: DataPoint[]; curre
           </tr>
         </thead>
         <tbody>
-          {sorted.map((row, i) => (
-            <tr key={i}>
-              {columns.map((key) => (
-                <td key={key} className={typeof row[key] === "number" ? "r" : ""}>
-                  {formatCell(key, row[key], currency)}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {sorted.map((row, i) => {
+            const link = applyLinkOf(row);
+            return (
+              <tr key={i}>
+                {columns.map((key) => {
+                  const cell = formatCell(key, row[key], currency);
+                  return (
+                    <td key={key} className={typeof row[key] === "number" ? "r" : ""}>
+                      {key === linkColumn && link ? (
+                        <a href={link} target="_blank" rel="noopener noreferrer">
+                          {cell}
+                        </a>
+                      ) : (
+                        cell
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

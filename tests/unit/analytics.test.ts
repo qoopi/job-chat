@@ -114,6 +114,11 @@ describe("buildTemplateSql", () => {
     );
   });
 
+  it("latest_postings projects apply_url (the link-out column) alongside the entity fields", () => {
+    const { sql } = buildTemplateSql("latest_postings", {}, "postings");
+    expect(sql).toContain("apply_url");
+  });
+
   // Country is a chStr-equality filter on the two v1 templates the composed builder cannot
   // serve (latest_postings is an entity list; salary_distribution is the v1-only histogram shape).
   it("adds a country equality filter to latest_postings (same shape as city)", () => {
@@ -174,6 +179,12 @@ describe("Should_MatchCaseInsensitively_When_CategoricalFilter (044 AC-1, lowerU
   it("search_postings city score term lowers both sides (the third family)", () => {
     const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["engineer"], cities: ["berlin", "MUNICH"] }, "postings");
     expect(rowsSql).toContain("(lowerUTF8(city) IN (lowerUTF8('berlin'), lowerUTF8('MUNICH')))");
+  });
+
+  it("search_postings rows projection carries apply_url through the inner and outer SELECT", () => {
+    const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["engineer"] }, "postings");
+    // Twice: once in the inner scored subquery, once re-selected in the outer projection.
+    expect(rowsSql.match(/apply_url/g)?.length).toBe(2);
   });
 
   // The SELECT / GROUP BY projections keep the ORIGINAL casing (display + stored data untouched) - only

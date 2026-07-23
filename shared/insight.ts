@@ -97,6 +97,9 @@ export const ScoredPostingRowSchema = z
     experience: z.string(),
     publishedAt: z.string(),
     score: z.number(),
+    // The apply link-out. Optional so a pre-backfill persisted snapshot (no apply_url) still parses and
+    // renders unchanged; empty/absent -> plain-text title, present -> a link.
+    applyUrl: z.string().max(2048).optional(),
   })
   .strict();
 export type ScoredPostingRow = z.infer<typeof ScoredPostingRowSchema>;

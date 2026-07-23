@@ -27,6 +27,9 @@ export const PostingSchema = z.object({
   // Require an explicit UTC (`Z`)/offset: a timezone-less string is read as LOCAL by new Date() and shifts;
   // reject it at the boundary (offsets normalize to UTC).
   publishedAt: z.string().datetime({ offset: true }),
+  // The apply/careers-site link the jobs-api attaches per item. Validated (reject junk that would render a
+  // dead link) and capped; nullish so an item that omits it still ingests.
+  externalApplyUrl: z.string().url().max(2048).nullish(),
 });
 
 export type Posting = z.infer<typeof PostingSchema>;
@@ -57,6 +60,8 @@ export interface PostingRow {
   salary_max: number | null;
   salary_currency: string | null;
   published_at: string;
+  // The apply link-out; empty string when the item carried none (the CH column is non-nullable, DEFAULT '').
+  apply_url: string;
   ingested_at: string;
 }
 
@@ -85,6 +90,7 @@ export function mapPostingToRow(posting: Posting, ingestedAt: Date): PostingRow 
     salary_max: salary?.normalizedMax ?? null,
     salary_currency: salary?.currency ?? null,
     published_at: toChDateTime(posting.publishedAt),
+    apply_url: posting.externalApplyUrl ?? "",
     ingested_at: toChDateTime(ingestedAt),
   };
 }

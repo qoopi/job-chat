@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHART_TYPES, DataInsightSchema } from "@shared/insight";
+import { CHART_TYPES, DataInsightSchema, PostingsSchema } from "@shared/insight";
 
 const meta = { sql: "SELECT 1", sampleN: 42, updatedAt: "2026-07-18 06:00:00" };
 
@@ -88,5 +88,35 @@ describe("DataInsightSchema (the data-insight part)", () => {
       meta: { sampleN: 1, updatedAt: "t" },
     };
     expect(DataInsightSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+describe("PostingsSchema apply_url (additive wire field)", () => {
+  const scored = {
+    title: "Senior Backend Engineer",
+    company: "Google",
+    city: "Berlin",
+    remote: true,
+    salaryMin: 160000,
+    salaryMax: 200000,
+    experience: "Senior",
+    publishedAt: "2026-07-18 10:00:00",
+    score: 12,
+  };
+
+  it("accepts a postings part whose rows carry an applyUrl", () => {
+    const part = {
+      kind: "postings",
+      rows: [{ ...scored, applyUrl: "https://careers.example.com/jobs/42" }],
+      total: 1,
+    };
+    const parsed = PostingsSchema.safeParse(part);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("accepts a pre-backfill snapshot whose rows have NO applyUrl (renders unchanged)", () => {
+    const part = { kind: "postings", rows: [scored], total: 1 };
+    const parsed = PostingsSchema.safeParse(part);
+    expect(parsed.success).toBe(true);
   });
 });

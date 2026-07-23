@@ -49,9 +49,9 @@ const EXPECTED_ROWS: Record<string, Record<string, unknown>[]> = {
     { label: "remote", count: 3 },
   ],
   Q7: [
-    { title: "Senior Software Engineer", company: "Google", city: "San Francisco", experience_level: "Senior", salary_min: 150000, salary_max: 190000, salary_currency: "USD", published_at: "2026-07-18 10:00:00" },
-    { title: "Data Scientist", company: "Google", city: "San Francisco", experience_level: "Senior", salary_min: 160000, salary_max: 180000, salary_currency: "USD", published_at: "2026-07-18 08:00:00" },
-    { title: "Senior Engineer", company: "Google", city: "Los Angeles", experience_level: "Senior", salary_min: 140000, salary_max: 160000, salary_currency: "USD", published_at: "2026-07-14 09:00:00" },
+    { title: "Senior Software Engineer", company: "Google", city: "San Francisco", experience_level: "Senior", salary_min: 150000, salary_max: 190000, salary_currency: "USD", published_at: "2026-07-18 10:00:00", apply_url: "https://www.google.com/about/careers/applications/jobs/results/1" },
+    { title: "Data Scientist", company: "Google", city: "San Francisco", experience_level: "Senior", salary_min: 160000, salary_max: 180000, salary_currency: "USD", published_at: "2026-07-18 08:00:00", apply_url: "https://www.google.com/about/careers/applications/jobs/results/7" },
+    { title: "Senior Engineer", company: "Google", city: "Los Angeles", experience_level: "Senior", salary_min: 140000, salary_max: 160000, salary_currency: "USD", published_at: "2026-07-14 09:00:00", apply_url: "" },
   ],
 };
 const EXPECTED_SAMPLE_N: Record<string, number> = { Q1: 3, Q2: 6, Q3: 10, Q4: 10, Q5: 10, Q6: 10, Q7: 3 };
