@@ -197,6 +197,11 @@ export function MessageList({
   const showTrailingIndicator = pending && (!last || last.role === "user" || lastEmptyAssistant);
   // Show the useChat-error card only when a data-error part didn't already stream for the tail (don't double-render); tail => always Retry.
   const showLiveError = liveError && !(last?.role === "assistant" && hasErrorCard(last));
+  // A SETTLED (not pending) unanswered user tail is a failed/abandoned turn: the empty-turn persistence
+  // contract stored no assistant row, so a reload hydrates the bare question. Surface the SAME error card +
+  // Retry the live-error path shows - regenerate() over a user tail keeps it and fires "regenerate-message",
+  // which the run gate answers. Excluded when liveError already owns the tail so the two never double-render.
+  const showFailedTailRetry = !pending && !liveError && last?.role === "user";
 
   return (
     <div className="thread">
@@ -220,7 +225,7 @@ export function MessageList({
           />
         ),
       )}
-      {showLiveError ? (
+      {showLiveError || showFailedTailRetry ? (
         <div className="msg ai">
           <ErrorCard kind="system" onRetry={onRetry} />
         </div>

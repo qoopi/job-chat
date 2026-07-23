@@ -114,12 +114,12 @@ export const jobChatAgent = chat.agent({
     withStore(async (store) =>
       hydrateHistory((await store.getConversation(chatId))?.messages ?? [], incomingMessages),
     ),
-  // Persist the assistant turn on completion - normal, stopped, OR errored. An errored turn fires with
-  // `error` set; persistAssistantTurn synthesizes the error card so a failed turn reloads with Retry.
-  onTurnComplete: async ({ chatId, responseMessage, error }) => {
+  // Persist the assistant turn on completion (normal or stopped). An empty-text errored turn persists
+  // nothing, so its user tail stays unanswered and resume renders the Retry state (no synthesized card).
+  onTurnComplete: async ({ chatId, responseMessage }) => {
     turnOwnerContext.delete(chatId); // drop the per-turn owner-context cache (bounds the map)
     await withStore((store) =>
-      persistAssistantTurn(store, { conversationId: chatId, responseMessage, error }),
+      persistAssistantTurn(store, { conversationId: chatId, responseMessage }),
     );
   },
 });

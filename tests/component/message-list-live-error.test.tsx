@@ -62,9 +62,12 @@ describe("MessageList live error affordance (AC-7 live, SDK-synthesis path)", ()
     expect(container.querySelectorAll(".err-card").length).toBe(1);
   });
 
-  test("no live error card when useChat is not in an error state", () => {
+  test("no live error card when useChat is not in an error state (answered tail)", () => {
+    // Tail is an ANSWERED assistant turn - so neither the live-error card nor the settled failed-tail Retry
+    // card fires. (A settled UNANSWERED user tail now surfaces its own failed-turn card - covered in
+    // message-list.test.tsx's reload-after-failure suite.)
     const { container } = render(
-      <MessageList messages={[userMsg("Q", "u1")]} onRetry={noop} liveError={false} {...base} />,
+      <MessageList messages={[userMsg("Q", "u1"), insightMsg("a1")]} onRetry={noop} liveError={false} {...base} />,
     );
     expect(container.querySelector(".err-card")).toBeNull();
   });

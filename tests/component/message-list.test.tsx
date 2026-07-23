@@ -33,6 +33,13 @@ function userMsg(text: string, id = "u1"): UIMessage {
 const noop = () => {};
 const noSet = new Set<string>();
 const btn = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+const base = { pending: false, usedFollowups: noSet, onFollowup: noop, onOpenDetailPanel: noop };
+const userMsgId = (text: string, id: string): UIMessage => ({ id, role: "user", parts: [{ type: "text", text }] });
+const insightMsg = (id: string): UIMessage => ({
+  id,
+  role: "assistant",
+  parts: [{ type: "data-insight", id: `${id}-c0`, data: insight }],
+});
 
 afterEach(cleanup);
 
@@ -237,10 +244,11 @@ describe("MessageList", () => {
     expect(container.textContent).not.toContain("Something went wrong on my side - please try again.");
   });
 
-  // A SYNTHESIZED failed turn (the errored turn had no response message) persists content "", so the row
-  // hydrates no text part at all - belt and suspenders with the render-layer suppression. (A tool-failure
-  // that DID narrate persists the prose verbatim; the render layer suppresses it - covered above.)
-  test("AC-25 resume: a synthesized error turn (empty content) hydrates with no prose part", () => {
+  // Backward-compat: a LEGACY-persisted error card (empty content, from before the empty-turn flip stopped
+  // persisting failed turns) still hydrates with no text part and renders as the error card - belt and
+  // suspenders with the render-layer suppression. New failed turns persist nothing (see the reload-after-
+  // failure suite); this proves an already-stored error row still renders correctly.
+  test("AC-25 resume: a legacy synthesized error turn (empty content) hydrates with no prose part", () => {
     const stored: StoredMessage[] = [{ id: "a2", role: "assistant", content: "", parts: { kind: "system" } }];
     const messages = storeToUiMessages(stored);
     expect(messages[0].parts).toEqual([{ type: "data-error", id: "a2-card-0", data: { kind: "system" } }]);
@@ -249,10 +257,10 @@ describe("MessageList", () => {
     expect(container.querySelector(".bubble.ai")).toBeNull();
   });
 
-  // A FAILED turn now persists as a turn (a synthesized system error card, content ""), so a
-  // reload resumes it as the error card WITH Retry - not a bare unanswered question. Drives the real
-  // hydration function (storeToUiMessages), the resume path onTurnComplete's error branch feeds.
-  test("Should_ResumeErrorCard_When_FailedTurnReloaded", () => {
+  // Backward-compat: a LEGACY-persisted failed turn (an error card stored before the empty-turn flip) still
+  // resumes as the error card WITH a working Retry. New failed turns persist nothing and resume as a bare
+  // user tail (covered in the reload-after-failure suite); this proves an already-stored error row still works.
+  test("Should_ResumeErrorCard_When_LegacyFailedTurnReloaded", () => {
     const onRetry = vi.fn();
     const stored: StoredMessage[] = [
       { id: "u1", role: "user", content: "Who is hiring the most?", parts: null },
@@ -275,5 +283,52 @@ describe("MessageList", () => {
     expect(screen.getByText(/reached the guest message limit/i)).toBeTruthy();
     expect(container.querySelector(".notice")).toBeTruthy();
     expect(container.querySelector(".err-card")).toBeNull();
+  });
+});
+
+// Under the empty-turn persistence contract a FAILED turn persists NO assistant row, so a reload of a failed
+// turn hydrates as a bare unanswered user tail (no error card in the store). MessageList surfaces the SAME
+// error card + Retry from that settled user tail - the reload-after-failure affordance the persisted error
+// card used to provide. Retry routes through onRetry -> regenerate(); regenerate() over a user tail keeps the
+// question and fires trigger "regenerate-message", which the run gate answers (deleteTrailingAssistant no-ops).
+describe("MessageList reload-after-failure Retry (settled unanswered user tail)", () => {
+  test("Should_ShowRetry_When_SettledTailIsUnansweredUser", () => {
+    const onRetry = vi.fn();
+    render(<MessageList messages={[userMsgId("Who is hiring?", "u1")]} onRetry={onRetry} {...base} />);
+    expect(screen.getByText("Something went wrong on my side - try again")).toBeTruthy();
+    fireEvent.click(btn("Retry"));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  test("Should_ShowRetry_When_ReloadedFailedTurnHasUserTail (real hydration shape)", () => {
+    const onRetry = vi.fn();
+    const stored: StoredMessage[] = [{ id: "u1", role: "user", content: "Median salary in SF?", parts: null }];
+    render(<MessageList messages={storeToUiMessages(stored)} onRetry={onRetry} {...base} />);
+    expect(screen.getByText("Median salary in SF?")).toBeTruthy(); // the question survives
+    fireEvent.click(btn("Retry"));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  test("Should_NotShowRetry_When_TailIsAnsweredAssistant", () => {
+    render(<MessageList messages={[userMsgId("Q", "u1"), insightMsg("a1")]} onRetry={noop} {...base} />);
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(); // nothing failed - no Retry
+  });
+
+  test("Should_NotShowRetry_When_UserTailIsPending", () => {
+    const { container } = render(
+      <MessageList messages={[userMsgId("Q", "u1")]} onRetry={noop} {...base} pending />,
+    );
+    // While the turn is in flight the trailing indicator stands in, never a premature Retry.
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(container.querySelector(".answering")).toBeTruthy();
+  });
+
+  test("Should_NotShowRetry_When_LiveErrorAlreadyOwnsTheUserTail", () => {
+    // An in-session SDK error already surfaces the live error card + Retry off the user tail; the settled
+    // affordance must not double-render on top of it.
+    const { container } = render(
+      <MessageList messages={[userMsgId("Q", "u1")]} onRetry={noop} liveError {...base} />,
+    );
+    expect(container.querySelectorAll(".err-card").length).toBe(1);
   });
 });

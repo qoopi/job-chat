@@ -16,7 +16,8 @@ import {
   refusalPart,
   toModelOutput,
 } from "../../trigger/parts";
-import { extractAssistantPersistence } from "../../trigger/persistence";
+import { extractAssistantPersistence, persistAssistantTurn } from "../../trigger/persistence";
+import type { Store } from "@shared/store";
 
 // Synthetic query results mirroring the reference fixture's hand-computed rows (tests/fixtures), so the
 // pure part-building is unit-testable without a ClickHouse client. The live 7/7 run lives in the
@@ -513,6 +514,73 @@ describe("extractAssistantPersistence pulls the persisted content + card payload
       parts: [{ type: "data-refusal", id: "r1", data: { reason: "too_long" } }],
     };
     expect(extractAssistantPersistence(message).parts).toEqual({ reason: "too_long" });
+  });
+});
+
+// Live defect (2026-07-21): a turn whose every tool call timed out completed with NO final text, and
+// the empty assistant row it persisted (a) lost the streamed prose on reload and (b) would make the
+// run's redelivery guard read the turn as "already answered" - blocking a legitimate Retry. So an
+// empty-text turn persists NOTHING: the tail stays the unanswered user row and resume renders the
+// retry state.
+describe("Should_PersistNoAssistantRow_When_TurnFinalTextEmpty (persistAssistantTurn)", () => {
+  function recordingStore() {
+    const appended: Array<{ role: string; content: string; parts: unknown }> = [];
+    const store = {
+      appendMessage: async (_conversationId: string, role: string, content: string, parts: unknown) => {
+        appended.push({ role, content, parts });
+        return { role, content, parts } as never;
+      },
+    } as unknown as Store;
+    return { store, appended };
+  }
+
+  it("skips the insert when the tool-failure turn produced no text and no persistable card", async () => {
+    const { store, appended } = recordingStore();
+    // The live shape: the skeleton was never superseded (every query timed out), so extraction yields
+    // content "" and a null payload - nothing worth a row.
+    const responseMessage = {
+      role: "assistant",
+      parts: [{ type: "data-insight", id: "call-1", data: buildSkeleton("call-1", "top_companies") }],
+    };
+    await persistAssistantTurn(store, { conversationId: "c1", responseMessage });
+    expect(appended).toEqual([]);
+  });
+
+  it("skips the insert when the final text is whitespace only", async () => {
+    const { store, appended } = recordingStore();
+    const responseMessage = { role: "assistant", parts: [{ type: "text", text: "  \n " }] };
+    await persistAssistantTurn(store, { conversationId: "c1", responseMessage });
+    expect(appended).toEqual([]);
+  });
+
+  it("skips the insert for an error-card turn (empty content) so Retry never reads as a duplicate", async () => {
+    const { store, appended } = recordingStore();
+    // An error card persists empty content; a persisted assistant tail would make the redelivery
+    // guard skip the Retry regenerate (same envelope, no new user turn) as a duplicate.
+    const responseMessage = {
+      role: "assistant",
+      parts: [{ type: "data-error", id: "call-1", data: { kind: "system" } }],
+    };
+    await persistAssistantTurn(store, { conversationId: "c1", responseMessage });
+    expect(appended).toEqual([]);
+  });
+
+  it("still persists a normal answered turn (a real answer card) with its card payload", async () => {
+    const { store, appended } = recordingStore();
+    const insight = buildInsight({
+      id: "i1",
+      tool: "top_companies",
+      params: {},
+      result: result([{ company: "Google", count: 4 }], 10),
+    });
+    const responseMessage = {
+      role: "assistant",
+      parts: [{ type: "data-insight", id: "i1", data: insight }],
+    };
+    await persistAssistantTurn(store, { conversationId: "c1", responseMessage });
+    // Prose is persisted VERBATIM (text parts only), so a card-only turn stores content "" - the verdict
+    // substitution is buildModelHistory's job, not persistence's - with the full insight as the answer card.
+    expect(appended).toEqual([{ role: "assistant", content: "", parts: insight }]);
   });
 });
 

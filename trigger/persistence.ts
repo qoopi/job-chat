@@ -62,28 +62,27 @@ export function extractAssistantPersistence(message: MessageLike): {
   return { content, parts: payload };
 }
 
-/** Card synthesized for an errored turn with no card, so a failed turn persists and resumes with Retry. */
-const SYSTEM_ERROR_CARD = { kind: "system" } as const;
+/** An error/refusal marker is a FAILURE surface, not an answer - so an empty-text turn carrying only one is
+ *  not worth a standalone row (errors no longer persist as turns). A real answer card is kept. */
+function isFailureMarker(payload: unknown): boolean {
+  if (typeof payload !== "object" || payload === null) return false;
+  const d = payload as Record<string, unknown>;
+  return isErrorKind(d.kind) || isRefusalReason(d.reason);
+}
 
-/** Persist the assistant turn (normal, stopped, OR errored). Errors are turns (the SDK fires with `error` set);
- *  keyed by responseMessage.id (idempotent upsert), a synthesized error card takes a fresh uuid. */
+/** Persist the assistant turn (normal or stopped). An empty/whitespace-text turn with no real answer card
+ *  persists NOTHING - errored turns included - so the tail stays the unanswered user row and a legitimate Retry
+ *  never reads as already-answered. Keyed by responseMessage.id (idempotent upsert). */
 export async function persistAssistantTurn(
   store: Store,
-  args: { conversationId: string; responseMessage?: MessageLike; error?: unknown },
+  args: { conversationId: string; responseMessage?: MessageLike },
 ): Promise<void> {
-  const { conversationId, responseMessage, error } = args;
-  const failed = error !== undefined;
-
-  if (!responseMessage) {
-    if (!failed) return; // no response and no error: nothing to persist
-    await store.appendMessage(conversationId, "assistant", "", SYSTEM_ERROR_CARD, crypto.randomUUID());
-    return;
-  }
-
+  const { conversationId, responseMessage } = args;
+  if (!responseMessage) return; // no response (incl. a bare SDK error): nothing to persist
   const { content, parts } = extractAssistantPersistence(responseMessage);
-  // A partial errored turn with no card still persists the error card (resume with Retry); a real answer card is kept.
-  const payload = failed && parts === null ? SYSTEM_ERROR_CARD : parts;
-  await store.appendMessage(conversationId, "assistant", content, payload, responseMessage.id);
+  // Empty text + no real answer card (a bare error/refusal marker doesn't count) persists nothing: keep the user tail for Retry.
+  if (content.trim().length === 0 && (parts === null || isFailureMarker(parts))) return;
+  await store.appendMessage(conversationId, "assistant", content, parts, responseMessage.id);
 }
 
 /** Read a model message's user text (content is a string or an array of text parts). */

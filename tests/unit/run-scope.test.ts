@@ -206,8 +206,8 @@ describe("createChatRun PROFILE note injection (030)", () => {
 // The load-bearing dedup + the refuse-before-persist order. Order in createChatRun
 // is guards FIRST (a refused turn persists nothing - not even its user row), THEN persist the incoming
 // user turn(s), THEN the already-answered check. Retry is recognized by the WIRE trigger, never guessed
-// from the persisted tail - a failed turn now leaves a trailing assistant error row, so a tail-role
-// guess would wrongly skip a legitimate Retry.
+// from the persisted tail - a regenerate over a SUCCESSFUL answer has an assistant tail, so a tail-role
+// guess would wrongly skip that legitimate Retry.
 describe("createChatRun gate: dedup + refuse-before-persist (R3)", () => {
   function recordingStore(seed: Seed[], count = 0) {
     const store = stubStore(seed);
@@ -256,9 +256,10 @@ describe("createChatRun gate: dedup + refuse-before-persist (R3)", () => {
     logSpy.mockRestore();
   });
 
-  it("Should_RunTurn_When_RegenerateTriggerArrives (AC-8): regenerate runs even over a trailing assistant error row", async () => {
-    // A FAILED turn left an assistant error row (content ""). A tail-role guess would skip it; keying off
-    // the wire trigger, regenerate ALWAYS runs, and the empty error row drops from the rebuilt history.
+  it("Should_RunTurn_When_RegenerateTriggerArrives (AC-8): regenerate runs even over a trailing empty assistant row", async () => {
+    // A legacy/defensive shape - a trailing assistant row with empty content (e.g. a pre-flip error row).
+    // A tail-role guess would skip it; keying off the wire trigger, regenerate ALWAYS runs, and the empty
+    // row drops from the rebuilt history.
     const { store, appended } = recordingStore([
       { role: "user", content: "Median salary in SF?" },
       { role: "assistant", content: "", parts: { kind: "system" } },
@@ -400,5 +401,36 @@ describe("createChatRun gate: dedup + refuse-before-persist (R3)", () => {
     expect(emitted).toHaveLength(1); // the harmless stream-only refusal
     expect((emitted[0] as { type: string; data: { reason: string } }).type).toBe("data-refusal");
     expect((emitted[0] as { data: { reason: string } }).data.reason).toBe("guest_cap");
+  });
+
+  // Composes with persistAssistantTurn's empty-turn skip (ruling #2): a FAILED turn persists no assistant
+  // row, so its user question stays the tail. A submit over that unanswered user tail runs the model (it is
+  // NOT a redelivery of an answered turn) and re-persists nothing (count-based ingress - q1/q2 already stored).
+  it("Should_RunTurn_When_SubmitTailIsUnansweredUser: a submit over a trailing (failed-turn) user row still runs", async () => {
+    const { store, appended } = recordingStore([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "q2" }, // the failed turn persisted no assistant row - q2 is unanswered
+    ]);
+    let captured: StreamModelArgs | undefined;
+    const streamModel = vi.fn((a: StreamModelArgs) => {
+      captured = a;
+      return "answered" as const;
+    });
+    const run = runWith(store, { streamModel });
+
+    const res = await run(
+      argsFor("submit-message", [
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "q2" },
+      ]),
+    );
+
+    expect(res).toBe("answered");
+    expect(streamModel).toHaveBeenCalledTimes(1);
+    const history = captured!.messages;
+    expect(history[history.length - 1]).toEqual({ role: "user", content: "q2" });
+    expect(appended).toEqual([]); // count-based ingress: no re-persist of already-stored turns
   });
 });

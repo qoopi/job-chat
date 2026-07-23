@@ -3,10 +3,10 @@ import type { Message, Store } from "@shared/store";
 import { extractAssistantPersistence, persistAssistantTurn } from "../../trigger/persistence";
 import { buildInsight } from "../../trigger/parts";
 
-// A turn that fails is a TURN - it persists its assistant row with the error card, so a
-// reload renders the card with Retry rather than a bare unanswered question. The load-bearing correction
-// (chat-agent conformance #3): an errored turn fires onTurnComplete with `error` set and the response
-// message UNDEFINED-or-partial, so persistence must branch on `error`, not bail on a missing response.
+// A turn whose final text is empty/whitespace AND carries no real answer card persists NOTHING - errored
+// turns included (the flip of "errors persist as turns"). The tail stays the unanswered user row so a
+// legitimate Retry never reads as already-answered; a turn with real prose or a real answer card persists
+// exactly as before (a bare error/refusal marker is a failure surface, not an answer worth a row).
 
 /** A fake store recording every appendMessage call (nothing else is touched). */
 function fakeStore() {
@@ -31,10 +31,8 @@ function fakeStore() {
   return { store, appended };
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-describe("persistAssistantTurn persists failed turns as turns (AC-6/7)", () => {
-  it("Should_PersistErrorCardTurn_When_ToolFails: a response carrying the error card persists it under the response id", async () => {
+describe("persistAssistantTurn: empty errored turns persist nothing; real content/cards persist (AC-6/7)", () => {
+  it("Should_PersistErrorCardTurn_When_ToolFails: a response carrying prose + the error card persists it under the response id", async () => {
     const { store, appended } = fakeStore();
     // The tool caught its failure, cleared the skeleton with a data-error part; the turn completed with a
     // response message carrying that card (no `error` set at the SDK level).
@@ -54,44 +52,45 @@ describe("persistAssistantTurn persists failed turns as turns (AC-6/7)", () => {
     expect(appended[0].id).toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"); // keyed by the response id
   });
 
-  it("Should_SynthesizeErrorCard_When_TurnErrorsWithoutResponse: a bare error persists a system card under a fresh uuid", async () => {
+  it("Should_PersistNothing_When_TurnErrorsWithoutResponse: a bare SDK error persists no row (the user tail stays for Retry)", async () => {
     const { store, appended } = fakeStore();
-    // The SDK-level error path: onTurnComplete fires with `error` set and NO response message. The current
-    // `if (!responseMessage) return` dropped exactly this turn; it must now synthesize the error card.
-    await persistAssistantTurn(store, {
-      conversationId: "c1",
-      responseMessage: undefined,
-      error: new Error("Bedrock exploded"),
-    });
-
-    expect(appended).toHaveLength(1);
-    expect(appended[0].role).toBe("assistant");
-    expect(appended[0].content).toBe(""); // an error card persists no prose
-    expect(appended[0].parts).toEqual({ kind: "system" }); // synthesized error card
-    expect(appended[0].id).toMatch(UUID_RE); // a fresh uuid (no response id to key on)
+    // The SDK-level error path: onTurnComplete fires with NO response message. The OLD invariant synthesized
+    // a system error card here; the flip persists NOTHING so the user question stays the tail (resume Retry).
+    await persistAssistantTurn(store, { conversationId: "c1", responseMessage: undefined });
+    expect(appended).toEqual([]);
   });
 
-  it("Should_PersistErrorCard_When_PartialResponseHasNoCard: an errored partial with prose but no card still resumes with Retry", async () => {
+  it("Should_PersistProse_When_PartialErroredTurnHasProse: a partial with prose but no card persists the prose, no synthesized card", async () => {
     const { store, appended } = fakeStore();
-    // A partial response (aborted mid-answer) that carried only lead-in text - no card. With `error` set,
-    // it must still persist the error card so the failed turn resumes with Retry, keyed by the response id.
+    // A partial response (aborted mid-answer) that carried only lead-in text - no card. The error no longer
+    // forces a system card: the non-empty prose persists as a normal assistant row (parts null), keyed by id.
     const responseMessage = {
       id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       role: "assistant",
       parts: [{ type: "text", text: "Let me check that" }],
     };
-    await persistAssistantTurn(store, {
-      conversationId: "c1",
-      responseMessage,
-      error: "stream failed",
-    });
+    await persistAssistantTurn(store, { conversationId: "c1", responseMessage });
 
     expect(appended).toHaveLength(1);
-    expect(appended[0].parts).toEqual({ kind: "system" });
+    expect(appended[0].content).toBe("Let me check that");
+    expect(appended[0].parts).toBeNull();
     expect(appended[0].id).toBe("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
   });
 
-  it("persists a real answer card even on a partial errored turn (a card produced before the error is kept)", async () => {
+  it("Should_PersistNothing_When_ErroredTurnHasOnlyAnErrorCard: an empty-text error-card turn persists nothing", async () => {
+    const { store, appended } = fakeStore();
+    // The flip's core: a failed turn whose only surface is an error card (empty prose) persists NOTHING, so a
+    // redelivered Retry over the surviving user tail is never mistaken for an already-answered turn.
+    const responseMessage = {
+      id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      role: "assistant",
+      parts: [{ type: "data-error", id: "call-1", data: { kind: "system" } }],
+    };
+    await persistAssistantTurn(store, { conversationId: "c1", responseMessage });
+    expect(appended).toEqual([]);
+  });
+
+  it("persists a real answer card on a card-only turn (empty prose + a real card is kept)", async () => {
     const { store, appended } = fakeStore();
     const card = buildInsight({
       id: "m1",
@@ -108,12 +107,8 @@ describe("persistAssistantTurn persists failed turns as turns (AC-6/7)", () => {
       role: "assistant",
       parts: [{ type: "data-insight", id: "m1", data: card }],
     };
-    await persistAssistantTurn(store, {
-      conversationId: "c1",
-      responseMessage,
-      error: "errored on a later step",
-    });
-    expect(appended[0].parts).toEqual(card); // the genuine answer wins over a synthesized error card
+    await persistAssistantTurn(store, { conversationId: "c1", responseMessage });
+    expect(appended[0].parts).toEqual(card); // a real answer card persists even with empty prose (not a failure marker)
   });
 
   it("persists NOTHING when there is neither a response message nor an error (a manual pipe completion)", async () => {
