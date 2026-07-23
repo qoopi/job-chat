@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { UIMessage } from "ai";
 import type { Profile } from "@shared/profile";
 import { setAuthDialogOpen } from "@/lib/layers";
+import { closeAuthDialog } from "@/lib/auth-dialog";
 
 // The 029 profile surfaces driven through the REAL ChatClient (part rendering, invite wiring, detail panel
 // routing, save-injection) plus the leaf cards in isolation. External boundaries (transport + server
@@ -21,7 +22,9 @@ vi.mock("@/app/actions", () => ({
   deleteProfile: vi.fn(async () => ({ ok: true })),
   getProfileRunStatus: vi.fn(async () => ({ status: "pending" })),
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+// `push` is a shared, captured mock so the F3 abandon tests can assert a stale send never navigates to a spurious new conversation (the fresh-chat send branch calls router.push).
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock, replace: vi.fn() }) }));
 vi.mock("@/lib/auth-client", () => ({
   authClient: { signIn: { social: vi.fn() }, signOut: vi.fn(), useSession: () => ({ data: null, isPending: false }) },
 }));
@@ -100,6 +103,7 @@ const freshFailureMyProfile: MyProfile = {
 afterEach(() => {
   cleanup();
   setAuthDialogOpen(false);
+  closeAuthDialog(); // the auth-dialog store is a module singleton - reset it too, else an opened-dialog test leaks `dialogOpen` into later tests (a stuck AuthDialog makes ChatClient's Esc handler yield)
   sessionStorage.clear(); // the pending-invite tests below stash a real sessionStorage key
   // These action mocks are SHARED module-level vi.fn()s; `mockResolvedValueOnce` queues values that
   // outlive a test if the component under test never consumed them (e.g. a test that never opens the
@@ -109,6 +113,7 @@ afterEach(() => {
   vi.mocked(saveProfile).mockReset();
   vi.mocked(deleteProfile).mockReset().mockResolvedValue({ ok: true });
   vi.mocked(pollProfileSave).mockReset();
+  pushMock.mockClear();
 });
 
 // ---------------------------------------------------------------------------------------------------
@@ -456,6 +461,49 @@ describe("F3 auto-continue after profile save", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(screen.getAllByText(FIT_Q)).toHaveLength(2); // still exactly one auto re-run
+  });
+
+  // F3 stale-ref regression (repro A): an armed auto-continue must be CLEARED when the form is abandoned
+  // via Esc (not saved). Re-opening from the title bar (no re-arm) and saving must NOT fire the stale send.
+  test("Should_NotAutoResend_When_FormEscAbandonedThenReopenedAndSaved", async () => {
+    renderChat(threadWithInvite(), { e2e: true }); // signed in as Ada
+    expect(screen.getAllByText(FIT_Q)).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Add your profile" })); // arms + opens the form
+    await screen.findByRole("region", { name: "Your profile" });
+    // Abandon via Esc - the window keydown close path that bypassed the ref clear.
+    await act(async () => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Your profile" })).toBeNull());
+    // Re-open from the title-bar account menu (openProfile - never re-arms).
+    fireEvent.click(screen.getByRole("button", { name: "Account: Ada" }));
+    fireEvent.click(screen.getByRole("button", { name: "Your profile" }));
+    await screen.findByRole("region", { name: "Your profile" });
+    fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
+    fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
+    await screen.findByText("Profile saved ✓");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.getAllByText(FIT_Q)).toHaveLength(1); // still only the original ask - no stale re-send
+  });
+
+  // F3 stale-ref regression (repro B, worse): New chat abandons the flow AND arms freshChatRef. A surviving
+  // stale ref would make the next save start a spurious BRAND-NEW conversation (router.push). Must not happen.
+  test("Should_NotAutoResendOrCreateConversation_When_NewChatAbandonsThenSaved", async () => {
+    renderChat(threadWithInvite(), { e2e: true });
+    fireEvent.click(screen.getByRole("button", { name: "Add your profile" })); // arms + opens the form
+    await screen.findByRole("region", { name: "Your profile" });
+    fireEvent.click(screen.getByRole("button", { name: "New chat" })); // clears the thread + closes the form (bypassed the ref clear); arms freshChatRef
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Your profile" })).toBeNull());
+    // Re-open from the title bar (no re-arm) over the now-empty thread and save.
+    fireEvent.click(screen.getByRole("button", { name: "Account: Ada" }));
+    fireEvent.click(screen.getByRole("button", { name: "Your profile" }));
+    await screen.findByRole("region", { name: "Your profile" });
+    fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
+    fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
+    await screen.findByText("Profile saved ✓");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.queryAllByText(FIT_Q)).toHaveLength(0); // New chat cleared the thread; nothing re-added
+    expect(pushMock).not.toHaveBeenCalled(); // no spurious new conversation navigated to
   });
 });
 

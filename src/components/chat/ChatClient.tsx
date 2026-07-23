@@ -140,10 +140,15 @@ export function ChatClient({
     setDetailTarget(null);
     setProfileOpen(true);
   }, []);
-  const closeProfile = useCallback(() => {
-    autoContinueRef.current = null; // abandon the flow without saving -> never auto-continue a stale question later
-    setProfileOpen(false);
-  }, []);
+  const closeProfile = useCallback(() => setProfileOpen(false), []);
+  // F3 abandon-clear (single home): ANY profile-panel close that is NOT a save clears the one-shot ref, so a
+  // later save can never fire a stale question. This covers every close path off one flag - the X button
+  // (closeProfile), Esc (the window handler), New chat (startNewChat), and switching to a detail panel - which
+  // all set `profileOpen=false`. A SAVE keeps the panel open (the saved state), so `onProfileSaved` still reads
+  // the armed ref before this ever runs.
+  useEffect(() => {
+    if (!profileOpen) autoContinueRef.current = null;
+  }, [profileOpen]);
 
   // F3: arm the one-shot replay IF an invite card is the trailing assistant turn right now (the invite
   // interrupted a fit question). Capture that question; a non-invite trailing card (an Edit from the profile
