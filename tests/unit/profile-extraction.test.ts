@@ -105,6 +105,19 @@ describe("buildExtractionPrompt", () => {
     expect(text).toContain("GitHub @octocat");
     expect(text).toContain("Merged public PRs: 42");
   });
+
+  // F5a: the operator's saved profile was built from GitHub ALONE (repos became "jobs", the resume's
+  // positions were dropped). The SYSTEM prompt must demand exhaustive resume-only experience, keep repos
+  // as ossHighlights (never experience entries), and tag skill sources honestly.
+  it("SYSTEM demands exhaustive resume-only experience, repos as ossHighlights, honest source tags (F5a)", () => {
+    const { system } = buildExtractionPrompt({ resumeText: "x" });
+    expect(system).toMatch(/every position/i); // exhaustive extraction
+    expect(system).toMatch(/exhaustively/i);
+    expect(system).toMatch(/only from the resume/i); // experience[] from the resume's employment history only
+    expect(system).toMatch(/ossHighlights/); // repos live here...
+    expect(system).toMatch(/never (an |in )?experience/i); // ...never as experience entries
+    expect(system).toMatch(/honest/i); // skill source tags honest
+  });
 });
 
 describe("extractProfileFields", () => {

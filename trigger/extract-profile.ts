@@ -6,12 +6,15 @@ import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 import { ProfileSchema } from "@shared/profile";
 import { fetchGithubProfile } from "./github-profile";
 import { markProfileExtractionFailed, runProfileExtraction, type GenerateProfile } from "./profile-extraction";
+import { MODEL_ID } from "./model-id";
 import { withStore } from "./store-session";
 
 // The background extraction task (durable, not a Vercel action, to survive the latency + 4MB PDF); the pure pipeline is profile-extraction.ts.
 
-// Default eu Haiku 4.5 profile; the env var lets the operator swap it.
-const DEFAULT_EXTRACTION_MODEL_ID = "eu.anthropic.claude-haiku-4-5-20251001-v1:0";
+// F5b: default = the SAME shipped eu Sonnet 4.5 profile chat + evals already use (import, so no drift/second
+// literal). Haiku 4.5 failed the n=1 extraction quality bar; Sonnet is the cheapest model that clears it.
+// Enablement is proven by chat's live use. EXTRACTION_MODEL_ID still overrides.
+const DEFAULT_EXTRACTION_MODEL_ID = MODEL_ID;
 
 const bedrock = createAmazonBedrock({
   region: process.env.AWS_REGION ?? "eu-central-1",
