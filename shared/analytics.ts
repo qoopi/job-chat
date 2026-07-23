@@ -46,6 +46,29 @@ function whereClause(filters: string[]): string {
   return filters.length ? `WHERE ${filters.join(" AND ")}` : "";
 }
 
+// Case-insensitive categorical matching (044 AC-1). ONE home: `eqCI`/`inCI` wrap lowerUTF8 around BOTH
+// the column and the value so a filter value's casing never changes which rows match
+// ("senior"/"Senior"/"SENIOR" are identical). All three query families (fixed templates, composed
+// builder, searchPostings) route their categorical equality/IN through here. Only free-text categorical
+// String columns pass through - experience_level, employment_type, city, region, country (company is
+// already case-insensitive via ILIKE; location_kind is an Enum8 whose filter values are Zod-validated to
+// the canonical lowercase names, so wrapping it would be a no-op needing an Enum->String cast).
+// A function on a filter column forgoes primary-index / skip-index use
+// (clickhouse-best-practices `schema-pk-filter-on-orderby` CRITICAL, `query-index-skipping-indices` HIGH),
+// but that is MOOT here: none of these columns are in `postings`' ORDER BY (source, external_id) and the
+// table carries no skip indices, so every categorical aggregate already full-scans the ~12k-row open set
+// - lowerUTF8 per row on that scan costs nothing measurable. The value is still chStr-escaped inside the
+// wrap, so the SQL-injection contract is unchanged.
+function lowerCI(expr: string): string {
+  return `lowerUTF8(${expr})`;
+}
+function eqCI(column: string, value: string): string {
+  return `${lowerCI(column)} = ${lowerCI(chStr(value))}`;
+}
+function inCI(column: string, values: string[]): string {
+  return `${lowerCI(column)} IN (${values.map((v) => lowerCI(chStr(v))).join(", ")})`;
+}
+
 function assemble(lines: string[]): string {
   return lines.filter((line) => line !== "").join("\n");
 }
@@ -129,8 +152,8 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       const p = SalaryDistributionParams.parse(rawParams);
       const filters = ["salary_min IS NOT NULL", "salary_max IS NOT NULL"];
       if (p.role) filters.push(roleFilter(p.role));
-      if (p.city) filters.push(`city = ${chStr(p.city)}`);
-      if (p.country) filters.push(`country = ${chStr(p.country)}`);
+      if (p.city) filters.push(eqCI("city", p.city));
+      if (p.country) filters.push(eqCI("country", p.country));
       filters.push(openSetFilter(table));
       filters.push(dominantCurrencyFilter(table, filters)); // single-currency salaried set only
       const where = whereClause(filters);
@@ -156,7 +179,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       const filters = [
         "salary_min IS NOT NULL",
         "salary_max IS NOT NULL",
-        `city IN (${p.cities.map((c) => chStr(c)).join(", ")})`,
+        inCI("city", p.cities),
       ];
       if (p.role) filters.push(roleFilter(p.role));
       filters.push(openSetFilter(table));
@@ -198,7 +221,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       const p = TopCompaniesParams.parse(rawParams);
       const filters: string[] = [];
       if (p.days !== undefined) filters.push(trendWindow(table, p.days));
-      if (p.city) filters.push(`city = ${chStr(p.city)}`);
+      if (p.city) filters.push(eqCI("city", p.city));
       // Current-state only when unwindowed; a days window is a historical read.
       const openSet = p.days === undefined;
       if (openSet) filters.push(openSetFilter(table));
@@ -239,8 +262,8 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       const p = LatestPostingsParams.parse(rawParams);
       const filters: string[] = [];
       if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
-      if (p.level) filters.push(`experience_level = ${chStr(p.level)}`);
-      if (p.country) filters.push(`country = ${chStr(p.country)}`);
+      if (p.level) filters.push(eqCI("experience_level", p.level));
+      if (p.country) filters.push(eqCI("country", p.country));
       filters.push(openSetFilter(table));
       const where = whereClause(filters);
       const sql = assemble([
@@ -392,12 +415,14 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   if (p.role) filters.push(roleFilter(p.role));
   if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
   // `cities` WINS over a coexisting single `city` (follow-up inheritance replaces, never intersects).
-  if (p.cities) filters.push(`city IN (${p.cities.map((c) => chStr(c)).join(", ")})`);
-  else if (p.city) filters.push(`city = ${chStr(p.city)}`);
-  if (p.region) filters.push(`region = ${chStr(p.region)}`);
-  if (p.country) filters.push(`country = ${chStr(p.country)}`);
-  if (p.experience_level) filters.push(`experience_level = ${chStr(p.experience_level)}`);
-  if (p.employment_type) filters.push(`employment_type = ${chStr(p.employment_type)}`);
+  if (p.cities) filters.push(inCI("city", p.cities));
+  else if (p.city) filters.push(eqCI("city", p.city));
+  if (p.region) filters.push(eqCI("region", p.region));
+  if (p.country) filters.push(eqCI("country", p.country));
+  if (p.experience_level) filters.push(eqCI("experience_level", p.experience_level));
+  if (p.employment_type) filters.push(eqCI("employment_type", p.employment_type));
+  // location_kind is an Enum8 with Zod-validated canonical lowercase values - a direct equality (no
+  // lowerUTF8 wrap, which would need an Enum->String cast for a no-op) is correct here.
   if (p.location_kind) filters.push(`location_kind = ${chStr(p.location_kind)}`);
   if (p.min_salary !== undefined) filters.push(`(salary_min + salary_max) / 2 >= ${p.min_salary}`);
   if (p.max_salary !== undefined) filters.push(`(salary_min + salary_max) / 2 <= ${p.max_salary}`);
@@ -500,8 +525,7 @@ function scoreExpr(p: SearchPostingsQuery): string {
       : "0";
   const band = p.experience ? seniorityBand(p.experience) : "";
   const expMatch = band ? `(${seniorityBandSql("experience_level")} = ${chStr(band)})` : "0";
-  const cityMatch =
-    p.cities.length > 0 ? `(city IN (${p.cities.map((c) => chStr(c)).join(", ")}))` : "0";
+  const cityMatch = p.cities.length > 0 ? `(${inCI("city", p.cities)})` : "0";
   const remoteMatch = p.remoteOk ? "(location_kind = 'remote')" : "0";
   const salaryMatch =
     p.salaryMin !== undefined

@@ -51,8 +51,8 @@ describe.skipIf(!hasCreds)("query_postings composed tool against the seeded refe
     expect(insight.kind).toBe("chart");
     if (insight.kind === "chart") expect(insight.chartType).toBe("bars");
 
-    // The revealed SQL carries the country filter AND the open-set predicate.
-    expect(insight.meta.sql).toContain("country = 'United States'");
+    // The revealed SQL carries the country filter (case-insensitive, 044 AC-1) AND the open-set predicate.
+    expect(insight.meta.sql).toContain("lowerUTF8(country) = lowerUTF8('United States')");
     expect(insight.meta.sql).toContain(`ingested_at = (SELECT max(ingested_at) FROM ${TABLE})`);
     expect(insight.meta.openSet).toBe(true);
 
