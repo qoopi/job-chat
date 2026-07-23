@@ -248,6 +248,13 @@ describe("mergeSearchParams (server-authoritative profile merge)", () => {
     expect(mergeSearchParams({ titleTerms: ["staff engineer"] }, PROFILE).companies).toBeUndefined();
   });
 
+  it("passes model-extracted role phrases through (no profile fallback); absent otherwise", () => {
+    const withRole = mergeSearchParams({ titleTerms: ["staff engineer"], roles: ["backend engineer"] }, PROFILE);
+    expect(withRole.roles).toEqual(["backend engineer"]);
+    // No role named by the model -> no role phrase (the profile's titles do NOT auto-become roles).
+    expect(mergeSearchParams({ titleTerms: ["staff engineer"] }, PROFILE).roles).toBeUndefined();
+  });
+
   // Mutation check: the tool schema's `.strict()` blocks an injected experience/salaryMin key BEFORE it
   // reaches mergeSearchParams in production - but that is a schema-layer guarantee, not a merge-logic one.
   // This forces a model-supplied value THROUGH the merge itself (a raw cast, as if a differently-shaped
@@ -365,6 +372,14 @@ describe("Should_EmitPostingsPart_When_SearchPostingsRuns (AC-7)", () => {
         opts,
       ),
     ).rejects.toThrow();
+  });
+
+  it("carries the model's role phrases to the scorer (the role-IN match source)", async () => {
+    const analytics = searchAnalytics([], 0);
+    const tools = buildCatalogTools({ analytics, emit: () => {}, profile: PROFILE });
+    await tools.search_postings.execute!({ titleTerms: ["backend"], roles: ["backend engineer"] }, opts);
+    const passed = (analytics.searchPostings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(passed.roles).toEqual(["backend engineer"]);
   });
 
   it("emits no card and signals request_profile when there is no profile on file", async () => {

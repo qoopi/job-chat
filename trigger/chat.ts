@@ -11,7 +11,7 @@ import { callerKindFor, type CallerKind } from "./guard";
 import { AGENT_ID } from "./agent-id";
 import { MODEL_ID } from "./model-id";
 import { withStore } from "./store-session";
-import { ADVISER_V3 } from "./prompts/adviser-v3";
+import { ADVISER_V4 } from "./prompts/adviser-v4";
 import { buildCatalogTools, type EmitPart } from "./tools";
 import { persistAssistantTurn, hydrateHistory } from "./persistence";
 import { createChatRun, type StreamModelArgs } from "./run";
@@ -89,7 +89,7 @@ const chatRun = createChatRun({
   guards: getGuardConfig(),
   emit,
   now: () => new Date(),
-  system: ADVISER_V3,
+  system: ADVISER_V4,
   coverageProfile: () => analytics().coverageProfile(),
   profile: (chatId) =>
     (turnOwnerContext.get(chatId) ?? resolveOwnerContextForTurn(chatId)).then((c) => c.profile),
