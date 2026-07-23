@@ -1,5 +1,5 @@
 import type { Sql } from "postgres";
-import type { Profile } from "./profile";
+import type { Profile, Skill } from "./profile";
 
 // OLTP chat store (raw postgres, no ORM). Contract: `null` always means "not found".
 
@@ -71,6 +71,14 @@ export interface ProfileInputs {
   githubUsername: string | null;
 }
 
+/** The user-editable preference fields on an extracted profile (the 041 edit surface). A null salary or
+ *  remotePref is "unknown"; empty locations clears them. These feed searchPostings via mergeSearchParams. */
+export interface ProfilePrefs {
+  salaryMin: number | null;
+  locations: string[];
+  remotePref: boolean | null;
+}
+
 export interface Store {
   getOrCreateUser(guestId: string): Promise<User>;
   createConversation(
@@ -129,6 +137,15 @@ export interface Store {
   /** Write the extracted profile (`profile` + `extracted_at`); does NOT clear `resume_pdf`. Returns
    *  `false` if the row was deleted mid-extraction (caller then skips the orphan card). */
   saveExtractedProfile(userId: string, profile: Profile): Promise<boolean>;
+  /** Patch the editable preference fields (salaryMin/locations/remotePref) on the caller's EXTRACTED
+   *  profile via a targeted jsonb merge - titles/skills/experience are untouched. Returns the updated
+   *  Profile, or null when the user has no extracted profile row (nothing to edit). Ownership is the
+   *  userId scope (the CALLER passes its own id, mirroring the other profile methods). */
+  updateProfilePrefs(userId: string, prefs: ProfilePrefs): Promise<Profile | null>;
+  /** Replace the skills array on the caller's EXTRACTED profile (jsonb merge; the caller supplies the full
+   *  validated array, sources included). Returns the updated Profile, or null when there is no extracted
+   *  profile row. Ownership is the userId scope, exactly like updateProfilePrefs. */
+  updateProfileSkills(userId: string, skills: Skill[]): Promise<Profile | null>;
   /** Clear the transient resume PDF - the terminal PII clear-point on the success path. */
   clearResumePdf(userId: string): Promise<void>;
   /** onFailure (all retries spent): NULL `resume_pdf` (transient PII must never linger) and set
@@ -312,6 +329,26 @@ export function createStore(sql: Sql): Store {
         SET profile = ${sql.json(profile as never)}, extracted_at = now(), extraction_failed = FALSE
         WHERE user_id = ${userId}`;
       return result.count > 0;
+    },
+
+    async updateProfilePrefs(userId, prefs) {
+      // jsonb `||` shallow-merges the three keys onto the stored profile, leaving every other field
+      // intact. `profile IS NOT NULL` scopes the edit to an EXTRACTED profile (a pending row has nothing
+      // to edit), so a missing/pending row matches zero rows -> null (the action reads it as not_found).
+      const rows = await sql<{ profile: Profile }[]>`
+        UPDATE profiles SET profile = profile || ${sql.json(prefs as never)}::jsonb
+        WHERE user_id = ${userId} AND profile IS NOT NULL
+        RETURNING profile`;
+      return rows.length === 0 ? null : rows[0].profile;
+    },
+
+    async updateProfileSkills(userId, skills) {
+      // Same targeted jsonb merge as updateProfilePrefs, replacing only the `skills` array.
+      const rows = await sql<{ profile: Profile }[]>`
+        UPDATE profiles SET profile = profile || ${sql.json({ skills } as never)}::jsonb
+        WHERE user_id = ${userId} AND profile IS NOT NULL
+        RETURNING profile`;
+      return rows.length === 0 ? null : rows[0].profile;
     },
 
     async clearResumePdf(userId) {

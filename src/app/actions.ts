@@ -1,17 +1,18 @@
 "use server";
 
 import { cookies, headers } from "next/headers";
+import { z } from "zod";
 import { auth, runs, tasks } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore, type ConversationSummary } from "@shared/store";
-import type { Profile } from "@shared/profile";
-import { profileCardMessageId } from "../../trigger/profile-card-id";
+import type { Profile, Skill } from "@shared/profile";
 import type { extractProfileTask } from "../../trigger/extract-profile";
 import { getGuardConfig } from "@shared/env";
 import { isE2E } from "@/lib/e2e";
 import { auth as authServer } from "@/lib/auth";
 import { GUEST_COOKIE } from "@/lib/guest-cookie";
 import { getJobchatSql } from "@/lib/jobchat-sql";
+import { parseLocationPref } from "@/lib/profile-format";
 import { AGENT_ID } from "../../trigger/agent-id";
 import {
   chatTokenScopes,
@@ -280,20 +281,93 @@ export async function getMyProfile(): Promise<MyProfile | null> {
   };
 }
 
-/** Delete the caller's profile (idempotent). When a conversationId the caller owns is passed, the profile
- *  CARD in that active conversation is also deleted; orphan cards in other conversations stay as history. */
-export async function deleteProfile(conversationId?: string): Promise<{ ok: boolean }> {
+/** Delete the caller's profile row (idempotent). The profile CARD already streamed into any conversation
+ *  STAYS as history - deleting your profile does not rewrite past turns (041 req 3). The PROFILE note simply
+ *  leaves the agent's context on the next turn: owner-context (trigger/chat.ts) re-reads the profile per
+ *  turn, so once the row is gone the next turn carries no note. The panel returns to its empty/upload state. */
+export async function deleteProfile(): Promise<{ ok: boolean }> {
   const identity = await resolveCaller();
   if (!identity || identity.kind !== "account") return { ok: false };
-  const store = createStore(getJobchatSql());
-  await store.deleteProfile(identity.userId);
-  if (conversationId) {
-    const owner = await store.getConversationOwner(conversationId);
-    if (owner && owner.user_id === identity.userId) {
-      await store.deleteMessage(conversationId, profileCardMessageId(conversationId));
-    }
-  }
+  await createStore(getJobchatSql()).deleteProfile(identity.userId);
   return { ok: true };
+}
+
+// The profile-edit bounds (041): server-authoritative caps mirrored loosely by the client inputs.
+const MAX_SALARY = 10_000_000;
+const MAX_LOCATION_TEXT = 120;
+
+/** A profile edit outcome: the re-rendered row on success, else a typed refusal. `not_found` = the caller
+ *  is a guest / signed-in with no extracted profile (a profile edit is only for one's OWN extracted
+ *  profile - mirrors renameConversation's non-owner -> not_found); `invalid_input` = a bound was breached. */
+export type UpdateProfileResult =
+  | { ok: true; profile: Profile }
+  | { ok: false; reason: "not_found" | "invalid_input" };
+
+/** Edit the caller's OWN salary/location preferences (the 041 inline edit). Validates server-side (salary a
+ *  positive int capped, location text trimmed + capped, both clearable), parses the free-text location into
+ *  {locations, remotePref}, and persists via the store's targeted jsonb merge. Returns the updated row so
+ *  the view re-renders from server truth. These fields feed searchPostings - the NEXT match run reflects them. */
+export async function updateProfilePrefs(input: {
+  salary: number | null;
+  location: string | null;
+}): Promise<UpdateProfileResult> {
+  const identity = await resolveCaller();
+  if (!identity || identity.kind !== "account") return { ok: false, reason: "not_found" };
+
+  let salaryMin: number | null;
+  if (input.salary === null) salaryMin = null;
+  else if (!Number.isInteger(input.salary) || input.salary <= 0 || input.salary > MAX_SALARY) {
+    return { ok: false, reason: "invalid_input" };
+  } else salaryMin = input.salary;
+
+  const rawLocation = input.location ?? "";
+  if (rawLocation.trim().length > MAX_LOCATION_TEXT) return { ok: false, reason: "invalid_input" };
+  const { locations, remotePref } = parseLocationPref(rawLocation);
+
+  const profile = await createStore(getJobchatSql()).updateProfilePrefs(identity.userId, {
+    salaryMin,
+    locations,
+    remotePref,
+  });
+  if (!profile) return { ok: false, reason: "not_found" };
+  return { ok: true, profile };
+}
+
+const MAX_SKILLS = 40;
+const MAX_SKILL_NAME = 60;
+const SkillsEditSchema = z.array(
+  z.object({ name: z.string(), source: z.enum(["resume", "github", "both"]) }),
+);
+
+/** Replace the caller's OWN skills array (the 041 chip add/remove). The client supplies the full array with
+ *  each chip's source preserved (a newly ADDED chip carries source "resume"); the server validates (names
+ *  trimmed non-empty <= 60, max 40, case-insensitively deduped) and persists. Removing a github-proven chip
+ *  is allowed - the user owns their profile. Returns the updated row. */
+export async function updateProfileSkills(input: {
+  skills: Skill[];
+}): Promise<UpdateProfileResult> {
+  const identity = await resolveCaller();
+  if (!identity || identity.kind !== "account") return { ok: false, reason: "not_found" };
+
+  const parsed = SkillsEditSchema.safeParse(input.skills);
+  if (!parsed.success) return { ok: false, reason: "invalid_input" };
+
+  const cleaned: Skill[] = [];
+  const seen = new Set<string>();
+  for (const raw of parsed.data) {
+    const name = raw.name.trim();
+    if (!name) continue; // an empty chip is dropped, never persisted
+    if (name.length > MAX_SKILL_NAME) return { ok: false, reason: "invalid_input" };
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue; // first wins, preserving its source
+    seen.add(key);
+    cleaned.push({ name, source: raw.source });
+  }
+  if (cleaned.length > MAX_SKILLS) return { ok: false, reason: "invalid_input" };
+
+  const profile = await createStore(getJobchatSql()).updateProfileSkills(identity.userId, cleaned);
+  if (!profile) return { ok: false, reason: "not_found" };
+  return { ok: true, profile };
 }
 
 // Trigger run statuses that are TERMINAL failures; others are in-flight, COMPLETED is terminal success.

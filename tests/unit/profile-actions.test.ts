@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProfileRow, Store, User } from "@shared/store";
-import type { Profile } from "@shared/profile";
+import type { Profile, Skill } from "@shared/profile";
 
 // The profile server actions' boundary logic: signed-in-only + conversation ownership + the PDF size cap
 // + the empty guard, plus the sanitized poll read (never the transient PDF bytes). Exercises the REAL
@@ -40,8 +40,14 @@ vi.mock("@shared/store", async (importOriginal) => {
   return { ...actual, createStore: () => fakeStore };
 });
 
-import { saveProfile, getMyProfile, deleteProfile, getProfileRunStatus } from "@/app/actions";
-import { profileCardMessageId } from "../../trigger/profile-card-id";
+import {
+  saveProfile,
+  getMyProfile,
+  deleteProfile,
+  getProfileRunStatus,
+  updateProfilePrefs,
+  updateProfileSkills,
+} from "@/app/actions";
 
 const ACCT = "acct-1";
 const AUTH = "auth-1";
@@ -81,6 +87,8 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     getProfile: boom,
     saveProfileInputs: boom,
     saveExtractedProfile: boom,
+    updateProfilePrefs: boom,
+    updateProfileSkills: boom,
     clearResumePdf: boom,
     markExtractionFailed: boom,
     deleteProfile: boom,
@@ -215,7 +223,7 @@ describe("deleteProfile", () => {
     expect(del).not.toHaveBeenCalled();
   });
 
-  it("deletes the signed-in caller's profile", async () => {
+  it("deletes the signed-in caller's profile row", async () => {
     signIn();
     const del = vi.fn(async () => {});
     fakeStore = makeStore({ deleteProfile: del });
@@ -223,24 +231,146 @@ describe("deleteProfile", () => {
     expect(del).toHaveBeenCalledWith(ACCT);
   });
 
-  it("also deletes the profile card in the active conversation the caller owns (card-on-delete)", async () => {
-    signIn();
-    const deleteMessage = vi.fn(async () => {});
-    fakeStore = makeStore({ deleteProfile: vi.fn(async () => {}), deleteMessage });
-    await deleteProfile(CONV);
-    expect(deleteMessage).toHaveBeenCalledWith(CONV, profileCardMessageId(CONV));
-  });
-
-  it("does NOT delete a card in a conversation the caller does not own", async () => {
+  // 041 req 3: the streamed profile card stays as history - delete-profile never rewrites past turns, so it
+  // never touches the messages (the PROFILE note leaves the agent context on its own, per-turn owner-context).
+  it("leaves the streamed profile card untouched (history is history) - never deletes a message", async () => {
     signIn();
     const deleteMessage = vi.fn();
-    fakeStore = makeStore({
-      deleteProfile: vi.fn(async () => {}),
-      deleteMessage,
-      getConversationOwner: async () => ({ user_id: "someone-else", auth_user_id: "other" }),
-    });
-    await deleteProfile(CONV);
+    fakeStore = makeStore({ deleteProfile: vi.fn(async () => {}), deleteMessage });
+    await deleteProfile();
     expect(deleteMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateProfilePrefs", () => {
+  it("refuses a guest (not_found) and never touches the store", async () => {
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfilePrefs: upd });
+    expect(await updateProfilePrefs({ salary: 100000, location: "SF" })).toEqual({ ok: false, reason: "not_found" });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("parses the location + persists the prefs, returning the updated row", async () => {
+    signIn();
+    const updated: Profile = { ...PROFILE, salaryMin: 150000, locations: ["SF"], remotePref: true };
+    const upd = vi.fn(async () => updated);
+    fakeStore = makeStore({ updateProfilePrefs: upd });
+    const res = await updateProfilePrefs({ salary: 150000, location: "SF or remote" });
+    expect(res).toEqual({ ok: true, profile: updated });
+    expect(upd).toHaveBeenCalledWith(ACCT, { salaryMin: 150000, locations: ["SF"], remotePref: true });
+  });
+
+  it("clears both prefs when salary is null and location is blank", async () => {
+    signIn();
+    const upd = vi.fn(async () => ({ ...PROFILE, salaryMin: null, locations: [], remotePref: null }));
+    fakeStore = makeStore({ updateProfilePrefs: upd });
+    await updateProfilePrefs({ salary: null, location: "   " });
+    expect(upd).toHaveBeenCalledWith(ACCT, { salaryMin: null, locations: [], remotePref: null });
+  });
+
+  it("rejects a non-positive / non-integer / over-cap salary (invalid_input), never persisting", async () => {
+    signIn();
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfilePrefs: upd });
+    for (const salary of [0, -5, 1.5, 10_000_001]) {
+      expect(await updateProfilePrefs({ salary, location: null })).toEqual({ ok: false, reason: "invalid_input" });
+    }
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("rejects location text over the 120 cap (invalid_input), never persisting", async () => {
+    signIn();
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfilePrefs: upd });
+    expect(await updateProfilePrefs({ salary: null, location: "x".repeat(121) })).toEqual({ ok: false, reason: "invalid_input" });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found when the caller has no extracted profile row (store -> null)", async () => {
+    signIn();
+    fakeStore = makeStore({ updateProfilePrefs: async () => null });
+    expect(await updateProfilePrefs({ salary: 100000, location: "SF" })).toEqual({ ok: false, reason: "not_found" });
+  });
+});
+
+describe("updateProfileSkills", () => {
+  const SKILLS: Skill[] = [
+    { name: "Go", source: "both" },
+    { name: "ClickHouse", source: "github" },
+    { name: "Rust", source: "resume" },
+  ];
+
+  it("refuses a guest (not_found) and never touches the store", async () => {
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    expect(await updateProfileSkills({ skills: SKILLS })).toEqual({ ok: false, reason: "not_found" });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("trims names, drops empties, dedupes case-insensitively (first wins, source preserved); returns the row", async () => {
+    signIn();
+    const updated: Profile = { ...PROFILE, skills: [{ name: "Go", source: "both" }, { name: "Rust", source: "resume" }] };
+    const upd = vi.fn(async () => updated);
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    const res = await updateProfileSkills({
+      skills: [
+        { name: "  Go  ", source: "both" },
+        { name: "", source: "resume" }, // dropped
+        { name: "go", source: "github" }, // dup of Go -> dropped, first (both) wins
+        { name: "Rust", source: "resume" },
+      ],
+    });
+    expect(res).toEqual({ ok: true, profile: updated });
+    expect(upd).toHaveBeenCalledWith(ACCT, [
+      { name: "Go", source: "both" },
+      { name: "Rust", source: "resume" },
+    ]);
+  });
+
+  it("allows removing every github-proven chip - an empty array persists (the user owns their profile)", async () => {
+    signIn();
+    const upd = vi.fn(async () => ({ ...PROFILE, skills: [] }));
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    await updateProfileSkills({ skills: [] });
+    expect(upd).toHaveBeenCalledWith(ACCT, []);
+  });
+
+  it("rejects a skill name over 60 chars (invalid_input), never persisting", async () => {
+    signIn();
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    expect(await updateProfileSkills({ skills: [{ name: "x".repeat(61), source: "resume" }] })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("rejects more than 40 skills (invalid_input)", async () => {
+    signIn();
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    const many: Skill[] = Array.from({ length: 41 }, (_, i) => ({ name: `skill-${i}`, source: "resume" }));
+    expect(await updateProfileSkills({ skills: many })).toEqual({ ok: false, reason: "invalid_input" });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid source from an untrusted client (invalid_input)", async () => {
+    signIn();
+    const upd = vi.fn();
+    fakeStore = makeStore({ updateProfileSkills: upd });
+    // @ts-expect-error - deliberately malformed source
+    expect(await updateProfileSkills({ skills: [{ name: "Go", source: "linkedin" }] })).toEqual({
+      ok: false,
+      reason: "invalid_input",
+    });
+    expect(upd).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found when the caller has no extracted profile row (store -> null)", async () => {
+    signIn();
+    fakeStore = makeStore({ updateProfileSkills: async () => null });
+    expect(await updateProfileSkills({ skills: SKILLS })).toEqual({ ok: false, reason: "not_found" });
   });
 });
 

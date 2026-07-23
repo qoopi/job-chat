@@ -207,4 +207,79 @@ describe.skipIf(!hasCreds)("profiles store against real Postgres", () => {
     expect(await store.getProfile(u)).toBeNull();
     await sql`DELETE FROM users WHERE user_id = ${u}`;
   });
+
+  // 041: the inline prefs edit patches only salaryMin/locations/remotePref via jsonb merge, leaving every
+  // other field (titles, skills, experience, ...) intact, and returns the updated row.
+  it("updateProfilePrefs merges the three pref fields and leaves the rest of the profile intact", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    await store.saveProfileInputs({ userId: u, rawResumeText: "r", resumePdf: null, githubUsername: null });
+    await store.saveExtractedProfile(u, extracted);
+
+    const updated = await store.updateProfilePrefs(u, { salaryMin: 175000, locations: ["SF", "NYC"], remotePref: false });
+    expect(updated).not.toBeNull();
+    expect(updated!.salaryMin).toBe(175000);
+    expect(updated!.locations).toEqual(["SF", "NYC"]);
+    expect(updated!.remotePref).toBe(false);
+    // Untouched fields survive the merge verbatim.
+    expect(updated!.skills).toEqual(extracted.skills);
+    expect(updated!.titles).toEqual(extracted.titles);
+    expect(updated!.experience).toEqual(extracted.experience);
+    // Persisted (a fresh read matches).
+    expect((await store.getProfile(u))!.profile).toEqual(updated);
+
+    // Clearing: nulls + empty locations round-trip through jsonb.
+    const cleared = await store.updateProfilePrefs(u, { salaryMin: null, locations: [], remotePref: null });
+    expect(cleared!.salaryMin).toBeNull();
+    expect(cleared!.locations).toEqual([]);
+    expect(cleared!.remotePref).toBeNull();
+
+    await sql`DELETE FROM profiles WHERE user_id = ${u}`;
+    await sql`DELETE FROM users WHERE user_id = ${u}`;
+  });
+
+  it("updateProfilePrefs returns null for a missing or still-pending (not yet extracted) profile row", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    // No profiles row at all.
+    expect(await store.updateProfilePrefs(u, { salaryMin: 1, locations: [], remotePref: null })).toBeNull();
+    // A pending row (inputs saved, extraction not done -> profile IS NULL): nothing to edit.
+    await store.saveProfileInputs({ userId: u, rawResumeText: "r", resumePdf: null, githubUsername: null });
+    expect(await store.updateProfilePrefs(u, { salaryMin: 1, locations: [], remotePref: null })).toBeNull();
+    await sql`DELETE FROM profiles WHERE user_id = ${u}`;
+    await sql`DELETE FROM users WHERE user_id = ${u}`;
+  });
+
+  // 041: replacing the skills array (add/remove) leaves the rest intact and returns the updated row.
+  it("updateProfileSkills replaces only the skills array and leaves the rest of the profile intact", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    await store.saveProfileInputs({ userId: u, rawResumeText: "r", resumePdf: null, githubUsername: null });
+    await store.saveExtractedProfile(u, extracted);
+
+    const nextSkills = [
+      { name: "Go", source: "both" as const },
+      { name: "TypeScript", source: "resume" as const }, // added
+    ];
+    const updated = await store.updateProfileSkills(u, nextSkills);
+    expect(updated).not.toBeNull();
+    expect(updated!.skills).toEqual(nextSkills);
+    expect(updated!.salaryMin).toBe(extracted.salaryMin); // untouched
+    expect(updated!.locations).toEqual(extracted.locations); // untouched
+    expect((await store.getProfile(u))!.profile!.skills).toEqual(nextSkills); // persisted
+
+    // Removing every proven chip is allowed - an empty array persists.
+    const emptied = await store.updateProfileSkills(u, []);
+    expect(emptied!.skills).toEqual([]);
+
+    await sql`DELETE FROM profiles WHERE user_id = ${u}`;
+    await sql`DELETE FROM users WHERE user_id = ${u}`;
+  });
+
+  it("updateProfileSkills returns null for a missing/pending profile row", async () => {
+    const u = `test-guest-${crypto.randomUUID()}`;
+    await store.getOrCreateUser(u);
+    expect(await store.updateProfileSkills(u, [{ name: "Go", source: "both" }])).toBeNull();
+    await sql`DELETE FROM users WHERE user_id = ${u}`;
+  });
 });

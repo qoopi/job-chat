@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Profile } from "@shared/profile";
 import {
+  formatLocationPref,
   isGithubSkipped,
+  parseLocationPref,
   profileSubline,
   profileSummary,
   profileTitle,
@@ -74,6 +76,39 @@ describe("isGithubSkipped", () => {
   it("is true only when no skill is proven in code", () => {
     expect(isGithubSkipped(full)).toBe(false);
     expect(isGithubSkipped({ ...full, skills: [{ name: "Python", source: "resume" }] })).toBe(true);
+  });
+});
+
+// 041: the single free-text "Location" edit field <-> the structured {locations, remotePref} prefs.
+describe("formatLocationPref / parseLocationPref (round-trip)", () => {
+  it("formats locations joined with 'or', appending 'remote' when remotePref", () => {
+    expect(formatLocationPref({ locations: ["SF"], remotePref: true })).toBe("SF or remote");
+    expect(formatLocationPref({ locations: ["Berlin", "Munich"], remotePref: false })).toBe("Berlin or Munich");
+    expect(formatLocationPref({ locations: [], remotePref: null })).toBe("");
+    expect(formatLocationPref({ locations: [], remotePref: true })).toBe("remote");
+  });
+
+  it("parses a remote keyword into remotePref and drops it from the locations", () => {
+    expect(parseLocationPref("SF or remote")).toEqual({ locations: ["SF"], remotePref: true });
+    expect(parseLocationPref("Remote")).toEqual({ locations: [], remotePref: true });
+  });
+
+  it("splits on comma / slash / 'or', trims, dedupes case-insensitively; no remote keyword => remotePref false", () => {
+    expect(parseLocationPref("Berlin, Munich / London")).toEqual({
+      locations: ["Berlin", "Munich", "London"],
+      remotePref: false,
+    });
+    expect(parseLocationPref("SF or sf or  SF ")).toEqual({ locations: ["SF"], remotePref: false });
+  });
+
+  it("empty text clears both prefs (locations [], remotePref null)", () => {
+    expect(parseLocationPref("")).toEqual({ locations: [], remotePref: null });
+    expect(parseLocationPref("   ")).toEqual({ locations: [], remotePref: null });
+  });
+
+  it("round-trips a format then parse for a physical + remote profile", () => {
+    const text = formatLocationPref({ locations: ["SF"], remotePref: true });
+    expect(parseLocationPref(text)).toEqual({ locations: ["SF"], remotePref: true });
   });
 });
 

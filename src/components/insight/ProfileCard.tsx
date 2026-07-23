@@ -253,13 +253,16 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-export function ProfileExpanded({ profile }: { profile: Profile }) {
+/** The read-only detail-panel profile. `extrasOnly` (041) drops the subline + both skills sections so the
+ *  editable saved view can render salary/location/skills itself and reuse this ONLY for the non-editable
+ *  remainder (Sources, domains, experience, OSS) - keeping one home for those sections. */
+export function ProfileExpanded({ profile, extrasOnly = false }: { profile: Profile; extrasOnly?: boolean }) {
   const { proven, claimed } = splitSkills(profile);
   const subline = profileSubline(profile, { expanded: true });
   const skipped = isGithubSkipped(profile);
   return (
     <div className="profile-expanded" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      {subline ? <div style={{ fontSize: 13, color: "var(--text-2)" }}>{subline}</div> : null}
+      {!extrasOnly && subline ? <div style={{ fontSize: 13, color: "var(--text-2)" }}>{subline}</div> : null}
 
       <Section label="Sources">
         <div className="file-row">
@@ -275,7 +278,7 @@ export function ProfileExpanded({ profile }: { profile: Profile }) {
         <span style={{ fontSize: 11, color: "var(--text-3)" }}>We only read public GitHub data.</span>
       </Section>
 
-      {proven.length > 0 ? (
+      {!extrasOnly && proven.length > 0 ? (
         <Section label="Skills — proven in code">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {proven.map((s) => (
@@ -285,7 +288,7 @@ export function ProfileExpanded({ profile }: { profile: Profile }) {
         </Section>
       ) : null}
 
-      {claimed.length > 0 ? (
+      {!extrasOnly && claimed.length > 0 ? (
         <Section label="Skills — from the resume">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {claimed.map((s) => (
