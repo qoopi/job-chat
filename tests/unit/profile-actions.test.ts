@@ -48,7 +48,6 @@ import {
   updateProfilePrefs,
   updateProfileSkills,
 } from "@/app/actions";
-import { profileCardMessageId } from "../../trigger/profile-card-id";
 
 const ACCT = "acct-1";
 const AUTH = "auth-1";
@@ -224,7 +223,7 @@ describe("deleteProfile", () => {
     expect(del).not.toHaveBeenCalled();
   });
 
-  it("deletes the signed-in caller's profile", async () => {
+  it("deletes the signed-in caller's profile row", async () => {
     signIn();
     const del = vi.fn(async () => {});
     fakeStore = makeStore({ deleteProfile: del });
@@ -232,23 +231,13 @@ describe("deleteProfile", () => {
     expect(del).toHaveBeenCalledWith(ACCT);
   });
 
-  it("also deletes the profile card in the active conversation the caller owns (card-on-delete)", async () => {
-    signIn();
-    const deleteMessage = vi.fn(async () => {});
-    fakeStore = makeStore({ deleteProfile: vi.fn(async () => {}), deleteMessage });
-    await deleteProfile(CONV);
-    expect(deleteMessage).toHaveBeenCalledWith(CONV, profileCardMessageId(CONV));
-  });
-
-  it("does NOT delete a card in a conversation the caller does not own", async () => {
+  // 041 req 3: the streamed profile card stays as history - delete-profile never rewrites past turns, so it
+  // never touches the messages (the PROFILE note leaves the agent context on its own, per-turn owner-context).
+  it("leaves the streamed profile card untouched (history is history) - never deletes a message", async () => {
     signIn();
     const deleteMessage = vi.fn();
-    fakeStore = makeStore({
-      deleteProfile: vi.fn(async () => {}),
-      deleteMessage,
-      getConversationOwner: async () => ({ user_id: "someone-else", auth_user_id: "other" }),
-    });
-    await deleteProfile(CONV);
+    fakeStore = makeStore({ deleteProfile: vi.fn(async () => {}), deleteMessage });
+    await deleteProfile();
     expect(deleteMessage).not.toHaveBeenCalled();
   });
 });

@@ -186,11 +186,6 @@ export function ChatClient({
     autoContinueRef.current = question || null;
   }, []);
 
-  const onProfileDeleted = useCallback(async () => {
-    const id = await profileCardMessageId(conversationId);
-    setMessages((prev) => prev.filter((m) => m.id !== id));
-  }, [conversationId, setMessages]);
-
   const onAuthInvite = useCallback(() => {
     if (signedIn) {
       armAutoContinue(); // a signed-in click on an auth-invite opens the form in place - continue the fit question after the save
@@ -579,7 +574,6 @@ export function ChatClient({
             onClose={closeProfile}
             onFindJob={() => void send("Find me a job that fits")}
             onProfileSaved={onProfileSaved}
-            onProfileDeleted={onProfileDeleted}
           />
         ) : detailContent ? (
           <DetailPanel content={detailContent} onClose={closeDetailPanel} />

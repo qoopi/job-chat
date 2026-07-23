@@ -64,7 +64,6 @@ export function DetailProfile({
   onClose,
   onFindJob,
   onProfileSaved,
-  onProfileDeleted,
 }: {
   conversationId: string;
   e2e?: boolean;
@@ -73,8 +72,6 @@ export function DetailProfile({
   onFindJob?: () => void;
   /** Inject / replace the profile card in the live thread after a successful save. */
   onProfileSaved: (profile: Profile) => void | Promise<void>;
-  /** Remove the profile card from the live thread after a delete. */
-  onProfileDeleted: () => void | Promise<void>;
 }) {
   // e2e opens straight on the empty form (no store); otherwise start on a skeleton and resolve the real
   // state asynchronously below.
@@ -192,8 +189,10 @@ export function DetailProfile({
     void onProfileSaved(outcome.profile);
   }, [conversationId, e2e, githubInput, resumeText, onProfileSaved]);
 
+  // Delete the profile ROW; the streamed profile card stays in the thread as history (041 req 3). The panel
+  // returns to the empty/upload form so the user can build a fresh profile.
   const remove = useCallback(async () => {
-    if (!e2e) await deleteProfile(conversationId).catch(() => ({ ok: false }));
+    if (!e2e) await deleteProfile().catch(() => ({ ok: false }));
     if (!mounted.current) return;
     setProfile(null);
     setResumeText("");
@@ -202,8 +201,7 @@ export function DetailProfile({
     fileRef.current = null;
     setFormError(null);
     setStatus("form");
-    void onProfileDeleted();
-  }, [conversationId, e2e, onProfileDeleted]);
+  }, [e2e]);
 
   const onPickFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;

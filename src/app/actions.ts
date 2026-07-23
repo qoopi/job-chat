@@ -6,7 +6,6 @@ import { auth, runs, tasks } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
 import { createStore, type ConversationSummary } from "@shared/store";
 import type { Profile, Skill } from "@shared/profile";
-import { profileCardMessageId } from "../../trigger/profile-card-id";
 import type { extractProfileTask } from "../../trigger/extract-profile";
 import { getGuardConfig } from "@shared/env";
 import { isE2E } from "@/lib/e2e";
@@ -282,19 +281,14 @@ export async function getMyProfile(): Promise<MyProfile | null> {
   };
 }
 
-/** Delete the caller's profile (idempotent). When a conversationId the caller owns is passed, the profile
- *  CARD in that active conversation is also deleted; orphan cards in other conversations stay as history. */
-export async function deleteProfile(conversationId?: string): Promise<{ ok: boolean }> {
+/** Delete the caller's profile row (idempotent). The profile CARD already streamed into any conversation
+ *  STAYS as history - deleting your profile does not rewrite past turns (041 req 3). The PROFILE note simply
+ *  leaves the agent's context on the next turn: owner-context (trigger/chat.ts) re-reads the profile per
+ *  turn, so once the row is gone the next turn carries no note. The panel returns to its empty/upload state. */
+export async function deleteProfile(): Promise<{ ok: boolean }> {
   const identity = await resolveCaller();
   if (!identity || identity.kind !== "account") return { ok: false };
-  const store = createStore(getJobchatSql());
-  await store.deleteProfile(identity.userId);
-  if (conversationId) {
-    const owner = await store.getConversationOwner(conversationId);
-    if (owner && owner.user_id === identity.userId) {
-      await store.deleteMessage(conversationId, profileCardMessageId(conversationId));
-    }
-  }
+  await createStore(getJobchatSql()).deleteProfile(identity.userId);
   return { ok: true };
 }
 

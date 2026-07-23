@@ -387,7 +387,6 @@ describe("DetailProfile form", () => {
         e2e
         onClose={vi.fn()}
         onProfileSaved={onProfileSaved}
-        onProfileDeleted={vi.fn()}
       />,
     );
     fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
@@ -399,20 +398,16 @@ describe("DetailProfile form", () => {
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
   });
 
-  test("delete from the saved state fires onProfileDeleted and returns to the empty form", async () => {
-    const onProfileDeleted = vi.fn();
-    render(
-      <DetailProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={onProfileDeleted} />,
-    );
+  test("delete from the saved state returns to the empty form (e2e: local reset, no server call)", async () => {
+    render(<DetailProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} />);
     fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
     fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(onProfileDeleted).toHaveBeenCalled());
-    expect(screen.getByText("No profile yet")).toBeTruthy();
+    expect(await screen.findByText("No profile yet")).toBeTruthy();
   });
 
   test("empty build with no inputs shows a validation message, never a save", () => {
-    render(<DetailProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    render(<DetailProfile conversationId={CONVERSATION_ID} e2e onClose={vi.fn()} onProfileSaved={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toMatch(/Add a resume or a GitHub username/);
@@ -423,7 +418,7 @@ describe("DetailProfile form", () => {
   // would otherwise clear it silently with no warning shown.
   test("Should_PrefillGithubAndIndicateResumeOnFile_When_EditingASavedProfile", async () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit & re-save" }));
     expect((screen.getByLabelText(/GitHub username/) as HTMLInputElement).value).toBe("octocat");
     expect(screen.getByText("A resume is on file. Re-upload to replace it.")).toBeTruthy();
@@ -610,8 +605,8 @@ describe("F3 auto-continue after profile save", () => {
 // ---------------------------------------------------------------------------------------------------
 // Card-on-delete: the active-conversation card-and-row rule, plus the orphan case in other conversations
 // ---------------------------------------------------------------------------------------------------
-describe("card-on-delete", () => {
-  test("Should_RemoveLiveThreadCardAndDeletePersistedRow_When_ProfileDeletedInActiveConversation", async () => {
+describe("profile-delete keeps the thread card (041 req 3: history is history)", () => {
+  test("Should_KeepLiveThreadCardAndDeleteRow_When_ProfileDeletedInActiveConversation", async () => {
     const cardId = await profileCardMessageId(CONVERSATION_ID);
     vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile);
     renderChat([
@@ -626,13 +621,16 @@ describe("card-on-delete", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit profile" })); // opens the detail panel form
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
 
-    await waitFor(() => expect(deleteProfile).toHaveBeenCalledWith(CONVERSATION_ID)); // the persisted row
-    await waitFor(() => expect(document.querySelector(".insight")).toBeNull()); // the live thread card
+    // The persisted profile ROW is deleted (no conversationId - delete never scopes to a thread)...
+    await waitFor(() => expect(deleteProfile).toHaveBeenCalled());
+    // ...but the streamed card STAYS as history (deleting your profile never rewrites past turns), and the
+    // panel returns to the empty/upload state.
+    expect(await screen.findByText("No profile yet")).toBeTruthy();
+    expect(document.querySelector(".insight")).toBeTruthy();
   });
 
-  // The binding rule scopes the DELETE to the ACTIVE conversation only (the deterministic id is PER
-  // conversation) - a card persisted in a DIFFERENT conversation is never touched, so it renders as plain
-  // history even when the account's CURRENT profile state (getMyProfile) is empty (e.g. deleted elsewhere).
+  // A card persisted in ANY conversation renders as plain history even when the account's CURRENT profile
+  // state (getMyProfile) is empty (deleted) - now the invariant for the active conversation too.
   test("Should_RenderPersistedCardAsHistory_When_AccountCurrentlyHasNoProfile (orphan card, other conversation)", async () => {
     const OTHER_CONV = "22222222-2222-4222-8222-222222222222";
     const cardId = await profileCardMessageId(OTHER_CONV);
@@ -663,7 +661,7 @@ describe("card-on-delete", () => {
 describe("DetailProfile error state (poll contract)", () => {
   test("Should_ShowNothingWasSaved_When_FreshExtractionFailsWithNoPriorProfile", async () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(freshFailureMyProfile);
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
     expect(await screen.findByText("Couldn’t build the profile")).toBeTruthy();
     expect(screen.getByText("Nothing was saved.")).toBeTruthy();
     expect(screen.queryByText("Your previous profile is untouched.")).toBeNull();
@@ -675,7 +673,7 @@ describe("DetailProfile error state (poll contract)", () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(savedMyProfile).mockResolvedValueOnce(savedMyProfile);
     vi.mocked(saveProfile).mockResolvedValueOnce({ ok: true, taskState: "queued", runId: "run_x" });
     vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "error", hadPriorProfile: true });
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit & re-save" })); // github already prefilled -> passes the build() guard
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
@@ -692,7 +690,7 @@ describe("DetailProfile error state (poll contract)", () => {
     vi.mocked(getMyProfile).mockResolvedValueOnce(null); // this tab's initial load: no profile known locally
     vi.mocked(saveProfile).mockResolvedValueOnce({ ok: true, taskState: "queued", runId: "run_y" });
     vi.mocked(pollProfileSave).mockResolvedValueOnce({ outcome: "error", hadPriorProfile: true });
-    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} onProfileDeleted={vi.fn()} />);
+    render(<DetailProfile conversationId={CONVERSATION_ID} onClose={vi.fn()} onProfileSaved={vi.fn()} />);
 
     await screen.findByText("No profile yet"); // confirms local state resolved empty (profile stays null)
     fireEvent.change(screen.getByLabelText(/GitHub username/), { target: { value: "mkoval" } });
@@ -720,7 +718,6 @@ describe("post-parse full profile (039 item 3)", () => {
         onClose={vi.fn()}
         onFindJob={onFindJob}
         onProfileSaved={vi.fn()}
-        onProfileDeleted={vi.fn()}
       />,
     );
 
