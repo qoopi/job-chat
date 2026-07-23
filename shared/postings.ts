@@ -11,7 +11,8 @@ export const LocationSchema = z.object({
   city: z.string().nullish(),
   region: z.string().nullish(),
   country: z.string().nullish(),
-  kind: z.number(),
+  // The deployed jobs API returns null (and undocumented kinds) on real rows; mapPostingToRow degrades those to onsite.
+  kind: z.number().nullish(),
 });
 
 export const PostingSchema = z.object({

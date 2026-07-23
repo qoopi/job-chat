@@ -177,11 +177,54 @@ const SearchPostingsToolInput = z
   .strict();
 type SearchToolInput = z.infer<typeof SearchPostingsToolInput>;
 
+// Generic title tokens that must never become a standalone search term (they'd match the whole board).
+const GENERIC_TITLE_TOKENS = new Set([
+  "full",
+  "engineer",
+  "developer",
+  "manager",
+  "senior",
+  "staff",
+  "junior",
+  "principal",
+  "lead",
+]);
+
+/** F4: broaden title terms for the whole-phrase ILIKE scorer, which recalls almost nothing against
+ *  real-world titles ("Software Engineer III, Full Stack" never matches '%Full-Stack Developer%'). Per term
+ *  emit the phrase, its hyphen->space normalization, and its DISTINCTIVE tokens (the generic-token stoplist
+ *  dropped, so a bare "Engineer"/"Developer" never widens the match). Deterministic, case-insensitively
+ *  deduped, capped at 10 (the analytics titleTerms bound). */
+export function expandTitleTerms(terms: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string) => {
+    const term = raw.trim();
+    if (!term) return;
+    const key = term.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(term);
+  };
+  for (const term of terms) {
+    const phrase = term.trim();
+    if (!phrase) continue;
+    push(phrase);
+    const normalized = phrase.replace(/-/g, " ").replace(/\s+/g, " ").trim();
+    push(normalized);
+    for (const token of normalized.split(" ")) {
+      if (!GENERIC_TITLE_TOKENS.has(token.toLowerCase())) push(token);
+    }
+  }
+  return out.slice(0, 10);
+}
+
 /** Merge the model's terms with the profile. SERVER-authoritative (model cannot set): `experience`, `salaryMin`.
  *  Model-refinable (else the profile's value): `titleTerms`, `cities`, `remoteOk`. `limit` is the hard cap (50). */
 export function mergeSearchParams(input: SearchToolInput, profile: Profile) {
+  const baseTitles = input.titleTerms && input.titleTerms.length > 0 ? input.titleTerms : profile.titles;
   return {
-    titleTerms: input.titleTerms && input.titleTerms.length > 0 ? input.titleTerms : profile.titles,
+    titleTerms: expandTitleTerms(baseTitles), // F4: recall-broadened before the scorer sees them
     experience: profile.seniority ?? undefined, // authoritative - never from the model
     cities: input.cities && input.cities.length > 0 ? input.cities : profile.locations,
     remoteOk: input.remoteOk ?? profile.remotePref ?? undefined,
