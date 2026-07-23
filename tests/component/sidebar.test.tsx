@@ -100,33 +100,38 @@ describe("signed-in history (AC-12)", () => {
     expect(document.querySelector(".sb-item")).toBeNull();
   });
 
-  // Each row gains a muted first-message preview between the title and the date, so two
-  // conversations that share a title are still distinguishable.
-  test("rows render a first-message preview line that distinguishes duplicate titles", () => {
+  // 036 design contract (interaction-spec s5): a row is title + relative date only - the preview layer
+  // (which duplicated the title on every row, since title == first user message == preview) is removed.
+  test("duplicate titles render title + date only, with NO preview line", () => {
     const dupTitles = [
-      {
-        id: convs[0].id,
-        title: "Median salary in SF",
-        created_at: ago(3_600_000),
-        preview: "median salary for a data engineer in SF",
-      },
-      {
-        id: convs[1].id,
-        title: "Median salary in SF",
-        created_at: ago(7_200_000),
-        preview: "and what about staff-level roles?",
-      },
+      { id: convs[0].id, title: "Median salary in SF", created_at: ago(3_600_000) },
+      { id: convs[1].id, title: "Median salary in SF", created_at: ago(7_200_000) },
     ];
     const { container } = render(
       <Sidebar signedIn conversations={dupTitles} activeId={convs[0].id} />,
     );
-    const previews = Array.from(container.querySelectorAll(".sb-preview")).map(
-      (n) => n.textContent,
+    expect(container.querySelectorAll(".sb-preview")).toHaveLength(0); // the preview layer is gone
+    const items = Array.from(container.querySelectorAll(".sb-item"));
+    expect(items).toHaveLength(2);
+    items.forEach((item) => {
+      expect(item.querySelector(".sb-title")?.textContent).toBe("Median salary in SF");
+      expect(item.querySelector("time")).toBeTruthy();
+    });
+  });
+
+  // 036 empty-pill: a legacy/edge empty-or-whitespace title must never render as a bare pill (a padded row
+  // with only a faint date). Render-side second-layer guard - the source (deriveTitle) already maps empty -> "New chat".
+  test("an empty/whitespace title never renders as an empty pill (falls back to a label)", () => {
+    const badRows = [
+      { id: convs[0].id, title: "", created_at: ago(3_600_000) },
+      { id: convs[1].id, title: "   ", created_at: ago(7_200_000) },
+    ];
+    const { container } = render(
+      <Sidebar signedIn conversations={badRows} activeId={convs[0].id} />,
     );
-    expect(previews).toEqual([
-      "median salary for a data engineer in SF",
-      "and what about staff-level roles?",
-    ]);
+    const titles = Array.from(container.querySelectorAll(".sb-item .sb-title"));
+    expect(titles).toHaveLength(2);
+    titles.forEach((t) => expect((t.textContent ?? "").trim().length).toBeGreaterThan(0));
   });
 });
 

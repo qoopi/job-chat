@@ -72,9 +72,7 @@ export function ChatClient({
   signedIn?: boolean;
   accountName?: string;
   accountEmail?: string;
-  conversations?: (Pick<Conversation, "id" | "title" | "created_at"> & {
-    preview?: string;
-  })[];
+  conversations?: Pick<Conversation, "id" | "title" | "created_at">[];
   profileOnArrival?: boolean;
   /** A genuine post-auth return (`/auth/complete` set `?fromAuth=1`) - ONLY such an arrival may replay a
    *  queued draft; a later ordinary signed-in mount that finds a stale (shared "/chat/new") key must not auto-send it. */

@@ -296,40 +296,6 @@ describe.skipIf(!hasCreds)("store against real Postgres", () => {
     await purge(u);
   });
 
-  // Each history row carries the conversation's FIRST user message as a preview, so rows
-  // that share a title stay distinguishable. An assistant turn never becomes the preview.
-  it("listConversations returns the first user message as each row's preview (refresh #2 s5)", async () => {
-    const u = `test-guest-${crypto.randomUUID()}`;
-    await store.getOrCreateUser(u);
-    const conv = await store.createConversation(u, "Median salary in SF");
-    await store.appendMessage(
-      conv.id,
-      "user",
-      "what is the median salary for a data engineer in SF",
-      null,
-    );
-    await store.appendMessage(conv.id, "assistant", "The median is $182k.", {
-      kind: "system",
-    });
-    await store.appendMessage(
-      conv.id,
-      "user",
-      "a later follow-up that must NOT win",
-      null,
-    );
-
-    const empty = await store.createConversation(u, "No messages yet");
-
-    const list = await store.listConversations(u);
-    const byId = new Map(list.map((x) => [x.id, x.preview]));
-    expect(byId.get(conv.id)).toBe(
-      "what is the median salary for a data engineer in SF",
-    ); // first user turn only
-    expect(byId.get(empty.id)).toBe(""); // COALESCE guard: a conversation with no user turn
-
-    await purge(u);
-  });
-
   // Deleting a conversation removes it AND its messages (the FK has no ON DELETE CASCADE, so the
   // store deletes both in one transaction). A sibling conversation's messages are untouched.
   it("deleteConversation removes the conversation and its messages, leaving siblings intact (AC-21)", async () => {

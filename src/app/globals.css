@@ -615,12 +615,10 @@ a:hover {
   border-color: var(--accent);
 }
 
-/* The history row's second line - a muted, single-line first-message preview that
-   distinguishes duplicate titles. */
-.sb-item .sb-preview {
+/* The history row's title - single line, ellipsis on overflow; the date sits below it and the .sb-item
+   active highlight wraps the whole row (design contract: title + relative date). */
+.sb-item .sb-title {
   display: block;
-  font-size: var(--fs-2xs);
-  color: var(--shell-fg-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

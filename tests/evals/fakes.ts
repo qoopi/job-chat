@@ -115,7 +115,6 @@ export function createMemoryStore(): Store {
           id,
           title,
           created_at,
-          preview: "",
         }));
     },
     async messageCounts({
