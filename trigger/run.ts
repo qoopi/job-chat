@@ -1,7 +1,7 @@
 import type { ToolSet } from "ai";
 import type { Store } from "@shared/store";
 import type { GuardConfig } from "@shared/env";
-import type { CoverageProfile } from "@shared/analytics";
+import type { CoverageProfile, CorpusSummary } from "@shared/analytics";
 import type { Profile } from "@shared/profile";
 import { isProfileCardPayload, type RefusalReason } from "@shared/insight";
 import { checkConversationGuards } from "./guard";
@@ -39,6 +39,9 @@ export interface ChatRunDeps<R> {
   coverageProfile?: () => Promise<CoverageProfile>;
   /** The owner's structured profile, resolved PER TURN (never memoized); a failure never blocks the turn. */
   profile?: (chatId: string) => Promise<Profile | null>;
+  /** The live corpus summary for the CORPUS note (044 AC-2/3), fetched ONCE per conversation and reused
+   *  across its turns (createChatRun memoizes by chatId); a failure degrades to NO note, never a turn failure. */
+  corpus?: (chatId: string) => Promise<CorpusSummary | null>;
   streamModel: StreamModel<R>;
 }
 
@@ -78,7 +81,47 @@ function dataScopeNote(p: CoverageProfile): string {
   );
 }
 
+/** The CORPUS note (044 AC-2): a compact text block listing what the live data actually contains, so the
+ *  agent draws filter spellings from real values and can be honest when a requested value is absent.
+ *  Omitted line = that dimension had no values. Prompt v3 teaches how to use it. */
+function corpusNote(c: CorpusSummary): string {
+  const snapshot = c.freshestAt.slice(0, 10); // YYYY-MM-DD
+  const salaryPct = Math.round(c.salaryCoverage * 100);
+  const lines = [
+    `CORPUS: the live data you answer from right now - ${c.total.toLocaleString()} open postings, snapshot ${snapshot}.` +
+      ` These are the values that EXIST; filter matching is case-insensitive (use any casing), but only filter on values shown here.`,
+  ];
+  if (c.sources.length)
+    lines.push(`Sources: ${c.sources.map((s) => `${s.source} ${Math.round(s.share * 100)}%`).join(", ")}.`);
+  if (c.topCities.length) lines.push(`Top cities: ${c.topCities.join(", ")}.`);
+  if (c.countries.length) lines.push(`Countries: ${c.countries.join(", ")}.`);
+  if (c.experienceLevels.length) lines.push(`experience_level values: ${c.experienceLevels.join(", ")}.`);
+  if (c.employmentTypes.length) lines.push(`employment_type values: ${c.employmentTypes.join(", ")}.`);
+  if (c.locationKinds.length) lines.push(`location_kind values: ${c.locationKinds.join(", ")}.`);
+  lines.push(`Salary present on ~${salaryPct}% of postings.`);
+  return lines.join(" ");
+}
+
 export function createChatRun<R>(deps: ChatRunDeps<R>) {
+  // AC-2/3: the CORPUS summary is fetched ONCE per conversation and reused across its turns, so the note
+  // (and the cached system prefix it rides in) stays byte-stable while a chat is active; a NEW chat
+  // (new chatId) re-fetches fresh corpus facts. Held for the life of this run factory (a module singleton
+  // in trigger/chat.ts). A rejected fetch is NOT pinned - a later turn retries.
+  const corpusByChat = new Map<string, Promise<CorpusSummary | null>>();
+  const resolveCorpus = (
+    chatId: string,
+    fetch: (id: string) => Promise<CorpusSummary | null>,
+  ): Promise<CorpusSummary | null> => {
+    const cached = corpusByChat.get(chatId);
+    if (cached) return cached;
+    const pending = fetch(chatId).catch((err) => {
+      corpusByChat.delete(chatId);
+      throw err;
+    });
+    corpusByChat.set(chatId, pending);
+    return pending;
+  };
+
   return async (args: ChatRunArgs): Promise<R | undefined> => {
     const { chatId, messages, trigger, tools, signal } = args;
 
@@ -137,6 +180,16 @@ export function createChatRun<R>(deps: ChatRunDeps<R>) {
         if (prof) system = `${system}\n\n${profileNote(prof)}`;
       } catch {
         // keep the prompt as-is
+      }
+    }
+
+    // The CORPUS note (once per conversation, reused across turns); a failed fetch degrades to no note.
+    if (deps.corpus) {
+      try {
+        const summary = await resolveCorpus(chatId, deps.corpus);
+        if (summary) system = `${system}\n\n${corpusNote(summary)}`;
+      } catch {
+        // keep the prompt as-is (fetch failed) - never block the turn
       }
     }
 

@@ -620,6 +620,52 @@ export interface CoverageProfile {
   salaryCoverage: number; // fraction of postings carrying a salary range (0..1)
 }
 
+/** The compact "what the live data contains" summary for the per-conversation CORPUS note (044 AC-2):
+ *  size, snapshot, source mix, top cities, countries, and the canonical (most-frequent casing) values of
+ *  each free-text categorical dimension, plus salary coverage. Rendered to text in trigger/run.ts. */
+export interface CorpusSummary {
+  total: number; // open postings
+  freshestAt: string; // max(ingested_at), CH text form (the snapshot age source)
+  salaryCoverage: number; // fraction of postings carrying a salary range (0..1)
+  sources: { source: string; share: number }[]; // source mix, top-first, shares 0..1
+  topCities: string[]; // up to 15, most-frequent first
+  countries: string[]; // countries present, most-frequent first
+  experienceLevels: string[]; // canonical spellings (most frequent casing per value), most-frequent first
+  employmentTypes: string[];
+  locationKinds: string[];
+}
+
+/** The corpus summary query (044 AC-2): ONE read over the current open set. Pure/unit-testable like the
+ *  other builders. Free-text categorical values dedupe by lowerUTF8 group and pick the most frequent
+ *  casing (argMax over per-casing counts) so "Senior"/"senior" collapse to one canonical spelling; source
+ *  names + shares come back as parallel arrays (identical ORDER BY) to avoid tuple serialization. */
+export function buildCorpusSql(table: string): string {
+  const from = `FROM ${table} FINAL`;
+  const open = `WHERE ${openSetFilter(table)}`;
+  // Distinct non-empty values of a free-text column, canonical casing first (argMax over per-casing
+  // counts within each lowercased group), ordered by group frequency then value.
+  const canonical = (col: string): string =>
+    `(SELECT groupArray(v) FROM (SELECT argMax(${col}, c) AS v FROM (SELECT ${col}, count() AS c ${from} ${open} AND ${col} != '' GROUP BY ${col}) GROUP BY lowerUTF8(${col}) ORDER BY sum(c) DESC, v ASC))`;
+  // Top-N non-null values of a nullable string column, most-frequent first.
+  const topValues = (col: string, limit: number): string =>
+    `(SELECT groupArray(${col}) FROM (SELECT ${col} ${from} ${open} AND ${col} IS NOT NULL AND ${col} != '' GROUP BY ${col} ORDER BY count() DESC, ${col} ASC LIMIT ${limit}))`;
+  return assemble([
+    "SELECT",
+    "  count() AS total,",
+    "  toString(max(ingested_at)) AS freshestAt,",
+    "  round(countIf(salary_min IS NOT NULL AND salary_max IS NOT NULL) / count(), 4) AS salaryCoverage,",
+    `  ${topValues("city", 15)} AS topCities,`,
+    `  ${topValues("country", 40)} AS countries,`,
+    `  ${canonical("experience_level")} AS experienceLevels,`,
+    `  ${canonical("employment_type")} AS employmentTypes,`,
+    `  (SELECT groupArray(v) FROM (SELECT toString(location_kind) AS v ${from} ${open} GROUP BY location_kind ORDER BY count() DESC, v ASC)) AS locationKinds,`,
+    `  (SELECT groupArray(source) FROM (SELECT source ${from} ${open} GROUP BY source ORDER BY count() DESC, source ASC LIMIT 8)) AS sourceNames,`,
+    `  (SELECT groupArray(sh) FROM (SELECT round(count() / (SELECT count() ${from} ${open}), 4) AS sh, count() AS c ${from} ${open} GROUP BY source ORDER BY c DESC, source ASC LIMIT 8)) AS sourceShares`,
+    from,
+    open,
+  ]);
+}
+
 export interface Analytics {
   runQuery(name: TemplateName, params: unknown): Promise<QueryResult>;
   // Execution seam for query_postings; tools receive Analytics, never a raw client.
@@ -629,6 +675,9 @@ export interface Analytics {
   /** Corpus shape for the DATA SCOPE note. Memoized on the per-process analytics singleton (once per isolate,
    *  not per turn); only a fulfilled result is cached, a transient failure is retried. */
   coverageProfile(): Promise<CoverageProfile>;
+  /** The compact corpus summary for the per-conversation CORPUS note (044 AC-2). One read, NOT memoized
+   *  here - the per-conversation memo lives in trigger/run.ts so a NEW conversation gets fresh facts. */
+  corpusSummary(): Promise<CorpusSummary>;
 }
 
 /** Build the analytics catalog over a client. Production injects the read-only `jobchat_ro` user reading
@@ -747,6 +796,38 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     };
   }
 
+  // One corpus-summary read, parsed into CorpusSummary. NOT memoized here (unlike coverageProfile): the
+  // per-conversation memo lives in trigger/run.ts, so each NEW conversation re-fetches fresh corpus facts.
+  async function computeCorpus(): Promise<CorpusSummary> {
+    const sql = buildCorpusSql(table);
+    const rs = await client.query({ query: sql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS });
+    const [row] = await rs.json<{
+      total: number;
+      freshestAt: string;
+      salaryCoverage: number;
+      topCities: string[];
+      countries: string[];
+      experienceLevels: string[];
+      employmentTypes: string[];
+      locationKinds: string[];
+      sourceNames: string[];
+      sourceShares: number[];
+    }>();
+    const names = row.sourceNames ?? [];
+    const shares = row.sourceShares ?? [];
+    return {
+      total: Number(row.total),
+      freshestAt: String(row.freshestAt),
+      salaryCoverage: Number(row.salaryCoverage),
+      topCities: (row.topCities ?? []).map(String),
+      countries: (row.countries ?? []).map(String),
+      experienceLevels: (row.experienceLevels ?? []).map(String),
+      employmentTypes: (row.employmentTypes ?? []).map(String),
+      locationKinds: (row.locationKinds ?? []).map(String),
+      sources: names.map((s, i) => ({ source: String(s), share: Number(shares[i] ?? 0) })),
+    };
+  }
+
   return {
     runQuery: (name, params) => executeBuilt(buildTemplateSql(name, params, table)),
     runComposedQuery: (params) => executeBuilt(buildComposedSql(params, table)),
@@ -757,5 +838,6 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
         coverageCache = undefined;
         throw err;
       })),
+    corpusSummary: () => computeCorpus(),
   };
 }

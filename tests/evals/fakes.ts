@@ -1,5 +1,6 @@
 import type {
   Analytics,
+  CorpusSummary,
   CoverageProfile,
   QueryResult,
 } from "@shared/analytics";
@@ -245,7 +246,27 @@ export function fakeAnalytics(): Analytics {
       meta: { freshestAt: FIXTURE_INGESTED_AT, topCompany: "Google", topShare: 0.5 },
     }),
     coverageProfile: fakeCoverageProfile,
+    corpusSummary: fakeCorpusSummary,
   };
+}
+
+/**
+ * The corpus summary shape a with-corpus run would inject, matching the fixture's domain values. The eval
+ * runner does NOT wire the CORPUS note into createChatRun (routing is scored under the shipped prompt
+ * text, not the note), so this only satisfies the Analytics contract - it is never rendered in a run.
+ */
+export function fakeCorpusSummary(): Promise<CorpusSummary> {
+  return Promise.resolve({
+    total: 3488,
+    freshestAt: FIXTURE_INGESTED_AT,
+    salaryCoverage: 0.65,
+    sources: [{ source: "searchnapply", share: 1 }],
+    topCities: ["San Francisco", "Los Angeles", "Berlin"],
+    countries: ["United States", "Germany"],
+    experienceLevels: ["Senior", "Junior", "Staff"],
+    employmentTypes: ["full-time", "contract"],
+    locationKinds: ["onsite", "hybrid", "remote"],
+  });
 }
 
 /**

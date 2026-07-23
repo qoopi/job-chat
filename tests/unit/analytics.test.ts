@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ClickHouseClient } from "@clickhouse/client";
 import {
   buildComposedSql,
+  buildCorpusSql,
   buildSearchPostingsSql,
   buildTemplateSql,
   createAnalytics,
@@ -905,5 +906,81 @@ describe("executeBuilt fires the rows and meta queries concurrently (perf)", () 
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }
+  });
+});
+
+// 044 AC-2: the per-conversation CORPUS summary query - ONE read over the open set describing what the
+// live data contains. Pure builder (shape pinned here); the note it feeds is rendered/tested in run-scope.
+describe("buildCorpusSql (044 AC-2 corpus summary query)", () => {
+  const sql = buildCorpusSql("postings_test");
+
+  it("reads the open set once with the headline aggregates", () => {
+    expect(sql).toContain("count() AS total");
+    expect(sql).toContain("toString(max(ingested_at)) AS freshestAt");
+    expect(sql).toContain("countIf(salary_min IS NOT NULL AND salary_max IS NOT NULL) / count()");
+    // The top-level read AND every subquery scope to the open set (latest ingest snapshot).
+    expect(sql).toContain("ingested_at = (SELECT max(ingested_at) FROM postings_test)");
+    expect(sql).toContain("FROM postings_test FINAL");
+  });
+
+  it("selects top cities and countries by frequency, non-null only", () => {
+    expect(sql).toContain("groupArray(city)");
+    expect(sql).toContain("city IS NOT NULL AND city != ''");
+    expect(sql).toContain("ORDER BY count() DESC, city ASC LIMIT 15");
+    expect(sql).toContain("groupArray(country)");
+    expect(sql).toContain("country IS NOT NULL AND country != ''");
+    expect(sql).toContain("LIMIT 40");
+  });
+
+  it("dedupes each free-text categorical by lowercased group, keeping the most frequent casing", () => {
+    // canonical spelling = argMax(value, per-casing count) within each lowerUTF8 group.
+    expect(sql).toContain("argMax(experience_level, c)");
+    expect(sql).toContain("GROUP BY lowerUTF8(experience_level)");
+    expect(sql).toContain("argMax(employment_type, c)");
+    expect(sql).toContain("GROUP BY lowerUTF8(employment_type)");
+  });
+
+  it("serializes location_kind by name and returns source names + shares as aligned parallel arrays", () => {
+    expect(sql).toContain("toString(location_kind) AS v");
+    expect(sql).toContain("AS locationKinds");
+    expect(sql).toContain("groupArray(source)");
+    expect(sql).toContain("AS sourceNames");
+    expect(sql).toContain("AS sourceShares");
+    expect(sql).toContain("round(count() / (SELECT count()"); // share denominator = open-set total
+  });
+});
+
+describe("analytics.corpusSummary parses the corpus row (044 AC-2)", () => {
+  it("maps the single JSON row into a CorpusSummary, pairing source names with shares by index", async () => {
+    const row = {
+      total: 3488,
+      freshestAt: "2026-07-18 06:00:00",
+      salaryCoverage: 0.65,
+      topCities: ["San Francisco", "Los Angeles"],
+      countries: ["United States", "Germany"],
+      experienceLevels: ["Senior", "Junior", "Staff"],
+      employmentTypes: ["full-time", "contract"],
+      locationKinds: ["onsite", "remote", "hybrid"],
+      sourceNames: ["searchnapply", "fixture"],
+      sourceShares: [0.98, 0.02],
+    };
+    const client = {
+      query: async () => ({ json: async () => [row] }),
+    } as unknown as ClickHouseClient;
+    const analytics = createAnalytics({ client, table: "postings_test" });
+
+    const c = await analytics.corpusSummary();
+    expect(c.total).toBe(3488);
+    expect(c.freshestAt).toBe("2026-07-18 06:00:00");
+    expect(c.salaryCoverage).toBe(0.65);
+    expect(c.topCities).toEqual(["San Francisco", "Los Angeles"]);
+    expect(c.countries).toEqual(["United States", "Germany"]);
+    expect(c.experienceLevels).toEqual(["Senior", "Junior", "Staff"]);
+    expect(c.employmentTypes).toEqual(["full-time", "contract"]);
+    expect(c.locationKinds).toEqual(["onsite", "remote", "hybrid"]);
+    expect(c.sources).toEqual([
+      { source: "searchnapply", share: 0.98 },
+      { source: "fixture", share: 0.02 },
+    ]);
   });
 });

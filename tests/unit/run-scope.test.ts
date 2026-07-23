@@ -8,7 +8,7 @@ import {
 } from "../../trigger/run";
 import type { Message, Store } from "@shared/store";
 
-import type { CoverageProfile } from "@shared/analytics";
+import type { CorpusSummary, CoverageProfile } from "@shared/analytics";
 import type { Profile } from "@shared/profile";
 
 // createChatRun appends a one-line DATA SCOPE note (from the corpus profile) to the system
@@ -200,6 +200,116 @@ describe("createChatRun PROFILE note injection (030)", () => {
     const res = await run(args());
     expect(res).toBe("ok");
     expect(capturedSystem).toBe("BASE PROMPT"); // the prompt is intact, the turn ran
+  });
+});
+
+// createChatRun appends a per-conversation CORPUS note (044 AC-2/3): what the live data contains, fetched
+// ONCE per conversation (memoized by chatId) and reused byte-identically across its turns so the cached
+// system prefix stays warm; a NEW conversation re-fetches fresh facts; a failed fetch degrades to NO note.
+const OWNER_CORPUS: CorpusSummary = {
+  total: 3488,
+  freshestAt: "2026-07-18 06:00:00",
+  salaryCoverage: 0.65,
+  sources: [{ source: "searchnapply", share: 0.98 }, { source: "fixture", share: 0.02 }],
+  topCities: ["San Francisco", "Los Angeles", "Berlin"],
+  countries: ["United States", "Germany"],
+  experienceLevels: ["Senior", "Junior", "Staff"],
+  employmentTypes: ["full-time", "contract"],
+  locationKinds: ["onsite", "remote", "hybrid"],
+};
+
+describe("createChatRun CORPUS note injection (044 AC-2/3)", () => {
+  it("renders a compact CORPUS note from the fixture summary (the values that EXIST)", async () => {
+    let capturedSystem = "";
+    const run = createChatRun({
+      ...base,
+      corpus: async () => OWNER_CORPUS,
+      streamModel: ({ system }) => {
+        capturedSystem = system;
+        return "ok" as const;
+      },
+    });
+    const res = await run(args());
+    expect(res).toBe("ok");
+    expect(capturedSystem).toContain("BASE PROMPT"); // base prompt preserved
+    expect(capturedSystem).toContain("CORPUS:");
+    expect(capturedSystem).toContain("3,488 open postings");
+    expect(capturedSystem).toContain("snapshot 2026-07-18");
+    expect(capturedSystem).toContain("Sources: searchnapply 98%, fixture 2%.");
+    expect(capturedSystem).toContain("Top cities: San Francisco, Los Angeles, Berlin.");
+    expect(capturedSystem).toContain("Countries: United States, Germany.");
+    expect(capturedSystem).toContain("experience_level values: Senior, Junior, Staff.");
+    expect(capturedSystem).toContain("employment_type values: full-time, contract.");
+    expect(capturedSystem).toContain("location_kind values: onsite, remote, hybrid.");
+    expect(capturedSystem).toContain("Salary present on ~65%");
+    expect(capturedSystem.toLowerCase()).toContain("case-insensitive");
+  });
+
+  it("falls back to the base prompt if the corpus fetch fails (never blocks the turn)", async () => {
+    let capturedSystem = "";
+    const run = createChatRun({
+      ...base,
+      corpus: async () => {
+        throw new Error("clickhouse unreachable");
+      },
+      streamModel: ({ system }) => {
+        capturedSystem = system;
+        return "ok" as const;
+      },
+    });
+    const res = await run(args());
+    expect(res).toBe("ok");
+    expect(capturedSystem).toBe("BASE PROMPT");
+  });
+
+  it("omits the note entirely when no corpus dep is provided", async () => {
+    let capturedSystem = "";
+    const run = createChatRun({
+      ...base,
+      streamModel: ({ system }) => {
+        capturedSystem = system;
+        return "ok" as const;
+      },
+    });
+    await run(args());
+    expect(capturedSystem).toBe("BASE PROMPT");
+  });
+
+  it("fetches the corpus ONCE per conversation and reuses it byte-identically across turns (AC-3)", async () => {
+    let calls = 0;
+    const captured: string[] = [];
+    const run = createChatRun({
+      ...base,
+      corpus: async () => {
+        calls++;
+        return OWNER_CORPUS;
+      },
+      streamModel: ({ system }) => {
+        captured.push(system);
+        return "ok" as const;
+      },
+    });
+    await run(args());
+    await run(args());
+    expect(calls).toBe(1); // fetched on the first turn only, reused on the second
+    expect(captured).toHaveLength(2);
+    expect(captured[0]).toContain("CORPUS:");
+    expect(captured[1]).toBe(captured[0]); // byte-identical -> the cached system prefix stays warm
+  });
+
+  it("re-fetches fresh corpus facts for a NEW conversation (a different chatId)", async () => {
+    const seen: string[] = [];
+    const run = createChatRun({
+      ...base,
+      corpus: async (chatId) => {
+        seen.push(chatId);
+        return OWNER_CORPUS;
+      },
+      streamModel: () => "ok" as const,
+    });
+    await run(args()); // chatId c1
+    await run({ ...args(), chatId: "c2" });
+    expect(seen).toEqual(["c1", "c2"]); // c1 memoized, c2 fetched fresh (not served from c1's memo)
   });
 });
 

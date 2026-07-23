@@ -175,6 +175,22 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
     expect(cityCounts).toEqual([6, 6, 6]); // all three casings hit the same 6 "San Francisco" rows
   });
 
+  // 044 AC-2: the ONE corpus-summary query runs against real ClickHouse and parses. Set/membership
+  // assertions (not exact array order) - the note needs the value SET, and this proves the argMax
+  // canonical-casing dedup and the parallel source-name/share arrays execute and parse end to end.
+  it("corpusSummary summarizes the seeded fixture (044 AC-2)", async () => {
+    const c = await analytics.corpusSummary();
+    expect(c.total).toBe(10);
+    expect(c.freshestAt).toBe(FIXTURE_INGESTED_AT);
+    expect(c.salaryCoverage).toBeCloseTo(0.8, 5);
+    expect(new Set(c.experienceLevels)).toEqual(new Set(["Senior", "Junior", "Staff"]));
+    expect(new Set(c.employmentTypes)).toEqual(new Set(["full-time"]));
+    expect(new Set(c.locationKinds)).toEqual(new Set(["onsite", "remote", "hybrid"]));
+    expect(new Set(c.topCities)).toEqual(new Set(["San Francisco", "Los Angeles"]));
+    expect(new Set(c.countries)).toEqual(new Set(["United States"]));
+    expect(c.sources).toEqual([{ source: "fixture", share: 1 }]);
+  });
+
   // The dominant-currency GROUP BY / ORDER BY count() DESC selection must execute against genuinely
   // mixed currencies on real ClickHouse (the shared fixture is all-USD; string-shape unit tests use a
   // mocked client). Seeds its own table (3 USD rows, 1 EUR row) and proves the salary aggregate

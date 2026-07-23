@@ -93,6 +93,8 @@ const chatRun = createChatRun({
   coverageProfile: () => analytics().coverageProfile(),
   profile: (chatId) =>
     (turnOwnerContext.get(chatId) ?? resolveOwnerContextForTurn(chatId)).then((c) => c.profile),
+  // The per-conversation CORPUS note (044): one RO-client query, memoized per chatId in createChatRun.
+  corpus: () => analytics().corpusSummary(),
   streamModel,
 });
 
