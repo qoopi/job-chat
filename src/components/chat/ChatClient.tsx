@@ -60,6 +60,7 @@ export function ChatClient({
   conversations: conversationsInitial = [],
   profileOnArrival = false,
   fromAuth = false,
+  hasProfile = false,
 }: {
   conversationId: string;
   title?: string;
@@ -77,6 +78,9 @@ export function ChatClient({
   /** A genuine post-auth return (`/auth/complete` set `?fromAuth=1`) - ONLY such an arrival may replay a
    *  queued draft; a later ordinary signed-in mount that finds a stale (shared "/chat/new") key must not auto-send it. */
   fromAuth?: boolean;
+  /** SSR-resolved: the returning account already has a completed profile. On the post-auth arrival this
+   *  skips the form and auto-continues the queued fit question directly (item 2). */
+  hasProfile?: boolean;
 }) {
   const router = useRouter();
   const transport = useJobChatTransport({ e2e, conversationId });
@@ -345,6 +349,15 @@ export function ChatClient({
     ],
   );
 
+  // Fire the armed one-shot fit question (F3). Null the ref BEFORE the send so a double-fire can never send
+  // twice; `send` still enforces the reentrancy + cap guards. One home for both firing sites: a profile save
+  // and the profile-already-on-file post-auth auto-continue (item 2).
+  const fireAutoContinue = useCallback(() => {
+    const question = autoContinueRef.current;
+    autoContinueRef.current = null;
+    if (question) void send(question);
+  }, [send]);
+
   // The profile card is out-of-band: the task persists it under a DETERMINISTIC id, and the form injects it
   // into the LIVE thread under the SAME id, so a re-save REPLACES the one card (reconcileMessagesById folds by id).
   const onProfileSaved = useCallback(
@@ -356,13 +369,10 @@ export function ChatClient({
         parts: [{ type: "data-profile-card", id: `${id}-card`, data: { kind: "profile-card", profile } }],
       } as UIMessage;
       setMessages((prev) => (prev.some((m) => m.id === id) ? prev.map((m) => (m.id === id ? card : m)) : [...prev, card]));
-      // F3: if an invite started this flow, re-run the fit question it interrupted. Null the ref BEFORE the
-      // send so a double-save can never fire twice; `send` still enforces the reentrancy + cap guards itself.
-      const question = autoContinueRef.current;
-      autoContinueRef.current = null;
-      if (question) void send(question);
+      // F3: if an invite started this flow, re-run the fit question it interrupted.
+      fireAutoContinue();
     },
-    [conversationId, setMessages, send],
+    [conversationId, setMessages, fireAutoContinue],
   );
 
   // Arrival: deliver turn 1 through the public send path. Message #1 was SSR-loaded into initialMessages;
@@ -404,12 +414,13 @@ export function ChatClient({
         const queued = takeQueuedDraft(conversationId);
         const pendingInvite = takePendingProfileInvite(conversationId);
         if (queued && fromAuth) void send(queued);
-        // F2: the post-auth return OPENS the profile form (the interaction-spec flow C step 4), never a second
-        // invite card. F3: this is the guest continuation of onAuthInvite across the redirect - arm the fit
-        // question the SSR thread's trailing invite interrupted, so the save auto-continues it.
+        // F3: this is the guest continuation of onAuthInvite across the redirect - arm the fit question the
+        // SSR thread's trailing invite interrupted. Item 2: if a profile is ALREADY on file, skip the form and
+        // auto-continue the queued fit question NOW; otherwise F2 opens the form and the save fires it.
         else if (pendingInvite && fromAuth) {
           armAutoContinue();
-          openProfile();
+          if (hasProfile) fireAutoContinue();
+          else openProfile();
         }
       }
     });

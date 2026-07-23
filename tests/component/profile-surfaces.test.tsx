@@ -644,3 +644,41 @@ describe("DetailProfile error state (poll contract)", () => {
     expect(screen.getByText("Your previous profile is untouched.")).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------------------------------
+// Item 2 (register 16): a post-auth return whose account ALREADY has a profile on file must SKIP the form
+// and auto-continue the queued fit question (the same F3 one-shot machinery, armed at a new site). No
+// profile -> the form opens (F2 unchanged). `hasProfile` is the SSR-resolved signal the page passes down.
+// ---------------------------------------------------------------------------------------------------
+describe("Item 2 fromAuth-with-profile auto-continue (register 16)", () => {
+  const FIT_Q = "find me a job that fits";
+  function threadWithInvite(): UIMessage[] {
+    return [
+      { id: "u-fit", role: "user", parts: [{ type: "text", text: FIT_Q }] } as UIMessage,
+      assistantPart("data-profile-invite", { kind: "profile-invite" }),
+    ];
+  }
+
+  test("Should_SkipFormAndAutoContinue_When_PostAuthArrivalWithProfileOnFile", async () => {
+    sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
+    renderChat(threadWithInvite(), { e2e: true, fromAuth: true, hasProfile: true });
+    // The queued fit question is re-asked exactly once (original + one auto re-run) - no manual "So?".
+    await waitFor(() => expect(screen.getAllByText(FIT_Q)).toHaveLength(2));
+    // The form is NOT opened (a profile is already on file), and getMyProfile is never consulted.
+    expect(screen.queryByRole("region", { name: "Your profile" })).toBeNull();
+    expect(getMyProfile).not.toHaveBeenCalled();
+    // read-once: the flag is cleared on consumption.
+    expect(sessionStorage.getItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`)).toBeNull();
+  });
+
+  test("Should_OpenFormAndNotAutoContinue_When_PostAuthArrivalWithoutProfile (F2 unchanged)", async () => {
+    sessionStorage.setItem(`jobchat_pending_profile_invite:${CONVERSATION_ID}`, "1");
+    renderChat(threadWithInvite(), { e2e: true, fromAuth: true }); // hasProfile defaults false
+    // No profile on file -> the form opens (interaction-spec flow C step 4)...
+    expect(await screen.findByRole("region", { name: "Your profile" })).toBeTruthy();
+    // ...and the fit question is NOT auto-resent (it waits for the save to fire the armed continuation).
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.getAllByText(FIT_Q)).toHaveLength(1);
+  });
+});

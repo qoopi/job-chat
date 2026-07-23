@@ -63,3 +63,10 @@ export function listOwnerConversations(
 ): Promise<ConversationSummary[]> {
   return store().listConversations(accountUserId);
 }
+
+/** Whether the account has a COMPLETED profile on file (extracted, not a pending inputs-only row). Reuses
+ *  the existing profile read - no new endpoint. Drives the chat page's post-auth auto-continue decision. */
+export async function viewerHasProfile(accountUserId: string): Promise<boolean> {
+  const row = await store().getProfile(accountUserId);
+  return Boolean(row?.profile && row?.extracted_at);
+}
