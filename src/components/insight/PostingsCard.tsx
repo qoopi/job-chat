@@ -18,6 +18,18 @@ import { Verdict } from "./Verdict";
 // The job-postings card (an InsightCard child). Rows are score-ordered: ORDER IS THE RANK (no percentages/badges).
 // Two surfaces: the in-chat card (capped, honesty caption, no-matches variant) and the detail panel full list (PostingsPanel).
 
+/** The role cell: a new-tab link to the posting when it carries an apply link, else plain text exactly as
+ *  before. rel noopener+noreferrer on every external target; an empty/absent apply_url never links. */
+function RoleCell({ row }: { row: ScoredPostingRow }) {
+  const title = <strong>{row.title}</strong>;
+  if (!row.applyUrl) return title;
+  return (
+    <a href={row.applyUrl} target="_blank" rel="noopener noreferrer">
+      {title}
+    </a>
+  );
+}
+
 /** The 5-column table body. A missing salary reads muted "not listed" (never blank). */
 function PostingsTable({ rows }: { rows: ScoredPostingRow[] }) {
   return (
@@ -37,7 +49,7 @@ function PostingsTable({ rows }: { rows: ScoredPostingRow[] }) {
           return (
             <tr key={i}>
               <td>
-                <strong>{r.title}</strong>
+                <RoleCell row={r} />
               </td>
               <td>{r.company}</td>
               <td>{locationLabel(r)}</td>
