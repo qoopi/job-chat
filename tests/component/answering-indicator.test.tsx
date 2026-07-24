@@ -27,4 +27,15 @@ describe("AnsweringIndicator", () => {
     const { container } = render(<AnsweringIndicator />);
     expect(container.querySelectorAll(".answering-dot").length).toBe(3);
   });
+
+  // A narrated wait (parsing a profile / looking for fitting postings) shows the label as visible text and
+  // as the accessible name, still an ai-shaped status bubble with the animated dots.
+  test("renders an optional label as visible text and the accessible name", () => {
+    const { container } = render(<AnsweringIndicator label="Parsing your profile..." />);
+    const bubble = container.querySelector(".bubble.ai.answering");
+    expect(bubble).toBeTruthy();
+    expect(screen.getByRole("status", { name: "Parsing your profile..." })).toBe(bubble);
+    expect(container.querySelector(".answering-label")?.textContent).toBe("Parsing your profile...");
+    expect(container.querySelectorAll(".answering-dot").length).toBe(3);
+  });
 });

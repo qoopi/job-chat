@@ -427,6 +427,49 @@ describe("ProfilePanel form", () => {
     expect(alert.textContent).toMatch(/Add a resume or a GitHub username/);
   });
 
+  // The in-thread parsing indicator toggles around the extraction poll: ON before the poll runs, and the
+  // parent clears it WITH the injected card on success (so this panel does not clear it on the success path).
+  test("signals parsing ON before the poll and hands the saved profile to the parent (success)", async () => {
+    const onParsingChange = vi.fn();
+    const onProfileSaved = vi.fn();
+    vi.mocked(saveProfile).mockResolvedValue({ ok: true, runId: "run-1" } as never);
+    vi.mocked(pollProfileSave).mockResolvedValue({ outcome: "saved", profile, githubUsername: "octocat" });
+    render(
+      <ProfilePanel
+        conversationId={CONVERSATION_ID}
+        onClose={vi.fn()}
+        onProfileSaved={onProfileSaved}
+        onParsingChange={onParsingChange}
+      />,
+    );
+    fireEvent.change(await screen.findByLabelText(/GitHub username/), { target: { value: "octocat" } });
+    fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
+    await waitFor(() => expect(onProfileSaved).toHaveBeenCalledWith(profile));
+    expect(onParsingChange).toHaveBeenCalledWith(true);
+    // The success path leaves the clear to the parent (which does it with the card) - never here.
+    expect(onParsingChange).not.toHaveBeenCalledWith(false);
+  });
+
+  // On a failed extraction the panel clears the indicator itself (no card will land in the thread).
+  test("clears the parsing indicator when the extraction poll fails", async () => {
+    const onParsingChange = vi.fn();
+    vi.mocked(saveProfile).mockResolvedValue({ ok: true, runId: "run-1" } as never);
+    vi.mocked(pollProfileSave).mockResolvedValue({ outcome: "error", hadPriorProfile: false });
+    render(
+      <ProfilePanel
+        conversationId={CONVERSATION_ID}
+        onClose={vi.fn()}
+        onProfileSaved={vi.fn()}
+        onParsingChange={onParsingChange}
+      />,
+    );
+    fireEvent.change(await screen.findByLabelText(/GitHub username/), { target: { value: "octocat" } });
+    fireEvent.click(screen.getByRole("button", { name: "Build my profile" }));
+    await screen.findByText("Couldn’t build the profile");
+    expect(onParsingChange).toHaveBeenCalledWith(true);
+    expect(onParsingChange).toHaveBeenCalledWith(false);
+  });
+
   // Inherited requirement (028 review, binding): the Update form MUST prefill the stored github_username
   // AND indicate a resume is on file - saveProfileInputs is full-replace, so an empty field on re-save
   // would otherwise clear it silently with no warning shown.

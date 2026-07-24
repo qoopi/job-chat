@@ -15,6 +15,9 @@ import { classifyCardData, dataParts, messageText, proseSpans } from "@/lib/chat
 const AUTH_INVITE_TEXT = "Sign in with Google to get matched — I’ll keep your profile and history.";
 const PROFILE_INVITE_TEXT = "Add your resume and GitHub — I’ll find roles that fit you.";
 
+// The in-thread narration while a profile is being parsed (transient, never persisted).
+const PARSING_LABEL = "Parsing your profile...";
+
 // The card kinds that ARE the answer surface: when one is present the model's prose is suppressed (single-surface rule).
 const ANSWER_CARD_KINDS = new Set([
   "insight",
@@ -205,6 +208,8 @@ export function MessageList({
   onEditProfile,
   onAuthInvite,
   liveError = false,
+  parsingProfile = false,
+  pendingLabel,
 }: {
   messages: UIMessage[];
   pending: boolean;
@@ -218,6 +223,11 @@ export function MessageList({
   onAuthInvite?: () => void;
   /** useChat error state (a turn errored at the SDK level, streaming NO data-error part); render the card + Retry unless a part already covers the tail. */
   liveError?: boolean;
+  /** While the profile poll is active: a transient "Parsing your profile..." indicator stands at the tail
+   *  (never persisted) and yields to the profile card when it lands. */
+  parsingProfile?: boolean;
+  /** A narration label for the pending indicator (the auto-continued fit search reads as looking-for-postings). */
+  pendingLabel?: string;
 }) {
   const last = messages[messages.length - 1];
   // The answering indicator stands in while a turn is in flight and hasn't produced anything renderable (no
@@ -230,7 +240,7 @@ export function MessageList({
   // contract stored no assistant row, so a reload hydrates the bare question. Surface the SAME error card +
   // Retry the live-error path shows - regenerate() over a user tail keeps it and fires "regenerate-message",
   // which the run gate answers. Excluded when liveError already owns the tail so the two never double-render.
-  const showFailedTailRetry = !pending && !liveError && last?.role === "user";
+  const showFailedTailRetry = !pending && !liveError && !parsingProfile && last?.role === "user";
 
   return (
     <div className="thread">
@@ -260,7 +270,13 @@ export function MessageList({
           <ErrorCard kind="system" onRetry={onRetry} />
         </div>
       ) : null}
-      {showTrailingIndicator ? <AnsweringIndicator /> : null}
+      {/* The parsing indicator stands independently of the run-wake gap (the poll runs with no chat turn in
+          flight); otherwise the pending indicator carries an optional narration label. */}
+      {parsingProfile ? (
+        <AnsweringIndicator label={PARSING_LABEL} />
+      ) : showTrailingIndicator ? (
+        <AnsweringIndicator label={pendingLabel} />
+      ) : null}
     </div>
   );
 }

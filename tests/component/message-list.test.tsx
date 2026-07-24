@@ -365,6 +365,38 @@ describe("MessageList", () => {
     expect(onFollowup).toHaveBeenCalledWith("a1-s", "What is the median salary in Berlin?");
   });
 
+  // The in-thread profile-parsing indicator: a transient narrated wait while the extraction poll runs. It
+  // stands at the tail regardless of the pending state (the poll runs with no chat turn in flight).
+  test("shows the 'Parsing your profile...' indicator while parsingProfile is set", () => {
+    const { container } = render(
+      <MessageList messages={[insightMsg("a1")]} onRetry={noop} {...base} parsingProfile />,
+    );
+    expect(screen.getByRole("status", { name: "Parsing your profile..." })).toBeTruthy();
+    expect(container.querySelector(".answering-label")?.textContent).toBe("Parsing your profile...");
+  });
+
+  test("the parsing indicator does not surface a spurious failed-tail Retry on a user tail", () => {
+    // A user tail that is NOT pending would normally show the failed-tail Retry; parsingProfile suppresses it.
+    render(<MessageList messages={[userMsgId("Find me a job", "u1")]} onRetry={noop} {...base} parsingProfile />);
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.getByRole("status", { name: "Parsing your profile..." })).toBeTruthy();
+  });
+
+  // The auto-continued fit search narrates its pending indicator (transient, not persisted).
+  test("the trailing pending indicator carries a narration label when provided", () => {
+    const { container } = render(
+      <MessageList
+        messages={[userMsgId("Find me a job that fits", "u1")]}
+        onRetry={noop}
+        {...base}
+        pending
+        pendingLabel="Looking for postings that fit you..."
+      />,
+    );
+    expect(screen.getByRole("status", { name: "Looking for postings that fit you..." })).toBeTruthy();
+    expect(container.querySelector(".answering-label")?.textContent).toBe("Looking for postings that fit you...");
+  });
+
   test("AC-15: a refusal part renders the polite limit notice (not the error card)", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "data-refusal", id: "a1-r", data: { reason: "guest_cap" } }] },
