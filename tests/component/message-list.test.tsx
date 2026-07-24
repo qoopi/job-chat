@@ -275,6 +275,96 @@ describe("MessageList", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  // Discovery suggestions: an additive part rendered as tappable chips BESIDE the brief reply (never a
+  // suppressing answer card). The chip shows its label; a tap sends the full question; used chips disable.
+  test("a suggestions turn renders the reply prose AND the chips (label shown, prose not suppressed)", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "I answer market questions with a chart and match your resume to roles." },
+          {
+            type: "data-suggestions",
+            id: "a1-s",
+            data: {
+              kind: "suggestions",
+              items: [
+                { label: "Find me a job that fits", question: "Find me a job that fits" },
+                { label: "Who is hiring most?", question: "Which companies are hiring the most right now?" },
+              ],
+            },
+          },
+        ],
+      },
+    ];
+    const { container } = render(
+      <MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={noop} onRetry={noop} onOpenDetailPanel={noop} />,
+    );
+    // the brief reply is shown (suggestions are additive, they do NOT suppress prose)...
+    expect(container.querySelector(".bubble.ai")?.textContent).toContain("I answer market questions");
+    // ...and the chips render by their short label
+    expect(btn("Find me a job that fits").disabled).toBe(false);
+    expect(btn("Who is hiring most?").disabled).toBe(false);
+  });
+
+  test("a suggestions chip tap sends its full question via onFollowup, and a used chip disables", () => {
+    const onFollowup = vi.fn();
+    const messages: UIMessage[] = [
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          {
+            type: "data-suggestions",
+            id: "a1-s",
+            data: {
+              kind: "suggestions",
+              items: [
+                { label: "Who is hiring most?", question: "Which companies are hiring the most right now?" },
+              ],
+            },
+          },
+        ],
+      },
+    ];
+    render(
+      <MessageList
+        messages={messages}
+        pending={false}
+        usedFollowups={new Set(["a1-s::Which companies are hiring the most right now?"])}
+        onFollowup={onFollowup}
+        onRetry={noop}
+        onOpenDetailPanel={noop}
+      />,
+    );
+    // the used chip is disabled with a check, keyed by the SENT question (not the label)
+    expect(btn("Who is hiring most? ✓").disabled).toBe(true);
+  });
+
+  test("a suggestions chip tap sends its full question (label != question)", () => {
+    const onFollowup = vi.fn();
+    const messages: UIMessage[] = [
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          {
+            type: "data-suggestions",
+            id: "a1-s",
+            data: {
+              kind: "suggestions",
+              items: [{ label: "Median salary in Berlin", question: "What is the median salary in Berlin?" }],
+            },
+          },
+        ],
+      },
+    ];
+    render(<MessageList messages={messages} pending={false} usedFollowups={noSet} onFollowup={onFollowup} onRetry={noop} onOpenDetailPanel={noop} />);
+    fireEvent.click(btn("Median salary in Berlin"));
+    expect(onFollowup).toHaveBeenCalledWith("a1-s", "What is the median salary in Berlin?");
+  });
+
   test("AC-15: a refusal part renders the polite limit notice (not the error card)", () => {
     const messages: UIMessage[] = [
       { id: "a1", role: "assistant", parts: [{ type: "data-refusal", id: "a1-r", data: { reason: "guest_cap" } }] },

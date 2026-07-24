@@ -138,6 +138,19 @@ export const PostingsSchema = z
 export const AuthInviteSchema = z.object({ kind: z.literal("auth-invite") }).strict();
 export const ProfileInviteSchema = z.object({ kind: z.literal("profile-invite") }).strict();
 
+/** One discovery-suggestion chip: `label` is the short chip text; `question` is the full turn sent on tap. */
+export const SuggestionItemSchema = z
+  .object({ label: z.string().min(1).max(80), question: z.string().min(1).max(200) })
+  .strict();
+export type SuggestionItem = z.infer<typeof SuggestionItemSchema>;
+
+/** The additive discovery-suggestions part payload: actionable chips offered on a capabilities turn.
+ *  Additive part kind - it never suppresses the model's brief reply (the reply plus chips is the answer). */
+export const SuggestionsSchema = z
+  .object({ kind: z.literal("suggestions"), items: z.array(SuggestionItemSchema).min(1).max(4) })
+  .strict();
+export type Suggestions = z.infer<typeof SuggestionsSchema>;
+
 /** True if a persisted row's payload is a profile card. The turn machinery keys off this: the run gate's
  *  already-answered tail and `deleteTrailingAssistant` both skip profile cards (out-of-band, not a turn). */
 export function isProfileCardPayload(parts: unknown): boolean {

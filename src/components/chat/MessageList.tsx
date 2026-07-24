@@ -152,6 +152,30 @@ const AssistantMessage = memo(function AssistantMessage({
             </div>
           );
         }
+        if (cls.kind === "suggestions") {
+          // Discovery chips beside the reply (additive, not an answer surface): the label is shown, the
+          // full question is sent on tap; one-shot like the follow-up chips (keyed by the sent question).
+          return (
+            <div key={id} className="msg ai">
+              <div className="followups">
+                {cls.items.map((item) => {
+                  const used = usedFollowups.has(`${id}::${item.question}`);
+                  return (
+                    <button
+                      key={item.question}
+                      className="chip"
+                      type="button"
+                      disabled={used || pending}
+                      onClick={() => onFollowup(id, item.question)}
+                    >
+                      {used ? `${item.label} ✓` : item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        }
         return null;
       })}
     </>
