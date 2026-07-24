@@ -6,6 +6,7 @@ import {
   corpusHonesty,
   hasSalary,
   isSeniorPlus,
+  latestPostingsVerdict,
   locationLabel,
   openPanelLabel,
   postingsVerdict,
@@ -84,6 +85,7 @@ function HonestyCaption({ rows }: { rows: ScoredPostingRow[] }) {
 export function PostingsCard({
   rows,
   total,
+  mode,
   onFollowup,
   onOpenPanel,
   onOpenPosting,
@@ -92,6 +94,8 @@ export function PostingsCard({
 }: {
   rows: ScoredPostingRow[];
   total: number;
+  /** "latest" = a plain latest-list header (neutral: no "match your profile"/best-by-score). Absent = the fit card. */
+  mode?: "latest";
   /** A follow-up prompt chip ("Only remote", "Include one level up"). Disabled while a turn streams. */
   onFollowup?: (text: string) => void;
   /** "Open all N in panel" - opens the detail panel full list. */
@@ -137,13 +141,15 @@ export function PostingsCard({
 
   const filtering = onlyRemote || onlySalary;
   const visible = filtered.slice(0, POSTINGS_INCHAT_CAP);
+  // "latest" mode reads as a neutral recency list; the default is the profile-fit headline.
+  const headline = mode === "latest" ? latestPostingsVerdict : postingsVerdict;
   return (
     <div className="insight" style={{ maxWidth: 760 }}>
       <div className="insight-head">
         {/* Under an active filter the "showing the best N" tail would contradict the filtered table
             (honesty). Pass shown=total to suppress the tail while the honest server total stays;
             the full headline restores when the filter clears. */}
-        <Verdict text={postingsVerdict(total, filtering ? total : shownCount(rows))} />
+        <Verdict text={headline(total, filtering ? total : shownCount(rows))} />
       </div>
       <div className="insight-body">
         {filtered.length > 0 ? (
@@ -184,7 +190,7 @@ export function PostingsCard({
         <span className="src">
           {filtering
             ? `${Math.min(filtered.length, POSTINGS_INCHAT_CAP)} of ${filtered.length} shown`
-            : `${shownCount(rows)} of ${total} matches`}
+            : `${shownCount(rows)} of ${total} ${mode === "latest" ? "shown" : "matches"}`}
         </span>
       </div>
     </div>
@@ -198,10 +204,13 @@ type Filter = "all" | "salary" | "remote" | "senior";
 export function PostingsPanel({
   rows,
   total,
+  mode,
   onOpenPosting,
 }: {
   rows: ScoredPostingRow[];
   total: number;
+  /** "latest" = neutral footer wording ("shown"); absent = the fit-list "matches". */
+  mode?: "latest";
   onOpenPosting?: OpenPosting;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
@@ -245,7 +254,7 @@ export function PostingsPanel({
       </div>
       <PostingsTable rows={filtered} onOpenPosting={onOpenPosting} />
       <span className="src">
-        {filtered.length} of {total} matches
+        {filtered.length} of {total} {mode === "latest" ? "shown" : "matches"}
       </span>
     </div>
   );

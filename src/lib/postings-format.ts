@@ -56,12 +56,19 @@ export function postingsVerdict(total: number, shown: number): string {
   return `${total} postings match your profile — showing the best ${shown}.`;
 }
 
+/** The NEUTRAL header for a latest_postings list (not a profile fit): no "match your profile", no best-by-score
+ *  framing - rows are ordered by recency, so it reads "showing the latest N". */
+export function latestPostingsVerdict(total: number, shown: number): string {
+  if (shown >= total) return `${total} postings.`;
+  return `${total} postings — showing the latest ${shown}.`;
+}
+
 /** The postings emitter hard cap (mergeSearchParams mirrors this 50); the part carries ALL matches up to it. */
 export const POSTINGS_ROWS_CAP = 50;
 
-/** The "Open in panel" chip label - the rows-cap-50 honesty contract: within the cap, rows IS the complete
- *  set ("Open all {total}"); over it, the emitter truncated, so the chip reads "Open top {rowsShown} of {total}". */
+/** The "Open in panel" chip label - honest about what the panel actually holds: when rowsShown covers the whole
+ *  set the panel IS complete ("Open all {total}"); otherwise it is truncated, so the chip reads "Open top {rowsShown} of {total}". */
 export function openPanelLabel(rowsShown: number, total: number): string {
-  if (total > POSTINGS_ROWS_CAP) return `Open top ${rowsShown} of ${total}`;
-  return `Open all ${total}`;
+  if (rowsShown >= total) return `Open all ${total}`;
+  return `Open top ${rowsShown} of ${total}`;
 }

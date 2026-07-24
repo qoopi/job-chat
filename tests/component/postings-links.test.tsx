@@ -99,6 +99,27 @@ describe("PostingsCard / PostingsPanel title click-through to detail", () => {
   });
 });
 
+// The header-mode mechanism: mode="latest" (a plain latest_postings list) renders a NEUTRAL header - no
+// "match your profile", no best-by-score framing; the default (no mode = the profile-fit card) is unchanged.
+describe("PostingsCard header mode (latest vs fit)", () => {
+  test("mode=latest renders the neutral latest-list header (no profile-fit / best framing)", () => {
+    render(
+      <PostingsCard rows={[scored()]} total={42} mode="latest" onOpenPanel={() => {}} onOpenPosting={() => {}} />,
+    );
+    expect(screen.getByText(/showing the latest 1/)).toBeTruthy();
+    expect(screen.queryByText(/match your profile/i)).toBeNull();
+    expect(screen.queryByText(/showing the best/i)).toBeNull();
+    // The footer reads neutrally too ("shown", not "matches").
+    expect(screen.getByText(/1 of 42 shown/)).toBeTruthy();
+  });
+
+  test("no mode keeps the profile-fit header + footer unchanged", () => {
+    render(<PostingsCard rows={[scored()]} total={42} onOpenPanel={() => {}} onOpenPosting={() => {}} />);
+    expect(screen.getByText(/match your profile/)).toBeTruthy();
+    expect(screen.getByText(/1 of 42 matches/)).toBeTruthy();
+  });
+});
+
 describe("DataTable latest_postings link-out (apply_url column)", () => {
   const row = (title: string, apply_url: string) => ({
     title,

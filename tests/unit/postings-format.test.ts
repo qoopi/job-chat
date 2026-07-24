@@ -97,16 +97,22 @@ describe("shownCount / postingsVerdict", () => {
   });
 });
 
-// The rows-cap-50 honesty contract (030-inherited from 029's review): the emitter carries ALL matching
-// rows up to a hard cap of 50, so "Open all {total}" is literal only while total is within that cap;
-// past it, rows is truncated to the top-50 and the chip must say so instead of overclaiming "all".
+// The honesty contract: the chip claims "all" only when the panel actually holds every row (rowsShown covers
+// total); otherwise the panel is truncated and the chip must say "top N of M" instead of overclaiming "all".
+// The fit search loads limit=50 so rowsShown == min(50, total) — coverage there is equivalent to total<=50.
 describe("openPanelLabel", () => {
-  it("is literal 'Open all N' at and below the cap (rows is the complete set)", () => {
+  it("is literal 'Open all N' when the panel holds the complete set (rowsShown covers total)", () => {
     expect(openPanelLabel(23, 23)).toBe("Open all 23");
     expect(openPanelLabel(50, 50)).toBe("Open all 50");
   });
-  it("adapts to 'Open top N of M' once total exceeds the cap (rows is truncated)", () => {
+  it("adapts to 'Open top N of M' once the panel is truncated (rowsShown < total)", () => {
     expect(openPanelLabel(50, 51)).toBe("Open top 50 of 51");
     expect(openPanelLabel(50, 200)).toBe("Open top 50 of 200");
+  });
+  // latest_postings loads limit=20, so a company with 21-50 latest postings gives rowsShown=20 < total<=50:
+  // within the old cap but NOT complete — the chip must not overclaim "all".
+  it("does not overclaim 'all' for a truncated latest-list within the cap", () => {
+    expect(openPanelLabel(20, 35)).toBe("Open top 20 of 35");
+    expect(openPanelLabel(20, 50)).toBe("Open top 20 of 50");
   });
 });

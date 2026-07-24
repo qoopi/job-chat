@@ -132,6 +132,7 @@ const AssistantMessage = memo(function AssistantMessage({
               <PostingsCard
                 rows={cls.rows}
                 total={cls.total}
+                mode={cls.mode}
                 onFollowup={(text) => onFollowup(id, text)}
                 onOpenPanel={() => onOpenDetailPanel(message.id, id)}
                 onOpenPosting={onOpenPosting}

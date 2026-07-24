@@ -65,7 +65,7 @@ export function DetailPanel({
         ) : content.kind === "posting" ? (
           <PostingDetailCard state={content.state} />
         ) : (
-          <PostingsPanel rows={content.rows} total={content.total} onOpenPosting={onOpenPosting} />
+          <PostingsPanel rows={content.rows} total={content.total} mode={content.mode} onOpenPosting={onOpenPosting} />
         )}
       </div>
     </section>

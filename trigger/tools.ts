@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   ComposedQueryParams,
   TEMPLATE_PARAM_SCHEMAS,
+  toScoredPostingRow,
   type Analytics,
   type TemplateName,
 } from "@shared/analytics";
@@ -104,13 +105,25 @@ function catalogTool(name: TemplateName, deps: CatalogDeps) {
     inputSchema,
     execute: async (params, { toolCallId }) => {
       const id = toolCallId;
-      deps.emit({ type: "data-insight", id, data: buildSkeleton(id, name) });
+      // latest_postings renders the INTERACTIVE postings card (clickable rows -> in-app detail), not the
+      // generic static table - so it skips the chart skeleton (a data-insight skeleton and the data-postings
+      // part carry different wire types and would NOT reconcile by id, leaving a stuck indicator beside the card).
+      const asPostings = name === "latest_postings";
+      if (!asPostings) deps.emit({ type: "data-insight", id, data: buildSkeleton(id, name) });
       try {
         const result = await deps.analytics.runQuery(name, params);
         // Empty result = plain mode: clear the skeleton with an empty marker (no dangling card) + a plain-prose signal.
         if (result.rows.length === 0) {
           deps.emit(emptyPart(id));
           return emptyModelOutput(name);
+        }
+        if (asPostings) {
+          // Same postings card + wire shape searchPostingsTool emits, in "latest" mode (a neutral header, no
+          // fit/best-by-score framing). total is the honest open-set count (sampleN over the same filter).
+          const rows = result.rows.map(toScoredPostingRow);
+          const total = result.meta.sampleN;
+          deps.emit({ type: "data-postings", id, data: { kind: "postings", rows, total, mode: "latest" } });
+          return { total, shown: rows.length, note: "The postings card is the complete answer - add no prose beside it." };
         }
         const insight = buildInsight({ id, tool: name, params, result });
         deps.emit({ type: "data-insight", id, data: insight });
