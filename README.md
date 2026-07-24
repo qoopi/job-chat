@@ -10,6 +10,7 @@ at jobchat.dev.
 ## Demo
 
 Live: https://jobchat.dev
+Judge env file: https://drive.google.com/file/d/1T6Ejk0_y0x37l636en4NlBoYtz7SoHxQ/view?usp=sharing
 
 <!-- HERO SCREENSHOT SLOT - operator adds the hero screenshot here during the demo walk -->
 
