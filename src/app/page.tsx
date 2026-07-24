@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { LandingComposer } from "@/components/landing/LandingComposer";
 import { LandingSignIn } from "@/components/landing/LandingSignIn";
-import { GITHUB_URL, HACKATHON_URL, SEARCHNAPPLY_URL } from "@/lib/links";
+import { GITHUB_URL, HACKATHON_URL } from "@/lib/links";
 import { isE2E } from "@/lib/e2e";
 import { getLivePostingCount } from "@/lib/landing-count";
 import { listOwnerConversations, resolveViewer } from "@/lib/server-store";
@@ -150,14 +150,7 @@ export default async function Landing() {
         <span>·</span>
         <span>
           Data by{" "}
-          <a
-            href={SEARCHNAPPLY_URL}
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "var(--shell-fg)" }}
-          >
-            searchnapply.com
-          </a>
+          <span style={{ color: "var(--shell-fg)" }}>searchnapply</span>
         </span>
       </footer>
     </div>

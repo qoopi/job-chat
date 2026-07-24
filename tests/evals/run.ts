@@ -1,4 +1,4 @@
-import { ADVISER_V4 } from "../../trigger/prompts/adviser-v4";
+import { ADVISER_V5 } from "../../trigger/prompts/adviser-v5";
 import { EVAL_SET } from "./eval-set";
 import {
   assertEvalEnabled,
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const system = ADVISER_V4; // the shipped prompt (trigger/chat.ts wires it)
+  const system = ADVISER_V5; // the shipped prompt (trigger/chat.ts wires it)
   const streamModel = bedrockStreamModel(buildModel());
 
   const { cases, skipped } = selectEvalCases(EVAL_SET, process.env.JOBCHAT_EVAL_IDS);
