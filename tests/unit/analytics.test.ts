@@ -1124,3 +1124,104 @@ describe("analytics.corpusSummary parses the corpus row (044 AC-2)", () => {
     ]);
   });
 });
+
+// Data-path role matching: a named role in a DATA query (count / breakdown / salary / list) resolves to
+// canonical role name(s) and matches has(role_names, name) as the PRIMARY signal, with title ILIKE as the
+// fallback for unclassified rows - the same canonical/title split the fit scorer uses, now in the data
+// tools too. With NO resolved names it is title ILIKE only (byte-identical to before), so an empty
+// taxonomy is a zero-regression no-op.
+describe("data-path canonical role filter (buildTemplateSql + buildComposedSql)", () => {
+  const CANONICAL =
+    "(hasAny(arrayMap(rn -> lowerUTF8(rn), role_names), ['test engineer']) OR (empty(role_names) AND title ILIKE '%Test Engineer%'))";
+
+  it("templates: a resolved role name keys off canonical has(role_names) with a title fallback", () => {
+    const { sql } = buildTemplateSql(
+      "salary_distribution",
+      { role: "Test Engineer" },
+      "postings",
+      ["test engineer"],
+    );
+    expect(sql).toContain(CANONICAL);
+  });
+
+  it("templates: NO resolved names is title ILIKE only (no role_names machinery leaks)", () => {
+    const { sql } = buildTemplateSql("salary_distribution", { role: "Test Engineer" }, "postings");
+    expect(sql).toContain("title ILIKE '%Test Engineer%'");
+    expect(sql).not.toContain("role_names");
+  });
+
+  it("composed: a resolved role name keys off canonical has(role_names) with a title fallback", () => {
+    const { sql } = buildComposedSql(
+      { measures: ["count"], role: "Test Engineer" },
+      "postings",
+      ["test engineer"],
+    );
+    expect(sql).toContain(CANONICAL);
+  });
+
+  it("composed: NO resolved names is byte-identical to the pre-roles call (forward-compat)", () => {
+    const withEmpty = buildComposedSql({ measures: ["count"], role: "Test Engineer" }, "postings", []);
+    const twoArg = buildComposedSql({ measures: ["count"], role: "Test Engineer" }, "postings");
+    expect(withEmpty.sql).toBe(twoArg.sql);
+    expect(twoArg.sql).not.toContain("role_names");
+  });
+
+  it("latest_postings accepts a role and filters by the canonical role (the LIST path)", () => {
+    const { sql } = buildTemplateSql(
+      "latest_postings",
+      { role: "Test Engineer" },
+      "postings",
+      ["test engineer"],
+    );
+    expect(sql).toContain(CANONICAL);
+  });
+});
+
+// The execute wiring: runQuery / runComposedQuery resolve a named role phrase to canonical name(s) over the
+// corpus's own role dimension FIRST, then thread those names into the built SQL. A stub client records the
+// queries so the resolve-then-build sequence is observable without a real ClickHouse.
+describe("createAnalytics resolves a role phrase before building the data-path SQL", () => {
+  function stubClient(resolvedNames: string[], captured: string[]): ClickHouseClient {
+    return {
+      query: async ({ query }: { query: string }) => {
+        captured.push(query);
+        const rows = query.includes("arrayJoin(role_names)")
+          ? resolvedNames.map((name) => ({ name }))
+          : query.includes("AS sampleN")
+            ? [{ sampleN: 14, freshestAt: "2026-07-24 00:00:00" }]
+            : [{ count: 14 }];
+        return { json: async () => rows };
+      },
+    } as unknown as ClickHouseClient;
+  }
+
+  it("threads the resolved canonical names into the composed SQL (has(role_names) primary)", async () => {
+    const captured: string[] = [];
+    const analytics = createAnalytics({ client: stubClient(["test engineer"], captured), table: "postings" });
+    await analytics.runComposedQuery({ measures: ["count"], role: "Test Engineer" });
+    // The role-resolve query ran over the corpus role dimension.
+    expect(captured.some((q) => q.includes("arrayJoin(role_names)"))).toBe(true);
+    // A built (non-resolve) query carries the canonical has(role_names) match.
+    expect(
+      captured.some(
+        (q) =>
+          !q.includes("arrayJoin(role_names)") &&
+          q.includes("hasAny(arrayMap(rn -> lowerUTF8(rn), role_names), ['test engineer'])"),
+      ),
+    ).toBe(true);
+  });
+
+  it("falls back to title ILIKE when the phrase resolves to nothing (empty taxonomy = no-op)", async () => {
+    const captured: string[] = [];
+    const analytics = createAnalytics({ client: stubClient([], captured), table: "postings" });
+    await analytics.runComposedQuery({ measures: ["count"], role: "Test Engineer" });
+    expect(
+      captured.some(
+        (q) =>
+          !q.includes("arrayJoin(role_names)") &&
+          q.includes("title ILIKE '%Test Engineer%'") &&
+          !q.includes("hasAny"),
+      ),
+    ).toBe(true);
+  });
+});

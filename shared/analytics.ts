@@ -73,8 +73,20 @@ function assemble(lines: string[]): string {
   return lines.filter((line) => line !== "").join("\n");
 }
 
-function roleFilter(role: string): string {
-  return `title ILIKE ${chStr(`%${likeEscape(role)}%`)}`;
+// A named role matches on the CANONICAL role when the phrase resolved to role name(s): a classified row
+// matches has(role_names, name) - case-insensitive, both sides lowered - even when its TITLE omits the
+// role; the title ILIKE is the FALLBACK, used only for an UNCLASSIFIED row (empty role_names). With no
+// resolved names the filter IS the title ILIKE, so an empty taxonomy is byte-identical to the pre-roles
+// build (forward-compat). This mirrors the fit scorer's role term as a WHERE predicate. Resolved names are
+// chStr-escaped string literals (injection-safe); a function on role_names / title forgoes the primary
+// index, but that is moot - these columns are outside the ORDER BY and carry no skip index, so the
+// categorical set already full-scans (per clickhouse-best-practices schema-pk-filter-on-orderby /
+// query-index-skipping-indices), and hasAny per row on that scan costs nothing measurable.
+function roleFilter(role: string, roleNames: string[] = []): string {
+  const title = `title ILIKE ${chStr(`%${likeEscape(role)}%`)}`;
+  if (roleNames.length === 0) return title;
+  const roleMatch = `hasAny(arrayMap(rn -> lowerUTF8(rn), role_names), [${roleNames.map((n) => chStr(n)).join(", ")}])`;
+  return `(${roleMatch} OR (empty(role_names) AND ${title}))`;
 }
 
 function trendWindow(table: string, days: number): string {
@@ -111,6 +123,9 @@ const LatestPostingsParams = z
     company: z.string().min(1).optional(),
     level: z.string().min(1).optional(),
     country: z.string().min(1).optional(),
+    // A named role for the LIST path ("show me Test Engineer jobs"): resolved to canonical role name(s) and
+    // matched via has(role_names, name) with a title fallback, so the list is the real role-matched postings.
+    role: z.string().min(1).optional(),
     limit: z.number().int().positive().max(100).default(20),
   })
   .strict();
@@ -145,13 +160,20 @@ function dominantCurrencyFilter(table: string, baseFilters: string[]): string {
   return `salary_currency IN (SELECT salary_currency FROM ${table} FINAL ${inner} GROUP BY salary_currency ORDER BY count() DESC, salary_currency ASC LIMIT 1)`;
 }
 
-/** Validate params (throws) and build the exact interpolated SQL for a template. Pure - unit-testable without a client. */
-export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: string): BuiltQuery {
+/** Validate params (throws) and build the exact interpolated SQL for a template. Pure - unit-testable
+ *  without a client. `roleNames` are the canonical role names a role phrase resolved to (the runtime
+ *  resolves them first); empty (the default) keeps role matching on the title path (forward-compat). */
+export function buildTemplateSql(
+  name: TemplateName,
+  rawParams: unknown,
+  table: string,
+  roleNames: string[] = [],
+): BuiltQuery {
   switch (name) {
     case "salary_distribution": {
       const p = SalaryDistributionParams.parse(rawParams);
       const filters = ["salary_min IS NOT NULL", "salary_max IS NOT NULL"];
-      if (p.role) filters.push(roleFilter(p.role));
+      if (p.role) filters.push(roleFilter(p.role, roleNames));
       if (p.city) filters.push(eqCI("city", p.city));
       if (p.country) filters.push(eqCI("country", p.country));
       filters.push(openSetFilter(table));
@@ -181,7 +203,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
         "salary_max IS NOT NULL",
         inCI("city", p.cities),
       ];
-      if (p.role) filters.push(roleFilter(p.role));
+      if (p.role) filters.push(roleFilter(p.role, roleNames));
       filters.push(openSetFilter(table));
       filters.push(dominantCurrencyFilter(table, filters)); // compare within one currency only
       const where = whereClause(filters);
@@ -201,7 +223,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
     case "postings_trend": {
       const p = PostingsTrendParams.parse(rawParams);
       const filters = [trendWindow(table, p.days)];
-      if (p.role) filters.push(roleFilter(p.role));
+      if (p.role) filters.push(roleFilter(p.role, roleNames));
       const where = whereClause(filters);
       const sql = assemble([
         "SELECT",
@@ -242,7 +264,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       const p = ShareSplitParams.parse(rawParams);
       const dimColumn = p.dimension === "experience" ? "experience_level" : "location_kind";
       const filters: string[] = [];
-      if (p.role) filters.push(roleFilter(p.role));
+      if (p.role) filters.push(roleFilter(p.role, roleNames));
       filters.push(openSetFilter(table));
       const where = whereClause(filters);
       // toString() so location_kind (Enum8) serializes/sorts by NAME, not its int.
@@ -264,6 +286,7 @@ export function buildTemplateSql(name: TemplateName, rawParams: unknown, table: 
       if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
       if (p.level) filters.push(eqCI("experience_level", p.level));
       if (p.country) filters.push(eqCI("country", p.country));
+      if (p.role) filters.push(roleFilter(p.role, roleNames));
       filters.push(openSetFilter(table));
       const where = whereClause(filters);
       const sql = assemble([
@@ -395,7 +418,11 @@ function bucketSpec(b: TimeBucket): DimensionSpec {
 
 /** Validate composed params (throws) and build the exact interpolated SQL. Pure, like buildTemplateSql.
  *  Deterministic ORDER BY (sort spec, then remaining dimensions ASC); open-set unless a `days` window. */
-export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery {
+export function buildComposedSql(
+  rawParams: unknown,
+  table: string,
+  roleNames: string[] = [],
+): BuiltQuery {
   const p = ComposedQueryParams.parse(rawParams);
 
   const dims: DimensionSpec[] = p.dimensions.map(dimensionSpec);
@@ -413,7 +440,7 @@ export function buildComposedSql(rawParams: unknown, table: string): BuiltQuery 
   if (isSalary) {
     filters.push("salary_min IS NOT NULL", "salary_max IS NOT NULL");
   }
-  if (p.role) filters.push(roleFilter(p.role));
+  if (p.role) filters.push(roleFilter(p.role, roleNames));
   if (p.company) filters.push(`company ILIKE ${chStr(`%${likeEscape(p.company)}%`)}`);
   // `cities` WINS over a coexisting single `city` (follow-up inheritance replaces, never intersects).
   if (p.cities) filters.push(inCI("city", p.cities));
@@ -856,6 +883,14 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     return rows.map((r) => String(r.name)).filter(Boolean);
   }
 
+  // A data-tool `role` phrase (present on the salary / trend / share / latest / composed paths) resolves to
+  // canonical role name(s) BEFORE the SQL is built, exactly as the fit path does - so a named role keys off
+  // has(role_names, name) in the data tools too. No role phrase => [] => the builder keeps title matching.
+  async function resolveRoleFromParams(params: unknown): Promise<string[]> {
+    const role = (params as { role?: unknown } | null | undefined)?.role;
+    return typeof role === "string" && role.trim().length > 0 ? resolveRoleNames([role]) : [];
+  }
+
   async function searchPostings(rawParams: unknown): Promise<SearchPostingsResult> {
     const p = SearchPostingsParams.parse(rawParams);
     const roleNames = await resolveRoleNames(p.roles);
@@ -959,8 +994,10 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
   }
 
   return {
-    runQuery: (name, params) => executeBuilt(buildTemplateSql(name, params, table)),
-    runComposedQuery: (params) => executeBuilt(buildComposedSql(params, table)),
+    runQuery: async (name, params) =>
+      executeBuilt(buildTemplateSql(name, params, table, await resolveRoleFromParams(params))),
+    runComposedQuery: async (params) =>
+      executeBuilt(buildComposedSql(params, table, await resolveRoleFromParams(params))),
     searchPostings,
     getPostingDetail,
     // Cache only a FULFILLED result; on rejection clear the memo so the next call retries.
