@@ -2,14 +2,16 @@
 // designated visual (Q5 pinned to donut), and the expected verdict value/label computed by hand from
 // the fixture (tests/fixtures/postings.fixture.ts). Consumed by the agent tests, which assert
 // the agent picks this tool + chartType and lands this verdict number.
-// `chartType` is the design visual: "bars" covers both sorted (Q4) and grouped (Q2) bars.
+// `chartType` is the design visual: "bars" covers both sorted (Q4) and grouped (Q2) bars; "postings"
+// is NOT a chart but the interactive postings card that latest_postings (Q7) renders - the agent test
+// asserts the data-postings card emission for that case, not a data-insight chart/table.
 
 export interface LaunchQuestionCase {
   id: string;
   question: string;
   tool: string;
   params: Record<string, unknown>;
-  chartType: "histogram" | "bars" | "trend" | "donut" | "table";
+  chartType: "histogram" | "bars" | "trend" | "donut" | "table" | "postings";
   expectedVerdict: number; // the headline number the verdict sentence must contain
   expectedLabel?: string; // the headline label (dominant category / winning city / latest title)
 }
@@ -72,8 +74,8 @@ export const LAUNCH_QUESTIONS: LaunchQuestionCase[] = [
     question: "Latest senior roles at Google",
     tool: "latest_postings",
     params: { company: "Google", level: "Senior" },
-    chartType: "table",
-    expectedVerdict: 3, // 3 Google senior roles match
-    expectedLabel: "Senior Software Engineer", // the most recently published of them
+    chartType: "postings", // the interactive postings card (data-postings), not a chart/table insight
+    expectedVerdict: 3, // the card's `total`: 3 Google senior roles match the open-set filter
+    expectedLabel: "Senior Software Engineer", // the most recently published of them (rows[0].title)
   },
 ];

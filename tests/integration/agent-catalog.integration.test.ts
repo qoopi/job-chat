@@ -9,9 +9,10 @@ import { LAUNCH_QUESTIONS } from "../fixtures/launch-questions";
 
 // Demo gate: the agent's tool catalog, run against the seeded reference dataset in real
 // ClickHouse, answers all 7 launch questions with the designated tool, the designated visual (Q5/Q6
-// donut), and the expected verdict value from the fixture case table. This proves the tool ->
-// visual -> value contract deterministically; the LLM's question->tool routing is verified in the
-// live dev-server round trip and the e2e suite. Skipped without ClickHouse creds.
+// donut for the chart tools; the interactive postings card for Q7/latest_postings), and the expected
+// verdict value from the fixture case table. This proves the tool -> visual -> value contract
+// deterministically; the LLM's question->tool routing is verified in the live dev-server round trip
+// and the e2e suite. Skipped without ClickHouse creds.
 const hasCreds = Boolean(process.env.CLICKHOUSE_URL);
 // A distinct table from analytics.integration.test's `postings_test` - vitest runs suites in
 // parallel workers, so a shared fixture-table name would race (drop/create collisions).
@@ -40,6 +41,31 @@ describe.skipIf(!hasCreds)("agent catalog against the seeded reference dataset",
       const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
 
       await tools[q.tool].execute!(q.params, { toolCallId: `${q.id}-call`, messages: [] } as never);
+
+      // latest_postings renders the INTERACTIVE postings card (a data-postings part with clickable rows),
+      // NOT a data-insight chart/table - so it emits no insight at all (not even a loading skeleton) and
+      // carries the same wire shape as search_postings, in "latest" mode.
+      if (q.tool === "latest_postings") {
+        expect(emitted.filter((p) => p.type === "data-insight")).toEqual([]); // no chart/table insight
+        const cards = emitted.filter((p) => p.type === "data-postings");
+        expect(cards).toHaveLength(1); // one direct emit - the card skips the loading skeleton
+        const card = cards[0].data as {
+          kind: string;
+          mode: string;
+          total: number;
+          rows: { source: string; externalId: string }[];
+        };
+        expect(card.kind).toBe("postings");
+        expect(card.mode).toBe("latest"); // neutral recency list, not fit/score framing
+        expect(card.total).toBe(q.expectedVerdict); // honest open-set count over the same filter
+        expect(card.rows.length).toBeGreaterThan(0);
+        for (const row of card.rows) {
+          // Every row carries its natural key so a title click can fetch the on-demand detail.
+          expect(row.source).not.toBe("");
+          expect(row.externalId).not.toBe("");
+        }
+        return;
+      }
 
       const insights = emitted.filter((p) => p.type === "data-insight");
       // Skeleton first (loading), filled insight last (same id) - the streaming contract.

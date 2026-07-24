@@ -48,10 +48,13 @@ const EXPECTED_ROWS: Record<string, Record<string, unknown>[]> = {
     { label: "hybrid", count: 3 },
     { label: "remote", count: 3 },
   ],
+  // latest_postings now returns the postings-card row shape (same columns as search_postings): remote
+  // flag, experience/publishedAt aliases, the natural key (source, externalId), and a neutral score 0
+  // (recency list, not a relevance search). Newest-first via ORDER BY published_at DESC, external_id DESC.
   Q7: [
-    { title: "Senior Software Engineer", company: "Google", city: "San Francisco", experience_level: "Senior", salary_min: 150000, salary_max: 190000, salary_currency: "USD", published_at: "2026-07-18 10:00:00", apply_url: "https://www.google.com/about/careers/applications/jobs/results/1" },
-    { title: "Data Scientist", company: "Google", city: "San Francisco", experience_level: "Senior", salary_min: 160000, salary_max: 180000, salary_currency: "USD", published_at: "2026-07-18 08:00:00", apply_url: "https://www.google.com/about/careers/applications/jobs/results/7" },
-    { title: "Senior Engineer", company: "Google", city: "Los Angeles", experience_level: "Senior", salary_min: 140000, salary_max: 160000, salary_currency: "USD", published_at: "2026-07-14 09:00:00", apply_url: "" },
+    { title: "Senior Software Engineer", company: "Google", city: "San Francisco", remote: 0, salary_min: 150000, salary_max: 190000, experience: "Senior", publishedAt: "2026-07-18 10:00:00", apply_url: "https://www.google.com/about/careers/applications/jobs/results/1", source: "fixture", externalId: "1", score: 0 },
+    { title: "Data Scientist", company: "Google", city: "San Francisco", remote: 0, salary_min: 160000, salary_max: 180000, experience: "Senior", publishedAt: "2026-07-18 08:00:00", apply_url: "https://www.google.com/about/careers/applications/jobs/results/7", source: "fixture", externalId: "7", score: 0 },
+    { title: "Senior Engineer", company: "Google", city: "Los Angeles", remote: 0, salary_min: 140000, salary_max: 160000, experience: "Senior", publishedAt: "2026-07-14 09:00:00", apply_url: "", source: "fixture", externalId: "5", score: 0 },
   ],
 };
 const EXPECTED_SAMPLE_N: Record<string, number> = { Q1: 3, Q2: 6, Q3: 10, Q4: 10, Q5: 10, Q6: 10, Q7: 3 };
