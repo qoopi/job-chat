@@ -174,6 +174,40 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
     expect((out as { empty?: boolean }).empty).toBe(true);
   });
 
+  // A bare single-number aggregate (no dimensions, no bucket) is just a number - a one-value chart adds
+  // nothing. The tool clears its skeleton with the empty marker (no card) and hands the model a scalar
+  // signal so it states the figure in one plain sentence.
+  it("suppresses the card for a bare single-number aggregate and hands the model a scalar text output", async () => {
+    const emitted: EmitPart[] = [];
+    const analytics = composedAnalytics([{ count: 175 }]);
+    const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
+
+    const out = await tools.query_postings.execute!(
+      { measures: ["count"], company: "ClickHouse", chartType: "table" },
+      opts,
+    );
+
+    expect(emitted[0]).toMatchObject({ data: { status: "loading" } });
+    expect(emitted[emitted.length - 1]).toMatchObject({ type: "data-insight", id: "call-1", data: { status: "empty" } });
+    // No filled insight card was emitted (no verdict/series/rows) - the answer is plain text.
+    expect(emitted.some((p) => p.type === "data-insight" && (p.data as { verdict?: unknown }).verdict !== undefined)).toBe(false);
+    expect((out as { scalar?: boolean }).scalar).toBe(true);
+    expect((out as { verdict?: string }).verdict).toContain("175");
+  });
+
+  // A GROUPED aggregate (a dimension) still renders its card - only the bare no-grouping scalar is suppressed.
+  it("still renders a card for a grouped aggregate (a dimension present is not a bare scalar)", async () => {
+    const emitted: EmitPart[] = [];
+    const analytics = composedAnalytics([{ company: "Google", count: 4 }, { company: "Meta", count: 2 }]);
+    const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
+
+    await tools.query_postings.execute!(
+      { measures: ["count"], dimensions: ["company"], chartType: "bars" },
+      opts,
+    );
+    expect(emitted.some((p) => p.type === "data-insight" && (p.data as { verdict?: unknown }).verdict !== undefined)).toBe(true);
+  });
+
   it("taxonomizes a composed query failure as a system error without throwing", async () => {
     const emitted: EmitPart[] = [];
     const analytics: Analytics = {

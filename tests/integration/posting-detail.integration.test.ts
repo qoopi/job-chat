@@ -52,6 +52,16 @@ const ROWS: PostingRow[] = [
   }),
   // Forward-compat: a pre-reingest row - empty description_text + department must read back as a valid detail.
   row({ external_id: "D2", title: "Recruiter", company: "Stripe" }),
+  // 053 round-trip guard: a NUMERIC-string external_id (the real searchnapply id shape, e.g. Greenhouse
+  // 1432006520). The key a searchPostings row EMITS must resolve in getPostingDetail unchanged - a
+  // number-vs-string coercion or whitespace on external_id would strand every detail open.
+  row({
+    external_id: "1432006520",
+    title: "Platform Reliability Engineer",
+    company: "Acme",
+    apply_url: "https://boards.greenhouse.io/acme/jobs/1432006520",
+    description_text: "About the role\nKeep the platform up.",
+  }),
 ];
 
 describe.skipIf(!hasCreds)("getPostingDetail reads one posting by natural key", () => {
@@ -92,6 +102,24 @@ describe.skipIf(!hasCreds)("getPostingDetail reads one posting by natural key", 
     expect(await analytics.getPostingDetail("detailfix", "does-not-exist")).toBeNull();
     // Right external_id, wrong source: the key is the PAIR, so this is still not-found.
     expect(await analytics.getPostingDetail("other-source", "D1")).toBeNull();
+  });
+
+  it("round-trip: the (source, external_id) a searchPostings row EMITS resolves in getPostingDetail (the match -> open-detail beat)", async () => {
+    // The exact chain a title click walks: search returns the row, the row carries the natural key, that
+    // key must fetch the detail. This is the 053 regression seam - a numeric-string external_id round-trips
+    // as a STRING (never a JS number) and matches the CH String column, so the fetch is never a false null.
+    const res = await analytics.searchPostings({ titleTerms: ["platform"], limit: 50 });
+    const row = res.rows.find((r) => r.title === "Platform Reliability Engineer");
+    expect(row).toBeDefined();
+    expect(typeof row!.source).toBe("string");
+    expect(typeof row!.externalId).toBe("string");
+    expect(row!.externalId).toBe("1432006520"); // the numeric-looking id is a string, not 1432006520 the number
+    const detail = await analytics.getPostingDetail(row!.source!, row!.externalId!);
+    expect(detail).not.toBeNull();
+    expect(detail).toMatchObject({
+      title: "Platform Reliability Engineer",
+      applyUrl: "https://boards.greenhouse.io/acme/jobs/1432006520",
+    });
   });
 
   it("forward-compat: a pre-reingest row reads back as a valid empty detail (no crash)", async () => {

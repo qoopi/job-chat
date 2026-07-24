@@ -333,4 +333,34 @@ describe("storeToUiMessages (AC-13 resume hydration)", () => {
     const [ui] = storeToUiMessages(stored);
     expect(ui.parts).toEqual([{ type: "data-profile-card", id: "m6-card-0", data: payload }]);
   });
+
+  it("preserves each posting row's natural key (source, externalId) through hydration + resolveDetailContent (053)", () => {
+    // A resumed postings card must carry its rows' keys intact end to end - hydrate re-tags by kind, and the
+    // panel resolver re-reads the SAME payload - so a click on a resumed row opens the RIGHT posting. A dropped
+    // or renamed key here is the 053 "posting unavailable" bug at the persistence seam.
+    const keyedRow = {
+      title: "Platform Reliability Engineer",
+      company: "Acme",
+      city: "Berlin",
+      remote: true,
+      salaryMin: 150000,
+      salaryMax: 190000,
+      experience: "Senior",
+      publishedAt: "2026-07-20",
+      score: 9,
+      source: "Greenhouse",
+      externalId: "1432006520",
+    };
+    const payload = { kind: "postings", rows: [keyedRow], total: 1 };
+    const stored: StoredMessage[] = [{ id: "m7", role: "assistant", content: "", parts: payload }];
+    const [ui] = storeToUiMessages(stored);
+    expect(ui.parts).toEqual([{ type: "data-postings", id: "m7-card-0", data: payload }]);
+    // The panel path a title click walks: resolve the same part, the row still carries its exact key.
+    const content = resolveDetailContent([ui], { messageId: "m7", partId: "m7-card-0" });
+    expect(content?.kind).toBe("postings");
+    if (content?.kind === "postings") {
+      expect(content.rows[0].source).toBe("Greenhouse");
+      expect(content.rows[0].externalId).toBe("1432006520");
+    }
+  });
 });

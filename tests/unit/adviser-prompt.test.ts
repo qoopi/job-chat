@@ -172,10 +172,10 @@ describe("adviser-v2 system prompt", () => {
 // The cutover itself needs a pin: createChatRun treats `system` as an opaque string and chat.agent()
 // does not expose its config for inspection, so a silent revert to ADVISER_V1 would pass every other
 // test in the suite. A static source-content check is the cheap, deterministic seam available.
-describe("trigger/chat.ts is cut over to adviser-v5 (the shipped system prompt)", () => {
-  it("wires ADVISER_V5, not a frozen older version, as the agent's system prompt", () => {
+describe("trigger/chat.ts is cut over to adviser-v6 (the shipped system prompt)", () => {
+  it("wires ADVISER_V6, not a frozen older version, as the agent's system prompt", () => {
     const src = readFileSync(resolve(process.cwd(), "trigger/chat.ts"), "utf8");
-    expect(src).toMatch(/system:\s*ADVISER_V5\b/);
-    expect(src).not.toMatch(/system:\s*ADVISER_V[1234]\b/);
+    expect(src).toMatch(/system:\s*ADVISER_V6\b/);
+    expect(src).not.toMatch(/system:\s*ADVISER_V[12345]\b/);
   });
 });

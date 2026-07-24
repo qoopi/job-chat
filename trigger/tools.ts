@@ -18,6 +18,7 @@ import {
   emptyModelOutput,
   emptyPart,
   errorPart,
+  scalarModelOutput,
   sumCount,
   toModelOutput,
   type ErrorPart,
@@ -48,7 +49,7 @@ const DESCRIPTIONS: Record<TemplateName, string> = {
   share_split:
     "The share split of postings by `experience` level or `location_kind` (remote/onsite/hybrid) for an optional role. Use for 'what is the mix/breakdown' questions.",
   latest_postings:
-    "The most recent postings, optionally filtered by company and/or experience level. Use for 'latest/newest roles at X' questions.",
+    "The most recent postings, optionally filtered by role, company, and/or experience level. Use for 'latest/newest roles at X' AND for a LIST request about specific job postings ('show me Test Engineer jobs', 'who is hiring test engineers') - pass the named role in `role` so the list is the real role-matched postings, not a count or a breakdown chart.",
 };
 
 export type InsightPart = { type: "data-insight"; id: string; data: unknown };
@@ -161,6 +162,12 @@ function composedTool(deps: CatalogDeps) {
           sampleN: result.meta.sampleN,
         });
         const insight = buildComposedInsight({ id, params, chartType: served, result });
+        // A bare aggregate (no grouping, no time bucket) is a single number: clear the skeleton with the
+        // empty marker (no one-value card) and hand the model the figure to state in one plain sentence.
+        if (params.dimensions.length === 0 && !params.bucket) {
+          deps.emit(emptyPart(id));
+          return { ...scalarModelOutput(insight.verdict), rawChartType: rawPick };
+        }
         deps.emit({ type: "data-insight", id, data: insight });
         // Record the RAW chartType pick: the eval scores the pick before any fallback; the served chart may differ.
         return { ...toModelOutput(insight), rawChartType: rawPick };
