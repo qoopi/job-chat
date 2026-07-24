@@ -235,8 +235,19 @@ describe.skipIf(!hasCreds)("analytics catalog against seeded ClickHouse", () => 
       executed.length = 0;
       const res = await analytics.runQuery(q.tool as TemplateName, q.params);
 
-      // meta.sql (result.sql) equals the statement ClickHouse actually received.
-      expect(executed[0]).toBe(res.sql);
+      // res.sql (meta.sql) is the EXACT analytical statement ClickHouse received - the guarantee
+      // "Show query" leans on. Two legitimate companions can share the `executed` log: a per-query
+      // sampleN/freshestAt META query, and - only when the question carries a role (Q1/Q2) - a
+      // canonical-role RESOLUTION query that runs FIRST (054's data-path role matching). The
+      // analytical query is the one that is neither: present exactly once and byte-identical to res.sql.
+      const isResolution = (sql: string) => sql.includes("lowerUTF8(rn) AS name");
+      const isMeta = (sql: string) => sql.includes("count() AS sampleN");
+      const analytical = executed.filter((sql) => !isResolution(sql) && !isMeta(sql));
+      expect(analytical).toEqual([res.sql]);
+      // A role phrase resolves to canonical name(s) before the template is built, so its resolution
+      // query precedes everything; with no role, no resolution query runs at all.
+      const hasRole = typeof q.params.role === "string";
+      expect(executed.filter(isResolution)).toEqual(hasRole ? [executed[0]] : []);
       expect(res.sql).toContain(`FROM ${TABLE} FINAL`);
 
       // rows match the hand-computed fixture expectations.
