@@ -31,6 +31,7 @@ function row(overrides: Partial<PostingRow> & Pick<PostingRow, "external_id" | "
     apply_url: "",
     role_names: [],
     description_text: "",
+    description_html: "",
     department: "",
     ...overrides,
   };

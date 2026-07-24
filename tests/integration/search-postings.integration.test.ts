@@ -41,6 +41,7 @@ function row(over: Partial<PostingRow> & Pick<PostingRow, "external_id" | "title
     apply_url: "",
     role_names: [],
     description_text: "",
+    description_html: "",
     department: "",
     ingested_at: INGESTED,
     ...over,

@@ -17,6 +17,7 @@ describe("buildPostingDetailSql", () => {
   it("selects the detail columns for one posting by the natural key, FINAL + LIMIT 1", () => {
     const sql = buildPostingDetailSql("GoogleCareers", "320973146", "postings");
     expect(sql).toContain("description_text");
+    expect(sql).toContain("description_html");
     expect(sql).toContain("department");
     expect(sql).toContain("apply_url");
     expect(sql).toContain("FROM postings FINAL");
@@ -29,6 +30,39 @@ describe("buildPostingDetailSql", () => {
     // The apostrophes are backslash-escaped inside the literal - never break out of the string.
     expect(sql).toContain("external_id = 'x\\' OR \\'1\\'=\\'1'");
     expect(sql).not.toContain("OR '1'='1'"); // no unescaped injection fragment survives
+  });
+});
+
+describe("getPostingDetail mapping", () => {
+  it("maps description_html to descriptionHtml (alongside descriptionText) and normalizes a missing row to null", async () => {
+    const row = {
+      title: "Senior Backend Engineer",
+      company: "Google",
+      city: "Berlin",
+      region: "Berlin",
+      country: "Germany",
+      remote: 0,
+      salary_min: 160000,
+      salary_max: 200000,
+      department: "Cloud",
+      description_text: "About\nOwn the ingest pipeline.",
+      description_html: "<h2>About</h2><ul><li>Own the ingest pipeline.</li></ul>",
+      apply_url: "https://careers.google.com/jobs/results/1",
+    };
+    const client = {
+      query: () => Promise.resolve({ json: async () => [row] }),
+    } as unknown as ClickHouseClient;
+
+    const analytics = createAnalytics({ client, table: "postings" });
+    const detail = await analytics.getPostingDetail("GoogleCareers", "320973146");
+    expect(detail?.descriptionHtml).toBe("<h2>About</h2><ul><li>Own the ingest pipeline.</li></ul>");
+    expect(detail?.descriptionText).toBe("About\nOwn the ingest pipeline.");
+
+    const empty = {
+      query: () => Promise.resolve({ json: async () => [] }),
+    } as unknown as ClickHouseClient;
+    const missing = await createAnalytics({ client: empty, table: "postings" }).getPostingDetail("s", "x");
+    expect(missing).toBeNull();
   });
 });
 

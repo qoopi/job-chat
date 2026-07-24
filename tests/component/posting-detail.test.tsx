@@ -4,8 +4,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { PostingDetail } from "@shared/insight";
 import { PostingDetailCard } from "@/components/insight/PostingDetailCard";
 
-// The single-posting detail view: header + the SAFE pre-wrapped description text (never dangerouslySetInnerHTML)
-// + a prominent Apply button (safe rel, absent -> no button), plus the loading/not-found/empty states.
+// The single-posting detail view: header + the description (TRUSTED sanitized HTML when descriptionHtml is
+// present - sanitized AT INGEST by sanitizePostingHtml, strict allowlist; the real XSS guard lives in that
+// unit test - else the plain-text descriptionText fallback) + a prominent Apply button (safe rel, absent ->
+// no button), plus the loading/not-found/empty states.
 
 afterEach(cleanup);
 
@@ -21,6 +23,7 @@ function detail(over: Partial<PostingDetail> = {}): PostingDetail {
     salaryMax: 200000,
     department: "Cloud",
     descriptionText: "About the role\nOwn the ingest pipeline.",
+    descriptionHtml: "",
     applyUrl: "https://careers.google.com/jobs/results/1",
     ...over,
   };
@@ -60,6 +63,40 @@ describe("PostingDetailCard loaded", () => {
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector("b")).toBeNull();
     expect(screen.getByText(/<script>alert\(1\)<\/script> plain <b>bold\?<\/b>/)).toBeTruthy();
+  });
+
+  test("renders the sanitized descriptionHtml as REAL markup - bold and bullets work", () => {
+    const html = "<h2>About</h2><ul><li>Own the ingest pipeline</li></ul><p>Own <strong>ingest</strong>.</p>";
+    const { container } = render(
+      <PostingDetailCard state={{ status: "loaded", detail: detail({ descriptionHtml: html }) }} />,
+    );
+    // The sanitized-at-ingest HTML is rendered trusted: structural elements exist in the DOM.
+    expect(container.querySelector(".posting-detail-desc strong")?.textContent).toBe("ingest");
+    expect(container.querySelectorAll(".posting-detail-desc li").length).toBe(1);
+    expect(container.querySelector(".posting-detail-desc h2")?.textContent).toBe("About");
+  });
+
+  test("prefers descriptionHtml over descriptionText when both are present (HTML branch renders markup)", () => {
+    const { container } = render(
+      <PostingDetailCard
+        state={{ status: "loaded", detail: detail({ descriptionHtml: "<p>HTML <strong>body</strong></p>" }) }}
+      />,
+    );
+    // The HTML branch wins; the plain-text fallback (with its --text pre-wrap class) is not used.
+    expect(container.querySelector(".posting-detail-desc strong")).not.toBeNull();
+    expect(container.querySelector(".posting-detail-desc--text")).toBeNull();
+  });
+
+  test("falls back to plain text (no markup parsed) when descriptionHtml is empty", () => {
+    const { container } = render(
+      <PostingDetailCard
+        state={{ status: "loaded", detail: detail({ descriptionHtml: "", descriptionText: "Plain <b>text</b> only" }) }}
+      />,
+    );
+    // Fallback branch: React-escaped text, the angle brackets are literal (no real <b> element created).
+    expect(container.querySelector(".posting-detail-desc--text")).not.toBeNull();
+    expect(container.querySelector(".posting-detail-desc b")).toBeNull();
+    expect(screen.getByText(/Plain <b>text<\/b> only/)).toBeTruthy();
   });
 
   test("forward-compat: an empty description_text renders a valid detail (no crash), no Apply when absent", () => {

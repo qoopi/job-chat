@@ -4,6 +4,7 @@ import {
   locationKindLabel,
   mapPostingToRow,
   PostingSchema,
+  sanitizePostingHtml,
   type Posting,
 } from "@shared/postings";
 
@@ -75,6 +76,60 @@ describe("htmlToText", () => {
       expect(htmlToText(c.html)).toBe(c.text);
     });
   }
+});
+
+describe("sanitizePostingHtml", () => {
+  // SECURITY: the stored+rendered HTML must be XSS-safe. Every dangerous construct is stripped; only the
+  // strict structural/formatting allowlist survives. This is the real XSS guard (the render trusts this output).
+  it("STRIPS a <script> tag and its content entirely", () => {
+    expect(sanitizePostingHtml("<script>alert(1)</script>")).toBe("");
+    expect(sanitizePostingHtml("before<script>alert(1)</script>after")).toBe("beforeafter");
+  });
+
+  it("STRIPS an <img> with an onerror handler (tag not allowed, no text survives)", () => {
+    expect(sanitizePostingHtml('<img src=x onerror=alert(1)>')).toBe("");
+  });
+
+  it("STRIPS a javascript: href (no javascript: survives; the anchor keeps no href)", () => {
+    const out = sanitizePostingHtml('<a href="javascript:alert(1)">click</a>');
+    expect(out).not.toContain("javascript:");
+    expect(out).not.toContain("href");
+    expect(out).toContain("click");
+  });
+
+  it("STRIPS a data: href", () => {
+    const out = sanitizePostingHtml('<a href="data:text/html,evil">d</a>');
+    expect(out).not.toContain("data:");
+    expect(out).not.toContain("href");
+  });
+
+  it("STRIPS on* event handlers, class, and style attributes", () => {
+    expect(sanitizePostingHtml('<p onclick="alert(1)">hi</p>')).toBe("<p>hi</p>");
+    expect(sanitizePostingHtml('<p class="x" style="color:red">styled</p>')).toBe("<p>styled</p>");
+  });
+
+  it("STRIPS <style> (tag + content) and <iframe>", () => {
+    expect(sanitizePostingHtml("<style>body{color:red}</style>keep")).toBe("keep");
+    expect(sanitizePostingHtml('<iframe src="https://evil"></iframe>after')).toBe("after");
+  });
+
+  it("KEEPS the structural allowlist: <strong>, <ul><li>, <h2>", () => {
+    const out = sanitizePostingHtml("<h2>About</h2><ul><li>a</li><li>b</li></ul><p>Own <strong>ingest</strong>.</p>");
+    expect(out).toBe("<h2>About</h2><ul><li>a</li><li>b</li></ul><p>Own <strong>ingest</strong>.</p>");
+  });
+
+  it("KEEPS an http(s) link but FORCES target=_blank and rel=noopener noreferrer nofollow", () => {
+    const out = sanitizePostingHtml('<a href="https://careers.example.com/j/1">apply</a>');
+    expect(out).toContain('href="https://careers.example.com/j/1"');
+    expect(out).toContain('target="_blank"');
+    expect(out).toContain('rel="noopener noreferrer nofollow"');
+  });
+
+  it("collapses empty/whitespace-only input to \"\"", () => {
+    expect(sanitizePostingHtml("")).toBe("");
+    expect(sanitizePostingHtml("   \n  ")).toBe("");
+    expect(sanitizePostingHtml("<script>alert(1)</script>")).toBe(""); // sanitizes to nothing -> ""
+  });
 });
 
 describe("locationKindLabel", () => {
@@ -218,7 +273,7 @@ describe("mapPostingToRow", () => {
     expect(row.apply_url).toBe("");
   });
 
-  it("strips the description HTML to plain text and copies the department", () => {
+  it("projects both the plain-text and the sanitized-HTML description, and copies the department", () => {
     const row = mapPostingToRow(
       {
         ...base,
@@ -229,13 +284,32 @@ describe("mapPostingToRow", () => {
       },
       ingestedAt,
     );
+    // description_text is the stripped plain text; description_html is the sanitized HTML (allowlist survives).
     expect(row.description_text).toBe("About\nOwn the ingest pipeline.");
+    expect(row.description_html).toBe("<h2>About</h2><p>Own the <strong>ingest</strong> pipeline.</p>");
     expect(row.department).toBe("Engineering");
   });
 
-  it("defaults description_text and department to '' when the item carries no description (pre-reingest, CH columns non-nullable)", () => {
+  it("sanitizes malicious HTML in the body so description_html carries no XSS (script stripped, plain text kept)", () => {
+    const row = mapPostingToRow(
+      {
+        ...base,
+        description: { descriptionHtml: "<script>alert(1)</script><p>Real <strong>body</strong>.</p>" },
+      },
+      ingestedAt,
+    );
+    // description_html is the XSS-safe projection: the <script> tag AND its content are gone.
+    expect(row.description_html).toBe("<p>Real <strong>body</strong>.</p>");
+    expect(row.description_html).not.toContain("script");
+    // description_text (the plain-text stripper) keeps the real body; its script-text leak is harmless
+    // (rendered React-escaped as literal text, never executed) and is covered by the htmlToText suite.
+    expect(row.description_text).toContain("Real body.");
+  });
+
+  it("defaults description_text, description_html and department to '' when the item carries no description (pre-reingest, CH columns non-nullable)", () => {
     const row = mapPostingToRow(base, ingestedAt);
     expect(row.description_text).toBe("");
+    expect(row.description_html).toBe("");
     expect(row.department).toBe("");
   });
 

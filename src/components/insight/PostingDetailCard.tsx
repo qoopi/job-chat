@@ -5,8 +5,11 @@ import type { PostingDetailState } from "@/lib/chat-ui";
 import { salaryLabel } from "@/lib/postings-format";
 
 // The single-posting detail (DetailPanel "posting" kind), fetched on demand by getPostingDetail. The
-// description is SAFE pre-wrapped TEXT (React escapes it; htmlToText already stripped the HTML at ingest) -
-// NEVER dangerouslySetInnerHTML. Apply is a prominent new-tab link with the safe rel; absent -> no button.
+// description renders as TRUSTED SANITIZED HTML: descriptionHtml was sanitized AT INGEST by sanitizePostingHtml
+// (shared/postings.ts) to a strict allowlist - no script/style/iframe/img/svg, no event handlers, no
+// javascript:/data: URLs - so dangerouslySetInnerHTML is safe HERE and only because of that ingest invariant.
+// When descriptionHtml is empty we fall back to descriptionText (plain text htmlToText output, React-escaped,
+// pre-wrapped). Apply is a prominent new-tab link with the safe rel; absent -> no button.
 
 /** The location line: Remote, else the non-empty city/region/country joined, else an em dash. */
 function locationLine(detail: PostingDetail): string {
@@ -32,9 +35,13 @@ function LoadedDetail({ detail }: { detail: PostingDetail }) {
           Apply
         </a>
       ) : null}
-      {detail.descriptionText ? (
-        // pre-wrapped plain text: newlines from htmlToText survive via CSS white-space, no markup is parsed.
-        <div className="posting-detail-desc">{detail.descriptionText}</div>
+      {detail.descriptionHtml ? (
+        // TRUSTED: descriptionHtml was sanitized at ingest by sanitizePostingHtml (strict allowlist) - safe to
+        // render as HTML, which is the ONLY reason dangerouslySetInnerHTML is acceptable here.
+        <div className="posting-detail-desc" dangerouslySetInnerHTML={{ __html: detail.descriptionHtml }} />
+      ) : detail.descriptionText ? (
+        // Fallback: pre-wrapped plain text; newlines from htmlToText survive via CSS white-space, no markup parsed.
+        <div className="posting-detail-desc posting-detail-desc--text">{detail.descriptionText}</div>
       ) : (
         <p className="posting-detail-note">No description provided.</p>
       )}

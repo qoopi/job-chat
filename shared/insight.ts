@@ -110,8 +110,9 @@ export const ScoredPostingRowSchema = z
 export type ScoredPostingRow = z.infer<typeof ScoredPostingRowSchema>;
 
 /** One posting's full detail, read on demand (getPostingDetail) for the in-app detail view. NOT a wire card
- *  payload - a server action returns it typed, so no Zod round-trip. description_text is already PLAIN TEXT
- *  (htmlToText stripped it at ingest); "" renders a valid empty detail. Raw HTML never reaches here. */
+ *  payload - a server action returns it typed, so no Zod round-trip. descriptionHtml is SANITIZED HTML
+ *  (sanitizePostingHtml, strict allowlist at ingest) rendered trusted; descriptionText is the parallel plain
+ *  text (htmlToText) used as the render fallback. Both "" render a valid empty detail. Raw HTML never reaches here. */
 export interface PostingDetail {
   title: string;
   company: string;
@@ -123,6 +124,7 @@ export interface PostingDetail {
   salaryMax: number | null;
   department: string;
   descriptionText: string;
+  descriptionHtml: string;
   applyUrl: string;
 }
 
