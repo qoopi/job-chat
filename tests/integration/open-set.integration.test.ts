@@ -30,6 +30,8 @@ function row(overrides: Partial<PostingRow> & Pick<PostingRow, "external_id" | "
     published_at: "2026-07-17 09:00:00",
     apply_url: "",
     role_names: [],
+    description_text: "",
+    department: "",
     ...overrides,
   };
 }

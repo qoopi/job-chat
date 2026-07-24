@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  htmlToText,
   locationKindLabel,
   mapPostingToRow,
   PostingSchema,
@@ -22,6 +23,59 @@ const base: Posting = {
 };
 
 const ingestedAt = new Date("2026-07-18T06:00:00Z");
+
+describe("htmlToText", () => {
+  // A case table over the pinned rules: block-closing tags + <br> -> newline, remaining tags stripped, the
+  // six named/numeric entities decoded, blank runs collapsed. Pure - no DOM, no dependency.
+  const cases: { name: string; html: string; text: string }[] = [
+    {
+      name: "empty string -> empty string (absent-description forward-compat)",
+      html: "",
+      text: "",
+    },
+    {
+      name: "a flat zero-heading <p> body (two paragraphs, no headings)",
+      html: "<p>We are hiring a backend engineer.</p><p>You will own the ingest pipeline.</p>",
+      text: "We are hiring a backend engineer.\nYou will own the ingest pipeline.",
+    },
+    {
+      name: "heading close -> newline",
+      html: "<h2>About the role</h2><p>Build things.</p>",
+      text: "About the role\nBuild things.",
+    },
+    {
+      name: "list items each become a line",
+      html: "<ul><li>Rust</li><li>Go</li></ul>",
+      text: "Rust\nGo",
+    },
+    {
+      name: "<br> (self-closing or not) becomes a newline",
+      html: "Line one<br/>Line two<br>Line three",
+      text: "Line one\nLine two\nLine three",
+    },
+    {
+      name: "remaining inline tags are stripped, their text kept",
+      html: "<p>A <strong>senior</strong> role with <a href='x'>a link</a>.</p>",
+      text: "A senior role with a link.",
+    },
+    {
+      name: "decodes the six entities (&amp; last so &amp;lt; stays literal)",
+      html: "<p>R&amp;D uses &lt;tags&gt; &amp; &quot;quotes&quot; &#39;apos&#39;&nbsp;end</p>",
+      text: 'R&D uses <tags> & "quotes" \'apos\' end',
+    },
+    {
+      name: "collapses blank runs from stacked block closes",
+      html: "<div><p>First</p></div>\n\n\n<div><p>Second</p></div>",
+      text: "First\nSecond",
+    },
+  ];
+
+  for (const c of cases) {
+    it(c.name, () => {
+      expect(htmlToText(c.html)).toBe(c.text);
+    });
+  }
+});
 
 describe("locationKindLabel", () => {
   it("maps the observed searchnapply kinds to onsite/remote/hybrid", () => {
@@ -162,6 +216,36 @@ describe("mapPostingToRow", () => {
   it("defaults apply_url to an empty string when the item carries no externalApplyUrl (CH column is non-nullable)", () => {
     const row = mapPostingToRow(base, ingestedAt);
     expect(row.apply_url).toBe("");
+  });
+
+  it("strips the description HTML to plain text and copies the department", () => {
+    const row = mapPostingToRow(
+      {
+        ...base,
+        description: {
+          descriptionHtml: "<h2>About</h2><p>Own the <strong>ingest</strong> pipeline.</p>",
+          department: "Engineering",
+        },
+      },
+      ingestedAt,
+    );
+    expect(row.description_text).toBe("About\nOwn the ingest pipeline.");
+    expect(row.department).toBe("Engineering");
+  });
+
+  it("defaults description_text and department to '' when the item carries no description (pre-reingest, CH columns non-nullable)", () => {
+    const row = mapPostingToRow(base, ingestedAt);
+    expect(row.description_text).toBe("");
+    expect(row.department).toBe("");
+  });
+
+  it("tolerates a description object that omits either field (nullish)", () => {
+    const row = mapPostingToRow(
+      { ...base, description: { descriptionHtml: "<p>Body only.</p>" } },
+      ingestedAt,
+    );
+    expect(row.description_text).toBe("Body only.");
+    expect(row.department).toBe("");
   });
 });
 

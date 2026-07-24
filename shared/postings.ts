@@ -24,6 +24,14 @@ export const RoleSchema = z.object({
   name: z.string(),
 });
 
+// The full posting body the jobs-api already carries per item: raw description HTML + the department string.
+// Both nullish so an item that omits the object (or either field) still ingests. The HTML is NEVER stored or
+// rendered raw - htmlToText strips it to plain text at projection (XSS: no raw HTML anywhere downstream).
+export const DescriptionSchema = z.object({
+  descriptionHtml: z.string().nullish(),
+  department: z.string().nullish(),
+});
+
 export const PostingSchema = z.object({
   id: z.union([z.number(), z.string()]),
   title: z.string(),
@@ -44,9 +52,39 @@ export const PostingSchema = z.object({
   // both parse to [] - matching then falls to the title-term path (unchanged behavior) until the field
   // ships and a re-ingest populates it.
   roles: z.array(RoleSchema).default([]),
+  // The description body (raw HTML + department). ABSENT on the pre-reingest payload, so nullish keeps a
+  // batch that omits it valid; mapPostingToRow degrades a missing body to empty text/department.
+  description: DescriptionSchema.nullish(),
 });
 
 export type Posting = z.infer<typeof PostingSchema>;
+
+/** Strip an ATS description's HTML to plain text at ingest. PURE + regex-based (no dependency, no DOM):
+ *  block-closing tags (</p></div></li></ul></ol></h1-6></blockquote>) and <br> become newlines, every
+ *  remaining tag is dropped, the six entities the ATS bodies use are decoded (&amp; LAST so an encoded
+ *  "&amp;lt;" stays the literal "&lt;"), and blank runs collapse to single-newline-separated lines. Raw
+ *  HTML is NEVER stored or rendered - this is the one place it is neutralized. "" in -> "" out. */
+export function htmlToText(html: string): string {
+  if (!html) return "";
+  const stripped = html
+    // Block-closing tags + <br> carry structure across as line breaks before the rest is removed.
+    .replace(/<\/(?:p|div|li|ul|ol|h[1-6]|blockquote)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    // Drop every remaining tag (opening tags, inline spans, anchors).
+    .replace(/<[^>]+>/g, "")
+    // Decode the entity set; &amp; must be last so "&amp;lt;" -> "&lt;", never "<".
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&");
+  return stripped
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => line !== "") // collapse blank runs: drop empties, keep single-newline separation
+    .join("\n");
+}
 
 export type LocationKind = "onsite" | "remote" | "hybrid";
 
@@ -80,6 +118,11 @@ export interface PostingRow {
   // matching key: the role id on the wire is a 64-bit integer that JSON.parse silently rounds past the JS
   // safe-integer limit, so it is never trustworthy - the name (a canonical unique string) drives matching.
   role_names: string[];
+  // The description body as PLAIN TEXT (htmlToText output), "" when the item carried none. Fetched on demand
+  // for the detail view - NEVER placed in the postings card payload (bloat). CH column is non-nullable, DEFAULT ''.
+  description_text: string;
+  // The posting's department, "" when absent. CH column is non-nullable, DEFAULT ''.
+  department: string;
   ingested_at: string;
 }
 
@@ -119,6 +162,9 @@ export function mapPostingToRow(posting: Posting, ingestedAt: Date): PostingRow 
     published_at: toChDateTime(posting.publishedAt),
     apply_url: posting.externalApplyUrl ?? "",
     role_names: roleNames,
+    // Strip the raw HTML to plain text HERE (the one neutralization point); "" when the body is absent.
+    description_text: htmlToText(posting.description?.descriptionHtml ?? ""),
+    department: posting.description?.department ?? "",
     ingested_at: toChDateTime(ingestedAt),
   };
 }
