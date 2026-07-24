@@ -343,6 +343,7 @@ a:hover {
 .posting-detail-desc p {
   margin: 0 0 var(--sp-3);
 }
+.posting-detail-desc h1,
 .posting-detail-desc h2,
 .posting-detail-desc h3,
 .posting-detail-desc h4,
@@ -352,6 +353,10 @@ a:hover {
   font-weight: 600;
   line-height: 1.35;
   margin: var(--sp-4) 0 var(--sp-2);
+}
+.posting-detail-desc h1 {
+  /* Largest allowed heading: a section title one token above h2 (--fs-lg vs --fs-md). */
+  font-size: var(--fs-lg);
 }
 .posting-detail-desc h2 {
   font-size: var(--fs-md);
@@ -387,6 +392,37 @@ a:hover {
 }
 .posting-detail-desc a:hover {
   color: var(--accent-strong);
+}
+.posting-detail-desc blockquote {
+  /* Indented quote: a left rule + padding, muted text, matched to the paragraph rhythm. */
+  margin: var(--sp-3) 0;
+  padding-left: var(--sp-4);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-2);
+}
+.posting-detail-desc code {
+  /* Inline code: mono on a subtle tint, small padding + radius. */
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+}
+.posting-detail-desc pre {
+  /* Code block: a padded mono panel that scrolls sideways so long lines never widen the layout. */
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  overflow-x: auto;
+}
+.posting-detail-desc pre code {
+  /* Nested code resets the inline tint/padding - the pre owns the surface. */
+  background: none;
+  padding: 0;
+  font-size: inherit;
 }
 .posting-detail-note {
   font-size: var(--fs-sm);

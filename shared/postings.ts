@@ -26,8 +26,9 @@ export const RoleSchema = z.object({
 });
 
 // The full posting body the jobs-api already carries per item: raw description HTML + the department string.
-// Both nullish so an item that omits the object (or either field) still ingests. The HTML is NEVER stored or
-// rendered raw - htmlToText strips it to plain text at projection (XSS: no raw HTML anywhere downstream).
+// Both nullish so an item that omits the object (or either field) still ingests. The RAW HTML is never stored:
+// at ingest it is sanitized (sanitizePostingHtml, strict allowlist) into description_html for rich rendering,
+// and htmlToText projects the plain-text fallback into description_text (XSS: no raw HTML anywhere downstream).
 export const DescriptionSchema = z.object({
   descriptionHtml: z.string().nullish(),
   department: z.string().nullish(),
