@@ -295,6 +295,21 @@ describe("mergeSearchParams (server-authoritative profile merge)", () => {
     expect(mergeSearchParams({ titleTerms: ["staff engineer"] }, PROFILE).roles).toBeUndefined();
   });
 
+  it("carries the profile's canonicalRoles as the server-authoritative role-IN signal (item 4)", () => {
+    // canonicalRoles come from the PROFILE (searchnapply autocomplete at extraction), never from the model.
+    const withRoles = { ...PROFILE, canonicalRoles: ["SDET", "Test Engineer"] };
+    const merged = mergeSearchParams({ titleTerms: ["qa engineer"], roles: ["ignored model phrase"] }, withRoles);
+    expect(merged.canonicalRoles).toEqual(["SDET", "Test Engineer"]);
+  });
+
+  it("FORWARD-COMPAT: a legacy profile whose JSONB lacks canonicalRoles merges to [] (no throw)", () => {
+    // The chat read path reads the profiles JSONB WITHOUT re-parsing through ProfileSchema, so a pre-056
+    // profile arrives with canonicalRoles === undefined at runtime; the merge must degrade it to [].
+    const legacy = { ...PROFILE } as Profile;
+    delete (legacy as { canonicalRoles?: unknown }).canonicalRoles;
+    expect(mergeSearchParams({ titleTerms: ["qa engineer"] }, legacy).canonicalRoles).toEqual([]);
+  });
+
   // Mutation check: the tool schema's `.strict()` blocks an injected experience/salaryMin key BEFORE it
   // reaches mergeSearchParams in production - but that is a schema-layer guarantee, not a merge-logic one.
   // This forces a model-supplied value THROUGH the merge itself (a raw cast, as if a differently-shaped

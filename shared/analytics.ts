@@ -539,6 +539,11 @@ const SearchPostingsParams = z
     // key the role-IN match (the 64-bit id is never used). Empty (the default) = no role phrase, so
     // matching falls to the title-term path.
     roles: z.array(z.string().min(1)).max(10).default([]),
+    // The PROFILE's canonical role LABELS (from searchnapply autocomplete at extraction), passed
+    // server-side and authoritative for the role-IN signal - NEVER model-supplied. Already canonical, so
+    // searchPostings uses them DIRECTLY (lowercased) and skips the query-time role-resolve read. Empty =
+    // legacy profile: fall back to resolving the model's `roles` phrases against the corpus.
+    canonicalRoles: z.array(z.string().min(1)).max(20).default([]),
     experience: z.string().min(1).nullish(),
     cities: z.array(z.string().min(1)).max(20).default([]),
     // "at company X for me": the named companies constrain the scored set as a HARD filter (never a score
@@ -579,15 +584,16 @@ export function buildRoleResolveSql(phrases: string[], table: string): string {
   ]);
 }
 
-/** The FIXED score formula:
- *    3*roleOrTitle + 2*experienceMatch + 2*cityMatch + 1*(remoteOk AND remote) + 1*salaryFloorMet
- *  The weight-3 term is role-IN when the phrase(s) resolved to canonical role name(s): a classified row
- *  matches on has(role_names, name) - case-insensitive, both sides lowered - at FULL weight even when its
- *  TITLE omits the role; the title-term hits become the FALLBACK, used only for an UNCLASSIFIED row (empty
- *  role_names). When nothing resolved (roleNames empty - always so pre-ship), the term IS the title hits,
- *  so the formula and behavior are unchanged. `roleNames` are already lowercased (the resolve lowered
- *  them). An absent term contributes literal `0` so the formula stays whole; a NULL salary is never a match. */
-function scoreExpr(p: SearchPostingsQuery, roleNames: string[]): string {
+/** The score/gate SUB-TERMS, computed once so scoreExpr (ranking) and matchExpr (the B1 gate) share ONE
+ *  source (no drift). The weight-3 roleTerm is role-IN when the phrase(s) resolved to canonical role
+ *  name(s): a classified row matches on has(role_names, name) - case-insensitive, both sides lowered - at
+ *  FULL weight even when its TITLE omits the role; the title-term hits are the FALLBACK, used only for an
+ *  UNCLASSIFIED row (empty role_names). When nothing resolved (roleNames empty), roleTerm IS the title
+ *  hits. `roleNames` are already lowercased. An absent term is literal `0`; a NULL salary is never a match. */
+function scoreParts(
+  p: SearchPostingsQuery,
+  roleNames: string[],
+): { roleTerm: string; expMatch: string; cityMatch: string; remoteMatch: string; salaryMatch: string } {
   const titleHits =
     p.titleTerms.length > 0
       ? `least(${p.titleTerms.map((t) => `(title ILIKE ${chStr(`%${likeEscape(t)}%`)})`).join(" + ")}, 2)`
@@ -605,11 +611,28 @@ function scoreExpr(p: SearchPostingsQuery, roleNames: string[]): string {
     p.salaryMin !== undefined
       ? `(salary_max IS NOT NULL AND salary_max >= ${p.salaryMin})`
       : "0";
-  return `3 * ${roleTerm} + 2 * ${expMatch} + 2 * ${cityMatch} + 1 * ${remoteMatch} + 1 * ${salaryMatch}`;
+  return { roleTerm, expMatch, cityMatch, remoteMatch, salaryMatch };
 }
 
-/** Build the rows + meta SQL for searchPostings (pure, unit-testable). Score computed once in an inner
- *  subquery so the outer filters (score > 0) and orders by the alias. Open set only. */
+/** The FIXED score formula (ranking only):
+ *    3*roleOrTitle + 2*experienceMatch + 2*cityMatch + 1*(remoteOk AND remote) + 1*salaryFloorMet
+ *  Seniority/salary/remote CONTRIBUTE to the rank but never make a match on their own (see matchExpr). */
+function scoreExpr(parts: ReturnType<typeof scoreParts>): string {
+  return `3 * ${parts.roleTerm} + 2 * ${parts.expMatch} + 2 * ${parts.cityMatch} + 1 * ${parts.remoteMatch} + 1 * ${parts.salaryMatch}`;
+}
+
+/** B1 HONEST-COUNT gate: a posting counts as a fit match ONLY with a REAL role/title/location signal -
+ *  roleTerm (which folds roleMatch OR the title-hit fallback) > 0, OR a city match. Seniority band alone
+ *  scored 2 and inflated the old `score > 0` gate (every senior posting counted - the 5799); it is
+ *  deliberately NOT here. A legacy (roleNames empty) title-only match STILL counts (roleTerm == the title
+ *  hits). cityMatch is already a boolean (or literal `0` when no city), so `OR ${cityMatch}` is safe. */
+function matchExpr(parts: ReturnType<typeof scoreParts>): string {
+  return `((${parts.roleTerm}) > 0 OR ${parts.cityMatch})`;
+}
+
+/** Build the rows + meta SQL for searchPostings (pure, unit-testable). Score + the B1 `matched` gate are
+ *  computed once in an inner subquery so the outer filters on `matched` (a real role/title/city signal)
+ *  and orders by the score alias. Open set only. */
 export function buildSearchPostingsSql(
   rawParams: unknown,
   table: string,
@@ -617,7 +640,9 @@ export function buildSearchPostingsSql(
 ): { rowsSql: string; metaSql: string } {
   const p = SearchPostingsParams.parse(rawParams);
   // Resolved role names are interpolated as chStr-escaped string literals (injection-safe).
-  const score = scoreExpr(p, roleNames);
+  const parts = scoreParts(p, roleNames);
+  const score = scoreExpr(parts);
+  const matched = matchExpr(parts);
   const openSet = openSetFilter(table);
   // A company scope narrows the ranked set to those companies only, applied alongside the open-set predicate
   // in BOTH inner queries so the honest total counts just the named companies.
@@ -650,11 +675,12 @@ export function buildSearchPostingsSql(
     "    apply_url,",
     "    source,",
     "    external_id,",
-    `    ${score} AS score`,
+    `    ${score} AS score,`,
+    `    ${matched} AS matched`,
     `  FROM ${table} FINAL`,
     `  WHERE ${scope}`,
     ")",
-    "WHERE score > 0",
+    "WHERE matched",
     // Deterministic tie-break within equal scores - salary-listed rows first, then
     // freshest. Stops a listed-salary US row sinking below an unlisted India row on a score tie.
     "ORDER BY score DESC, (salary_min IS NOT NULL OR salary_max IS NOT NULL) DESC, published_at DESC",
@@ -669,11 +695,12 @@ export function buildSearchPostingsSql(
     "  SELECT",
     "    company,",
     "    ingested_at,",
-    `    ${score} AS score`,
+    `    ${score} AS score,`,
+    `    ${matched} AS matched`,
     `  FROM ${table} FINAL`,
     `  WHERE ${scope}`,
     ")",
-    "WHERE score > 0",
+    "WHERE matched",
     "GROUP BY company",
     "ORDER BY c DESC, company ASC",
   ]);
@@ -893,7 +920,14 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
 
   async function searchPostings(rawParams: unknown): Promise<SearchPostingsResult> {
     const p = SearchPostingsParams.parse(rawParams);
-    const roleNames = await resolveRoleNames(p.roles);
+    // The profile's canonicalRoles are server-authoritative and ALREADY canonical (resolved from
+    // searchnapply autocomplete at extraction) - use them DIRECTLY for the role-IN signal, lowercased to
+    // match the lowerUTF8(role_names) comparison, and skip the query-time role-resolve read. Only a legacy
+    // profile (canonicalRoles empty) falls back to resolving the model's role phrases against the corpus.
+    const roleNames =
+      p.canonicalRoles.length > 0
+        ? p.canonicalRoles.map((r) => r.toLowerCase())
+        : await resolveRoleNames(p.roles);
     const { rowsSql, metaSql } = buildSearchPostingsSql(rawParams, table, roleNames);
     const [rawRows, metaRows] = await Promise.all([
       client
