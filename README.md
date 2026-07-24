@@ -11,7 +11,7 @@ at jobchat.dev.
 
 Live: https://jobchat.dev
 
-Judge environment: the judge `.env` is an **access-restricted** Google Drive file — please **request access** and the maintainer will grant it: https://drive.google.com/file/d/1T6Ejk0_y0x37l636en4NlBoYtz7SoHxQ/view?usp=sharing
+Judge environment: the judge `.env` is an **access-restricted** Google Drive file — please **request access** and the maintainer will grant it: [env](https://drive.google.com/file/d/14xuVzO9cWiCUQ4YcAXMEogivpG3tn7G3/view?usp=drive_link)
 
 <!-- HERO SCREENSHOT SLOT - operator adds the hero screenshot here during the demo walk -->
 
