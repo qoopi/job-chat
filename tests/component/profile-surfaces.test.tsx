@@ -240,7 +240,7 @@ describe("PostingsCard", () => {
     expect(document.querySelectorAll("tbody tr").length).toBe(8); // capped
     expect(screen.getAllByText("not listed").length).toBeGreaterThan(0);
     expect(screen.getByText(/Most matches are at Google/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open all 23 in panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open top 12 of 23 in panel" }));
     expect(onOpenPanel).toHaveBeenCalled();
   });
 
@@ -382,7 +382,7 @@ describe("detail panel routing per new card", () => {
 
   test("postings 'Open all N in panel' opens the full list with filter chips", () => {
     renderChat([assistantPart("data-postings", { kind: "postings", rows: postingsRows, total: 23 })]);
-    fireEvent.click(screen.getByRole("button", { name: "Open all 23 in panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open top 12 of 23 in panel" }));
     expect(screen.getByRole("region", { name: "Matching postings" })).toBeTruthy();
     // the detail panel full list is uncapped (all 12 rows) with a filter group
     expect(document.querySelector(".detail-panel")?.querySelectorAll("tbody tr").length).toBe(12);
