@@ -388,6 +388,16 @@ export function emptyModelOutput(tool: string): { empty: true; tool: string; not
   };
 }
 
+/** Model-facing signal for a bare single-number aggregate: no card is shown (a one-value chart adds
+ *  nothing over the sentence), so restate the figure in one plain sentence. The verdict already holds it. */
+export function scalarModelOutput(verdict: string): { scalar: true; verdict: string; note: string } {
+  return {
+    scalar: true,
+    verdict,
+    note: "This is a single number, so no chart is shown. State it in one short plain sentence (two at most) using the figure in the verdict; do not describe the tool call.",
+  };
+}
+
 /** Entity labels (first string column, capped) that ground the model's reasoning in what it got back -
  *  the prompt forbids naming any entity absent from this list. */
 const MODEL_LABEL_CAP = 12;
