@@ -31,6 +31,7 @@ const PROFILE: Profile = {
   domains: [],
   ossHighlights: [],
   experience: [],
+  canonicalRoles: [],
 };
 
 function profileRow(profile: Profile | null): ProfileRow {

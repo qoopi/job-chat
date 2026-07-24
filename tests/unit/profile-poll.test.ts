@@ -20,6 +20,7 @@ const profile = (overrides: Partial<Profile> = {}): Profile => ({
   domains: [],
   ossHighlights: [],
   experience: [],
+  canonicalRoles: [],
   ...overrides,
 });
 

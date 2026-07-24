@@ -31,5 +31,11 @@ export const ProfileSchema = z.object({
   domains: z.array(z.string()),
   ossHighlights: z.array(z.string()),
   experience: z.array(ExperienceSchema),
+  // Canonical role LABELS resolved from searchnapply autocomplete at extraction (e.g. "SDET",
+  // "Test Engineer"). The server-authoritative role-IN signal for fit matching; the 64-bit autocomplete
+  // id is NEVER used (JSON.parse corrupts it - only the label is trustworthy). default([]) is forward-
+  // compat: a legacy profile absent this field parses to [] and behaves as today (title-expansion
+  // fallback). Rides the profiles JSONB column - no migration.
+  canonicalRoles: z.array(z.string()).default([]),
 });
 export type Profile = z.infer<typeof ProfileSchema>;

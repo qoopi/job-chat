@@ -79,6 +79,7 @@ describe("classifyCardData", () => {
     domains: ["distributed systems"],
     ossHighlights: ["Merged PRs to trigger.dev"],
     experience: [],
+    canonicalRoles: [],
   };
 
   it("classifies a valid profile-card payload, carrying the profile", () => {
@@ -133,6 +134,7 @@ describe("resolveDetailContent", () => {
     domains: [],
     ossHighlights: [],
     experience: [],
+    canonicalRoles: [],
   };
   const postingsRows = [
     {
@@ -327,6 +329,7 @@ describe("storeToUiMessages (AC-13 resume hydration)", () => {
       domains: [],
       ossHighlights: [],
       experience: [],
+      canonicalRoles: [],
     };
     const payload = { kind: "profile-card", profile };
     const stored: StoredMessage[] = [{ id: "m6", role: "assistant", content: "", parts: payload }];

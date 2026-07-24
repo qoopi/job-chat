@@ -27,6 +27,7 @@ const PROFILE: Profile = {
   domains: ["fintech"],
   ossHighlights: ["OSS CLI maintainer"],
   experience: [],
+  canonicalRoles: [],
 };
 
 function signals(): GithubSignals {

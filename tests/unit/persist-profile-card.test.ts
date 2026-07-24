@@ -17,6 +17,7 @@ const profile: Profile = {
   domains: ["fintech"],
   ossHighlights: ["OSS CLI maintainer"],
   experience: [],
+  canonicalRoles: [],
 };
 
 describe("extractAssistantPersistence accepts the profile-card kind", () => {

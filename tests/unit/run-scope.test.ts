@@ -131,6 +131,7 @@ const OWNER_PROFILE: Profile = {
   domains: ["fintech"],
   ossHighlights: [],
   experience: [],
+  canonicalRoles: [],
 };
 
 describe("createChatRun PROFILE note injection (030)", () => {

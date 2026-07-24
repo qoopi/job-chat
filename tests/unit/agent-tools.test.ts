@@ -246,6 +246,7 @@ const PROFILE: Profile = {
   domains: ["fintech"],
   ossHighlights: [],
   experience: [],
+  canonicalRoles: [],
 };
 
 describe("buildCatalogTools registers the fit tools (search_postings + request_profile)", () => {

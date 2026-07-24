@@ -27,6 +27,7 @@ const full: Profile = {
       bullets: ["Cut p99 latency 40%", "Led the payments rewrite"],
     },
   ],
+  canonicalRoles: ["Backend Engineer", "Platform Engineer"],
 };
 
 describe("ProfileSchema", () => {
@@ -47,8 +48,21 @@ describe("ProfileSchema", () => {
       domains: [],
       ossHighlights: [],
       experience: [],
+      canonicalRoles: [],
     };
     expect(ProfileSchema.parse(sparse)).toEqual(sparse);
+  });
+
+  // Forward-compat: a legacy profile persisted before 056 has no canonicalRoles key; the JSONB read
+  // path must degrade it to [] (title-expansion fallback), never reject it.
+  it("defaults canonicalRoles to [] when the field is absent (legacy profile)", () => {
+    const { canonicalRoles: _omit, ...legacy } = full;
+    expect(ProfileSchema.parse(legacy).canonicalRoles).toEqual([]);
+  });
+
+  it("preserves canonicalRoles when present (the resolved role labels)", () => {
+    const parsed = ProfileSchema.parse({ ...full, canonicalRoles: ["SDET", "Test Engineer"] });
+    expect(parsed.canonicalRoles).toEqual(["SDET", "Test Engineer"]);
   });
 
   it("strips an unknown key the model might invent (not strict)", () => {

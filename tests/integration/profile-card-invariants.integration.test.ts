@@ -21,6 +21,7 @@ function profile(title: string): Profile {
     domains: [],
     ossHighlights: [],
     experience: [],
+    canonicalRoles: [],
   };
 }
 

@@ -64,6 +64,7 @@ const PROFILE: Profile = {
   domains: ["fintech"],
   ossHighlights: [],
   experience: [],
+  canonicalRoles: [],
 };
 
 function makeStore(overrides: Partial<Store> = {}): Store {

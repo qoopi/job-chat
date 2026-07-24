@@ -269,6 +269,7 @@ const EVAL_PROFILE: Profile = {
   domains: ["fintech"],
   ossHighlights: ["Maintainer of a widely used OSS library"],
   experience: [],
+  canonicalRoles: [],
 };
 
 // The 030 profile-driven fit cases: the three-way routing (guest -> auth-invite, signed-in-no-profile ->
