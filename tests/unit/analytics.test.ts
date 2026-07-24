@@ -3,6 +3,7 @@ import type { ClickHouseClient } from "@clickhouse/client";
 import {
   buildComposedSql,
   buildCorpusSql,
+  buildPostingDetailSql,
   buildRoleResolveSql,
   buildSearchPostingsSql,
   buildTemplateSql,
@@ -11,6 +12,25 @@ import {
   SENIORITY_BANDS,
 } from "@shared/analytics";
 import { SENIORITY_LEVELS } from "@shared/profile";
+
+describe("buildPostingDetailSql", () => {
+  it("selects the detail columns for one posting by the natural key, FINAL + LIMIT 1", () => {
+    const sql = buildPostingDetailSql("GoogleCareers", "320973146", "postings");
+    expect(sql).toContain("description_text");
+    expect(sql).toContain("department");
+    expect(sql).toContain("apply_url");
+    expect(sql).toContain("FROM postings FINAL");
+    expect(sql).toContain("WHERE source = 'GoogleCareers' AND external_id = '320973146'");
+    expect(sql).toContain("LIMIT 1");
+  });
+
+  it("escapes a quote in either key value (injection-safe)", () => {
+    const sql = buildPostingDetailSql("src", "x' OR '1'='1", "postings");
+    // The apostrophes are backslash-escaped inside the literal - never break out of the string.
+    expect(sql).toContain("external_id = 'x\\' OR \\'1\\'=\\'1'");
+    expect(sql).not.toContain("OR '1'='1'"); // no unescaped injection fragment survives
+  });
+});
 
 describe("buildTemplateSql", () => {
   it("interpolates salary_compare cities + role and uses quantileExact over FINAL", () => {

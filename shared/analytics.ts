@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { ClickHouseClient } from "@clickhouse/client";
 // Type-only import (erased at build): the scored OUTPUT row, NOT the profile type. The profile object
 // never enters the CH path; the output row is fine, and `import type` pulls no runtime profile code in.
-import type { ScoredPostingRow } from "@shared/insight";
+import type { PostingDetail, ScoredPostingRow } from "@shared/insight";
 
 // The analytics catalog: the only path from agent to ClickHouse; meta.sql is the EXACT executed SQL
 // ("Show query" reveals it verbatim). SQL-INJECTION safety despite interpolation (the reveal needs the
@@ -606,6 +606,8 @@ export function buildSearchPostingsSql(
     "  experience,",
     "  publishedAt,",
     "  apply_url,",
+    "  source,",
+    "  external_id AS externalId,",
     "  score",
     "FROM (",
     "  SELECT",
@@ -619,6 +621,8 @@ export function buildSearchPostingsSql(
     "    toString(published_at) AS publishedAt,",
     "    published_at,",
     "    apply_url,",
+    "    source,",
+    "    external_id,",
     `    ${score} AS score`,
     `  FROM ${table} FINAL`,
     `  WHERE ${scope}`,
@@ -654,6 +658,28 @@ export interface SearchPostingsResult {
   rows: ScoredPostingRow[];
   total: number;
   meta: { freshestAt: string; topCompany: string; topShare: number };
+}
+
+/** SELECT one posting by its natural key (source, external_id) for the on-demand detail view. FINAL collapses
+ *  the ReplacingMergeTree so the freshest snapshot wins; both key values are chStr-escaped (injection-safe). */
+export function buildPostingDetailSql(source: string, externalId: string, table: string): string {
+  return assemble([
+    "SELECT",
+    "  title,",
+    "  company,",
+    "  city,",
+    "  region,",
+    "  country,",
+    "  (location_kind = 'remote') AS remote,",
+    "  salary_min,",
+    "  salary_max,",
+    "  department,",
+    "  description_text,",
+    "  apply_url",
+    `FROM ${table} FINAL`,
+    `WHERE source = ${chStr(source)} AND external_id = ${chStr(externalId)}`,
+    "LIMIT 1",
+  ]);
 }
 
 export interface QueryResult {
@@ -726,6 +752,9 @@ export interface Analytics {
   runComposedQuery(params: unknown): Promise<QueryResult>;
   /** Profile-driven scored selection; params are DERIVED filter VALUES only (never the profile object). */
   searchPostings(params: unknown): Promise<SearchPostingsResult>;
+  /** One posting's full detail by natural key (source, external_id) for the in-app detail view; null when no
+   *  such posting (public postings, ownership-free). description_text is already plain text (stripped at ingest). */
+  getPostingDetail(source: string, externalId: string): Promise<PostingDetail | null>;
   /** Corpus shape for the DATA SCOPE note. Memoized on the per-process analytics singleton (once per isolate,
    *  not per turn); only a fulfilled result is cached, a transient failure is retried. */
   coverageProfile(): Promise<CoverageProfile>;
@@ -849,6 +878,9 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
       experience: String(r.experience),
       publishedAt: String(r.publishedAt),
       applyUrl: r.apply_url == null ? "" : String(r.apply_url),
+      // The natural key rides the row so a title click can fetch the on-demand detail (getPostingDetail).
+      source: String(r.source),
+      externalId: String(r.externalId),
       score: Number(r.score),
     }));
     const total = metaRows.reduce((sum, m) => sum + Number(m.c), 0);
@@ -865,6 +897,32 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
         topCompany: top ? String(top.company) : "",
         topShare: total > 0 && top ? Number(top.c) / total : 0,
       },
+    };
+  }
+
+  // One posting by (source, external_id) for the detail view. Missing row -> null (not-found). NULL/empty
+  // string columns normalize to null (location) or "" (department/description/apply), matching searchPostings.
+  async function getPostingDetail(source: string, externalId: string): Promise<PostingDetail | null> {
+    const rs = await client.query({
+      query: buildPostingDetailSql(source, externalId, table),
+      format: "JSONEachRow",
+      clickhouse_settings: QUERY_SETTINGS,
+    });
+    const [r] = await rs.json<Record<string, unknown>>();
+    if (!r) return null;
+    const orNull = (v: unknown) => (v == null || v === "" ? null : String(v));
+    return {
+      title: String(r.title),
+      company: String(r.company),
+      city: orNull(r.city),
+      region: orNull(r.region),
+      country: orNull(r.country),
+      remote: Number(r.remote) === 1,
+      salaryMin: r.salary_min == null ? null : Number(r.salary_min),
+      salaryMax: r.salary_max == null ? null : Number(r.salary_max),
+      department: r.department == null ? "" : String(r.department),
+      descriptionText: r.description_text == null ? "" : String(r.description_text),
+      applyUrl: r.apply_url == null ? "" : String(r.apply_url),
     };
   }
 
@@ -904,6 +962,7 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
     runQuery: (name, params) => executeBuilt(buildTemplateSql(name, params, table)),
     runComposedQuery: (params) => executeBuilt(buildComposedSql(params, table)),
     searchPostings,
+    getPostingDetail,
     // Cache only a FULFILLED result; on rejection clear the memo so the next call retries.
     coverageProfile: () =>
       (coverageCache ??= computeCoverage().catch((err) => {

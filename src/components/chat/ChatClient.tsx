@@ -25,7 +25,9 @@ import {
   messageText,
   reconcileMessagesById,
   resolveDetailContent,
+  type DetailContent,
   type DetailTarget,
+  type PostingDetailState,
 } from "@/lib/chat-ui";
 import { isAuthDialogOpen, isMenuOpen } from "@/lib/layers";
 import { queueDraft, takeQueuedDraft } from "@/lib/queued-draft";
@@ -40,6 +42,7 @@ import {
 import {
   clearGuestSession,
   deleteConversation as deleteConversationAction,
+  getPostingDetail as getPostingDetailAction,
   renameConversation as renameConversationAction,
   sendMessage as sendMessageAction,
   startConversation as startConversationAction,
@@ -151,16 +154,48 @@ export function ChatClient({
   // The open detail panel, held by identity so its body re-resolves from the immutable payload (a resume renders the same detail panel). One at a time.
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
   const [profileOpen, setProfileOpen] = useState(profileOnArrival);
-  const openDetailPanel = useCallback((messageId: string, partId: string) => {
-    setProfileOpen(false);
-    setDetailTarget({ messageId, partId });
+  // The on-demand single-posting detail (fetched, not payload-resolved). A monotonic request id discards a
+  // stale fetch: a second row click - or any panel switch/close - bumps it so an earlier resolve can't reopen.
+  const [postingDetail, setPostingDetail] = useState<PostingDetailState | null>(null);
+  const postingReqRef = useRef(0);
+  const clearPostingDetail = useCallback(() => {
+    postingReqRef.current += 1; // invalidate any in-flight fetch
+    setPostingDetail(null);
   }, []);
+  const openDetailPanel = useCallback(
+    (messageId: string, partId: string) => {
+      setProfileOpen(false);
+      clearPostingDetail();
+      setDetailTarget({ messageId, partId });
+    },
+    [clearPostingDetail],
+  );
   const closeDetailPanel = useCallback(() => setDetailTarget(null), []);
   const openProfile = useCallback(() => {
     setDetailTarget(null);
+    clearPostingDetail();
     setProfileOpen(true);
-  }, []);
+  }, [clearPostingDetail]);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
+
+  // Open one posting's detail from a row title: supersede any other panel, show a loading state, then the
+  // fetched detail (or not-found). The request-id guard drops a resolve superseded by a newer click/close.
+  const openPosting = useCallback((source: string, externalId: string) => {
+    const reqId = (postingReqRef.current += 1);
+    setProfileOpen(false);
+    setDetailTarget(null);
+    setPostingDetail({ status: "loading" });
+    void (async () => {
+      let next: PostingDetailState;
+      try {
+        const detail = await getPostingDetailAction(source, externalId);
+        next = detail ? { status: "loaded", detail } : { status: "not-found" };
+      } catch {
+        next = { status: "not-found" };
+      }
+      if (postingReqRef.current === reqId) setPostingDetail(next);
+    })();
+  }, []);
   // Abandon-clear (single home): ANY profile-panel close that is NOT a save clears the one-shot ref, so a
   // later save can never fire a stale question. This covers every close path off one flag - the X button
   // (closeProfile), Esc (the window handler), New chat (startNewChat), and switching to a detail panel - which
@@ -210,11 +245,12 @@ export function ChatClient({
     setMessages([]);
     setDetailTarget(null);
     setProfileOpen(false);
+    clearPostingDetail();
     setDraft("");
     setFailed(null);
     setTitleState(undefined); // title bar returns to the "New chat" empty state
     setFocusNonce((n) => n + 1);
-  }, [setMessages]);
+  }, [setMessages, clearPostingDetail]);
 
   // The polite cap/budget notice, rendered as a data-refusal turn (the one MessageList path shows it). A guest
   // cap flips the derived `capped` state below; it does NOT auto-open the dialog - the card + a queued send invite it.
@@ -529,6 +565,11 @@ export function ChatClient({
         : null,
     [targetMessage, detailTarget],
   );
+  // The on-demand single posting, built from ChatClient's own fetch state (not the message payload). Takes
+  // precedence over the payload-resolved detail panel when open (a title click supersedes an open list).
+  const postingContent: DetailContent | null = postingDetail
+    ? { kind: "posting", state: postingDetail }
+    : null;
 
   // Close-on-Esc, honoring the layer priority (dialog > menu > detail panel): yield while `isAuthDialogOpen()` or
   // `isMenuOpen()` is true; otherwise Esc closes the detail panel. Bound once; the functional setState reads current.
@@ -539,6 +580,8 @@ export function ChatClient({
       // Close whichever detail panel view is open (they are mutually exclusive).
       setProfileOpen(false);
       setDetailTarget((t) => (t ? null : t));
+      postingReqRef.current += 1; // drop any in-flight posting fetch too
+      setPostingDetail((p) => (p ? null : p));
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -580,10 +623,12 @@ export function ChatClient({
             onFindJob={() => void send("Find me a job that fits")}
             onProfileSaved={onProfileSaved}
           />
+        ) : postingContent ? (
+          <DetailPanel content={postingContent} onClose={clearPostingDetail} onOpenPosting={openPosting} />
         ) : detailContent ? (
-          <DetailPanel content={detailContent} onClose={closeDetailPanel} />
+          <DetailPanel content={detailContent} onClose={closeDetailPanel} onOpenPosting={openPosting} />
         ) : null}
-        <div className={profileOpen || detailContent ? "canvas docked" : "canvas"}>
+        <div className={profileOpen || detailContent || postingContent ? "canvas docked" : "canvas"}>
           <TitleBar
             title={titleState}
             signedIn={signedIn}
@@ -601,6 +646,7 @@ export function ChatClient({
               onFollowup={onFollowup}
               onRetry={onRetry}
               onOpenDetailPanel={openDetailPanel}
+              onOpenPosting={openPosting}
               onSignIn={signedIn ? undefined : openAuthDialog}
               onEditProfile={onEditProfile}
               onAuthInvite={onAuthInvite}

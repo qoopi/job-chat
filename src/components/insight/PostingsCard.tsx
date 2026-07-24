@@ -18,20 +18,25 @@ import { Verdict } from "./Verdict";
 // The job-postings card (an InsightCard child). Rows are score-ordered: ORDER IS THE RANK (no percentages/badges).
 // Two surfaces: the in-chat card (capped, honesty caption, no-matches variant) and the detail panel full list (PostingsPanel).
 
-/** The role cell: a new-tab link to the posting when it carries an apply link, else plain text exactly as
- *  before. rel noopener+noreferrer on every external target; an empty/absent apply_url never links. */
-function RoleCell({ row }: { row: ScoredPostingRow }) {
+/** A callback that opens one posting's in-app detail from its natural key. */
+type OpenPosting = (source: string, externalId: string) => void;
+
+/** The role cell: the title CLICKS THROUGH to the in-app posting detail (Apply lives inside that detail). A
+ *  row carrying the natural key renders a title button; an older snapshot row (no key) or no handler renders
+ *  plain text - no dead affordance. */
+function RoleCell({ row, onOpenPosting }: { row: ScoredPostingRow; onOpenPosting?: OpenPosting }) {
   const title = <strong>{row.title}</strong>;
-  if (!row.applyUrl) return title;
+  const { source, externalId } = row;
+  if (!onOpenPosting || !source || !externalId) return title;
   return (
-    <a href={row.applyUrl} target="_blank" rel="noopener noreferrer">
+    <button type="button" className="posting-title-btn" onClick={() => onOpenPosting(source, externalId)}>
       {title}
-    </a>
+    </button>
   );
 }
 
 /** The 5-column table body. A missing salary reads muted "not listed" (never blank). */
-function PostingsTable({ rows }: { rows: ScoredPostingRow[] }) {
+function PostingsTable({ rows, onOpenPosting }: { rows: ScoredPostingRow[]; onOpenPosting?: OpenPosting }) {
   return (
     <table className="data-table">
       <thead>
@@ -49,7 +54,7 @@ function PostingsTable({ rows }: { rows: ScoredPostingRow[] }) {
           return (
             <tr key={i}>
               <td>
-                <RoleCell row={r} />
+                <RoleCell row={r} onOpenPosting={onOpenPosting} />
               </td>
               <td>{r.company}</td>
               <td>{locationLabel(r)}</td>
@@ -81,6 +86,7 @@ export function PostingsCard({
   total,
   onFollowup,
   onOpenPanel,
+  onOpenPosting,
   onEdit,
   pending = false,
 }: {
@@ -90,6 +96,8 @@ export function PostingsCard({
   onFollowup?: (text: string) => void;
   /** "Open all N in panel" - opens the detail panel full list. */
   onOpenPanel?: () => void;
+  /** A row title click - opens that single posting's in-app detail. */
+  onOpenPosting?: OpenPosting;
   /** "Edit profile" (no-matches way-out) - opens the detail panel profile form. */
   onEdit?: () => void;
   pending?: boolean;
@@ -140,7 +148,7 @@ export function PostingsCard({
       <div className="insight-body">
         {filtered.length > 0 ? (
           <>
-            <PostingsTable rows={visible} />
+            <PostingsTable rows={visible} onOpenPosting={onOpenPosting} />
             <HonestyCaption rows={filtered} />
           </>
         ) : (
@@ -187,7 +195,15 @@ type Filter = "all" | "salary" | "remote" | "senior";
 
 /** The detail panel full list: the same table uncapped, with local filter chips (All / With salary / Remote /
  *  Senior+), each labelled with its count. Rendered inside the DetailPanel body. */
-export function PostingsPanel({ rows, total }: { rows: ScoredPostingRow[]; total: number }) {
+export function PostingsPanel({
+  rows,
+  total,
+  onOpenPosting,
+}: {
+  rows: ScoredPostingRow[];
+  total: number;
+  onOpenPosting?: OpenPosting;
+}) {
   const [filter, setFilter] = useState<Filter>("all");
   const counts = useMemo(
     () => ({
@@ -227,7 +243,7 @@ export function PostingsPanel({ rows, total }: { rows: ScoredPostingRow[]; total
           </button>
         ))}
       </div>
-      <PostingsTable rows={filtered} />
+      <PostingsTable rows={filtered} onOpenPosting={onOpenPosting} />
       <span className="src">
         {filtered.length} of {total} matches
       </span>

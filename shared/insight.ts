@@ -100,9 +100,31 @@ export const ScoredPostingRowSchema = z
     // The apply link-out. Optional so a pre-backfill persisted snapshot (no apply_url) still parses and
     // renders unchanged; empty/absent -> plain-text title, present -> a link.
     applyUrl: z.string().max(2048).optional(),
+    // The natural key (source, external_id): the ONLY row addition, tiny (not the bloaty description_text) -
+    // it lets a title click fetch the on-demand detail. Optional so an older persisted snapshot (no key)
+    // still parses; a row lacking it renders a plain, non-clickable title.
+    source: z.string().max(128).optional(),
+    externalId: z.string().max(256).optional(),
   })
   .strict();
 export type ScoredPostingRow = z.infer<typeof ScoredPostingRowSchema>;
+
+/** One posting's full detail, read on demand (getPostingDetail) for the in-app detail view. NOT a wire card
+ *  payload - a server action returns it typed, so no Zod round-trip. description_text is already PLAIN TEXT
+ *  (htmlToText stripped it at ingest); "" renders a valid empty detail. Raw HTML never reaches here. */
+export interface PostingDetail {
+  title: string;
+  company: string;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  remote: boolean;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  department: string;
+  descriptionText: string;
+  applyUrl: string;
+}
 
 /** Profile card payload. Appended out-of-band (not a turn) - INVISIBLE to the turn machinery. */
 export const ProfileCardSchema = z

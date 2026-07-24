@@ -36,6 +36,7 @@ const AssistantMessage = memo(function AssistantMessage({
   onFollowup,
   onRetry,
   onOpenDetailPanel,
+  onOpenPosting,
   onSignIn,
   onEditProfile,
   onAuthInvite,
@@ -47,6 +48,7 @@ const AssistantMessage = memo(function AssistantMessage({
   onFollowup: (cardId: string, text: string) => void;
   onRetry: () => void;
   onOpenDetailPanel: (messageId: string, partId: string) => void;
+  onOpenPosting?: (source: string, externalId: string) => void;
   onSignIn?: () => void;
   onEditProfile?: () => void;
   onAuthInvite?: () => void;
@@ -129,6 +131,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 total={cls.total}
                 onFollowup={(text) => onFollowup(id, text)}
                 onOpenPanel={() => onOpenDetailPanel(message.id, id)}
+                onOpenPosting={onOpenPosting}
                 onEdit={onEditProfile}
                 pending={pending}
               />
@@ -173,6 +176,7 @@ export function MessageList({
   onFollowup,
   onRetry,
   onOpenDetailPanel,
+  onOpenPosting,
   onSignIn,
   onEditProfile,
   onAuthInvite,
@@ -184,6 +188,7 @@ export function MessageList({
   onFollowup: (cardId: string, text: string) => void;
   onRetry: () => void;
   onOpenDetailPanel: (messageId: string, partId: string) => void;
+  onOpenPosting?: (source: string, externalId: string) => void;
   onSignIn?: () => void;
   onEditProfile?: () => void;
   onAuthInvite?: () => void;
@@ -216,6 +221,7 @@ export function MessageList({
             onFollowup={onFollowup}
             onRetry={onRetry}
             onOpenDetailPanel={onOpenDetailPanel}
+            onOpenPosting={onOpenPosting}
             onSignIn={onSignIn}
             onEditProfile={onEditProfile}
             onAuthInvite={onAuthInvite}

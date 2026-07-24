@@ -235,6 +235,7 @@ export function fakeAnalytics(): Analytics {
   return {
     runQuery: async (name) => result(`-- fake template ${name}`),
     runComposedQuery: async () => result(`-- fake query_postings`),
+    getPostingDetail: async () => null,
     // A fixed, schema-valid postings result so a with-profile search case registers a postings card
     // (=> "data" mode). It never scores real rows - the harness judges the agent's CHOICES.
     searchPostings: async () => ({

@@ -40,6 +40,8 @@ function row(over: Partial<PostingRow> & Pick<PostingRow, "external_id" | "title
     published_at: "2026-07-10 10:00:00",
     apply_url: "",
     role_names: [],
+    description_text: "",
+    department: "",
     ingested_at: INGESTED,
     ...over,
   };

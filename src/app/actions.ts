@@ -9,6 +9,8 @@ import type { Profile, Skill } from "@shared/profile";
 import type { extractProfileTask } from "../../trigger/extract-profile";
 import { getGuardConfig } from "@shared/env";
 import { isE2E } from "@/lib/e2e";
+import { getAnalytics } from "@/lib/analytics-server";
+import type { PostingDetail } from "@shared/insight";
 import { auth as authServer } from "@/lib/auth";
 import { GUEST_COOKIE } from "@/lib/guest-cookie";
 import { getJobchatSql } from "@/lib/jobchat-sql";
@@ -368,6 +370,24 @@ export async function updateProfileSkills(input: {
   const profile = await createStore(getJobchatSql()).updateProfileSkills(identity.userId, cleaned);
   if (!profile) return { ok: false, reason: "not_found" };
   return { ok: true, profile };
+}
+
+/** Read ONE posting's full detail by natural key for the in-app detail view. Public postings, so
+ *  ownership-free (no identity check). The key values are bounded here (defense-in-depth over the escaped
+ *  query) and a read failure or unknown key degrades to null so the view shows its not-found state. */
+export async function getPostingDetail(
+  source: string,
+  externalId: string,
+): Promise<PostingDetail | null> {
+  const s = source?.trim();
+  const e = externalId?.trim();
+  if (!s || !e || s.length > 128 || e.length > 256) return null;
+  try {
+    return await getAnalytics().getPostingDetail(s, e);
+  } catch (err) {
+    console.error("[getPostingDetail] read failed", err);
+    return null;
+  }
 }
 
 // Trigger run statuses that are TERMINAL failures; others are in-flight, COMPLETED is terminal success.

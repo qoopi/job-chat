@@ -24,6 +24,8 @@ const sampleRow: PostingRow = {
   published_at: "2026-07-18 00:00:00",
   apply_url: "",
   role_names: [],
+  description_text: "",
+  department: "",
   ingested_at: "2026-07-18 00:00:00",
 };
 

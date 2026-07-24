@@ -8,6 +8,7 @@ import {
   type ChartType,
   type DataInsight,
   type ErrorKind,
+  type PostingDetail,
   type RefusalReason,
   type ScoredPostingRow,
 } from "@shared/insight";
@@ -61,10 +62,20 @@ export interface DetailTarget {
   partId: string;
 }
 
+/** The single-posting detail's fetch lifecycle (getPostingDetail is async, off the payload). "" description
+ *  still renders a valid loaded detail (forward-compat). Held in ChatClient state, not resolved from a card. */
+export type PostingDetailState =
+  | { status: "loading" }
+  | { status: "not-found" }
+  | { status: "loaded"; detail: PostingDetail };
+
 export type DetailContent =
   | { kind: "table"; insight: DataInsight }
   | { kind: "profile-card"; profile: Profile }
-  | { kind: "postings"; rows: ScoredPostingRow[]; total: number };
+  | { kind: "postings"; rows: ScoredPostingRow[]; total: number }
+  // The on-demand single posting: NOT resolved from a message payload (getPostingDetail feeds it), so
+  // resolveDetailContent never yields this - ChatClient builds it from its own fetch state.
+  | { kind: "posting"; state: PostingDetailState };
 
 /** Resolve a detail panel target to content: stored by identity, so it re-resolves from the persisted payload (resume renders the same detail panel). */
 export function resolveDetailContent(messages: UIMessage[], target: DetailTarget): DetailContent | null {
