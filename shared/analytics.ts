@@ -507,6 +507,11 @@ function seniorityBandSql(column: string): string {
 const SearchPostingsParams = z
   .object({
     titleTerms: z.array(z.string().min(1)).max(10).default([]),
+    // Canonical-ish role phrases the model extracts (e.g. "backend engineer"). The runtime resolves
+    // each to canonical role name(s) against the corpus's own role dimension IN ClickHouse; the names
+    // key the role-IN match (the 64-bit id is never used). Empty (the default) = no role phrase, so
+    // matching falls to the title-term path.
+    roles: z.array(z.string().min(1)).max(10).default([]),
     experience: z.string().min(1).nullish(),
     cities: z.array(z.string().min(1)).max(20).default([]),
     // "at company X for me": the named companies constrain the scored set as a HARD filter (never a score
@@ -519,14 +524,52 @@ const SearchPostingsParams = z
   .strict();
 type SearchPostingsQuery = z.infer<typeof SearchPostingsParams>;
 
+// The roles dimension: distinct canonical role NAMES read from the corpus's OWN role_names arrays
+// (arrayJoin fans them out), filtered by a lowerUTF8 LIKE so a user phrase resolves to role name(s)
+// entirely IN ClickHouse (no query-time roles API call). Names key the match, not the wire id (a 64-bit
+// integer JSON.parse rounds past the JS safe-integer limit). One LIKE per phrase, OR-ed; the returned
+// names are lowercased so the match compares lowered-to-lowered. Bounded by a LIMIT so a broad phrase can
+// never return an unbounded name list.
+const ROLE_RESOLVE_LIMIT = 100;
+
+/** Build the role-resolve SQL (pure, unit-testable): the distinct LOWERCASED role names matching ANY
+ *  phrase, over the open set. Empty/whitespace-only phrases yield a no-match query (WHERE 0). */
+export function buildRoleResolveSql(phrases: string[], table: string): string {
+  const cleaned = phrases.map((p) => p.trim()).filter(Boolean);
+  const likes = cleaned
+    .map((p) => `lowerUTF8(rn) LIKE ${chStr(`%${likeEscape(p.toLowerCase())}%`)}`)
+    .join(" OR ");
+  return assemble([
+    "SELECT DISTINCT lowerUTF8(rn) AS name",
+    "FROM (",
+    "  SELECT arrayJoin(role_names) AS rn",
+    `  FROM ${table} FINAL`,
+    `  WHERE ${openSetFilter(table)} AND notEmpty(role_names)`,
+    ")",
+    `WHERE ${likes || "0"}`,
+    "ORDER BY name",
+    `LIMIT ${ROLE_RESOLVE_LIMIT}`,
+  ]);
+}
+
 /** The FIXED score formula:
- *    3*min(titleTermHits,2) + 2*experienceMatch + 2*cityMatch + 1*(remoteOk AND remote) + 1*salaryFloorMet
- *  An absent term contributes literal `0` so the formula stays whole; a NULL salary is never a match. */
-function scoreExpr(p: SearchPostingsQuery): string {
+ *    3*roleOrTitle + 2*experienceMatch + 2*cityMatch + 1*(remoteOk AND remote) + 1*salaryFloorMet
+ *  The weight-3 term is role-IN when the phrase(s) resolved to canonical role name(s): a classified row
+ *  matches on has(role_names, name) - case-insensitive, both sides lowered - at FULL weight even when its
+ *  TITLE omits the role; the title-term hits become the FALLBACK, used only for an UNCLASSIFIED row (empty
+ *  role_names). When nothing resolved (roleNames empty - always so pre-ship), the term IS the title hits,
+ *  so the formula and behavior are unchanged. `roleNames` are already lowercased (the resolve lowered
+ *  them). An absent term contributes literal `0` so the formula stays whole; a NULL salary is never a match. */
+function scoreExpr(p: SearchPostingsQuery, roleNames: string[]): string {
   const titleHits =
     p.titleTerms.length > 0
       ? `least(${p.titleTerms.map((t) => `(title ILIKE ${chStr(`%${likeEscape(t)}%`)})`).join(" + ")}, 2)`
       : "0";
+  const roleMatch = `hasAny(arrayMap(rn -> lowerUTF8(rn), role_names), [${roleNames.map((n) => chStr(n)).join(", ")}])`;
+  const roleTerm =
+    roleNames.length > 0
+      ? `multiIf(${roleMatch}, 2, empty(role_names), ${titleHits}, 0)`
+      : titleHits;
   const band = p.experience ? seniorityBand(p.experience) : "";
   const expMatch = band ? `(${seniorityBandSql("experience_level")} = ${chStr(band)})` : "0";
   const cityMatch = p.cities.length > 0 ? `(${inCI("city", p.cities)})` : "0";
@@ -535,7 +578,7 @@ function scoreExpr(p: SearchPostingsQuery): string {
     p.salaryMin !== undefined
       ? `(salary_max IS NOT NULL AND salary_max >= ${p.salaryMin})`
       : "0";
-  return `3 * ${titleHits} + 2 * ${expMatch} + 2 * ${cityMatch} + 1 * ${remoteMatch} + 1 * ${salaryMatch}`;
+  return `3 * ${roleTerm} + 2 * ${expMatch} + 2 * ${cityMatch} + 1 * ${remoteMatch} + 1 * ${salaryMatch}`;
 }
 
 /** Build the rows + meta SQL for searchPostings (pure, unit-testable). Score computed once in an inner
@@ -543,9 +586,11 @@ function scoreExpr(p: SearchPostingsQuery): string {
 export function buildSearchPostingsSql(
   rawParams: unknown,
   table: string,
+  roleNames: string[] = [],
 ): { rowsSql: string; metaSql: string } {
   const p = SearchPostingsParams.parse(rawParams);
-  const score = scoreExpr(p);
+  // Resolved role names are interpolated as chStr-escaped string literals (injection-safe).
+  const score = scoreExpr(p, roleNames);
   const openSet = openSetFilter(table);
   // A company scope narrows the ranked set to those companies only, applied alongside the open-set predicate
   // in BOTH inner queries so the honest total counts just the named companies.
@@ -767,8 +812,25 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
 
   // Rows + per-company match-count meta concurrently, then map rows / reduce meta. NULL/empty city -> null,
   // remote UInt8 -> boolean; a 0-match query returns rows=[] and total=0 (the honest no-match state).
+  // Resolve role phrases to canonical role NAME(s) via the corpus's own role dimension (one CH read). Empty
+  // phrases or no matches yield [] - matching then falls to the title-term path. Pre-ship this always
+  // returns [] (no row carries role_names yet), so the search behaves exactly as before.
+  async function resolveRoleNames(phrases: string[]): Promise<string[]> {
+    const cleaned = phrases.map((p) => p.trim()).filter(Boolean);
+    if (cleaned.length === 0) return [];
+    const rs = await client.query({
+      query: buildRoleResolveSql(cleaned, table),
+      format: "JSONEachRow",
+      clickhouse_settings: QUERY_SETTINGS,
+    });
+    const rows = await rs.json<{ name: string }>();
+    return rows.map((r) => String(r.name)).filter(Boolean);
+  }
+
   async function searchPostings(rawParams: unknown): Promise<SearchPostingsResult> {
-    const { rowsSql, metaSql } = buildSearchPostingsSql(rawParams, table);
+    const p = SearchPostingsParams.parse(rawParams);
+    const roleNames = await resolveRoleNames(p.roles);
+    const { rowsSql, metaSql } = buildSearchPostingsSql(rawParams, table, roleNames);
     const [rawRows, metaRows] = await Promise.all([
       client
         .query({ query: rowsSql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })

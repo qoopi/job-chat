@@ -23,6 +23,7 @@ const sampleRow: PostingRow = {
   salary_currency: null,
   published_at: "2026-07-18 00:00:00",
   apply_url: "",
+  role_names: [],
   ingested_at: "2026-07-18 00:00:00",
 };
 

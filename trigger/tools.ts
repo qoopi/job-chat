@@ -171,6 +171,11 @@ function composedTool(deps: CatalogDeps) {
 const SearchPostingsToolInput = z
   .object({
     titleTerms: z.array(z.string().min(1)).max(10).optional(),
+    // Canonical role phrases the model extracts from a fit question ("backend engineer"). The server
+    // resolves each to a canonical role name in ClickHouse; a resolved name is the primary match signal
+    // (the 64-bit id is never used), so a fitting posting is found even when its title never spells out
+    // the role. Absent = title-term matching only.
+    roles: z.array(z.string().min(1)).max(10).optional(),
     cities: z.array(z.string().min(1)).max(20).optional(),
     // A company scope for "am I a fit at X" - the named companies (trimmed, capped at 5) constrain the
     // ranked set to those companies only. Absent = rank the whole open set against the profile.
@@ -246,11 +251,16 @@ export function expandTitleTerms(terms: string[]): string[] {
 }
 
 /** Merge the model's terms with the profile. SERVER-authoritative (model cannot set): `experience`, `salaryMin`.
- *  Model-refinable (else the profile's value): `titleTerms`, `cities`, `remoteOk`. `limit` is the hard cap (50). */
+ *  Model-refinable (else the profile's value): `titleTerms`, `cities`, `remoteOk`. `roles` is model-only (the
+ *  profile has no canonical role field); absent leaves matching on the title path. `limit` is the hard cap (50). */
 export function mergeSearchParams(input: SearchToolInput, profile: Profile) {
   const baseTitles = input.titleTerms && input.titleTerms.length > 0 ? input.titleTerms : profile.titles;
   return {
     titleTerms: expandTitleTerms(baseTitles), // recall-broadened before the scorer sees them
+    // Model-extracted canonical role phrases; the server resolves them to canonical role names in
+    // ClickHouse (the 64-bit id is never used). No profile fallback - only a phrase the model actually
+    // named engages the role-IN match.
+    roles: input.roles && input.roles.length > 0 ? input.roles : undefined,
     experience: profile.seniority ?? undefined, // authoritative - never from the model
     cities: input.cities && input.cities.length > 0 ? input.cities : profile.locations,
     // A company scope comes ONLY from the model's read of the question (the profile has no company field);
@@ -265,9 +275,10 @@ export function mergeSearchParams(input: SearchToolInput, profile: Profile) {
 const SEARCH_POSTINGS_DESCRIPTION =
   "Return the job postings that fit the signed-in user's stored profile, as the postings card. Call " +
   "this on a personal fit-intent WHEN a PROFILE note is present. Supply titleTerms drawn from the " +
-  "profile's titles; optionally add cities or remoteOk to refine a follow-up ('only remote', 'in " +
-  "Berlin'). The server applies the profile's seniority and salary floor itself. The card is the whole " +
-  "answer - add no prose.";
+  "profile's titles; when the question or profile names a role, ALSO pass it in roles (a canonical role " +
+  "phrase like 'backend engineer') so the match keys off the role, not just the title wording. Optionally " +
+  "add cities or remoteOk to refine a follow-up ('only remote', 'in Berlin'). The server applies the " +
+  "profile's seniority and salary floor itself. The card is the whole answer - add no prose.";
 
 function searchPostingsTool(deps: CatalogDeps) {
   return tool({

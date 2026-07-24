@@ -16,6 +16,7 @@ export function posting(id: number, title = `Job ${id}`) {
     salary: null,
     locations: [{ city: "Tokyo", region: "Tokyo", country: "Japan", kind: 0 }],
     publishedAt: "2026-07-17T23:38:42Z",
+    roles: [],
   };
 }
 
