@@ -5,6 +5,10 @@ export default defineConfig({
     alias: {
       "@shared": new URL("./shared", import.meta.url).pathname,
       "@": new URL("./src", import.meta.url).pathname,
+      // vitest/node cannot resolve the Next.js "server-only" marker package; alias it to an empty
+      // stub so server-only modules (analytics-server, landing-count, server-store) are importable
+      // in tests. Prod is unaffected - Next.js resolves the real "server-only" guard.
+      "server-only": new URL("./tests/stubs/server-only.ts", import.meta.url).pathname,
     },
   },
   test: {
