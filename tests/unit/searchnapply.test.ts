@@ -116,15 +116,17 @@ describe("createSearchnapplyClient", () => {
   });
 
   // Role autocomplete (GET /api/jobs/roles). The wire shape is RoleResponse{id,label,matched,jobCount};
-  // the client keeps ONLY label + jobCount. The id is a 64-bit integer JSON.parse silently rounds past
-  // JS's safe-integer limit - the body below carries such an id and the client must never surface it.
+  // the client keeps label + jobCount + matched and strips the id. The id is a 64-bit integer JSON.parse
+  // silently rounds past JS's safe-integer limit - the body below carries such an id and the client must
+  // never surface it. `matched` is string|null on the wire (null = direct canonical hit; a string is the
+  // fuzzy alias that matched) - it must survive parsing so enrichment can keep only the direct hits.
   const rolesBody = [
-    { id: 9007199254740993, label: "Test Engineer", matched: true, jobCount: 13 },
-    { id: 9007199254740995, label: "SDET", matched: false, jobCount: 7 },
-    { id: 9007199254740997, label: "Obscure Role", matched: false, jobCount: 0 },
+    { id: 9007199254740993, label: "Test Engineer", matched: null, jobCount: 13 },
+    { id: 9007199254740995, label: "Software Engineering Manager", matched: "Senior Software Engineering Manager", jobCount: 140 },
+    { id: 9007199254740997, label: "Obscure Role", matched: null, jobCount: 0 },
   ];
 
-  it("resolves a phrase to canonical labels via /api/jobs/roles (Bearer, limit 8, LABEL-only)", async () => {
+  it("resolves a phrase to canonical labels via /api/jobs/roles (Bearer, limit 8, label+jobCount+matched, id stripped)", async () => {
     const fetchImpl = vi.fn<FetchLike>(async (url) =>
       url.includes("/api/auth/login") ? res(200, loginBody) : res(200, rolesBody),
     );
@@ -132,11 +134,12 @@ describe("createSearchnapplyClient", () => {
 
     const roles = await client.resolveRoles("test engineer");
 
-    // Only label + jobCount survive; the 64-bit id and `matched` are stripped (never used in logic).
+    // label + jobCount + matched survive; the 64-bit id is stripped (it never enters logic). matched is
+    // preserved verbatim (null for the direct hit, the alias string for the fuzzy neighbour).
     expect(roles).toEqual([
-      { label: "Test Engineer", jobCount: 13 },
-      { label: "SDET", jobCount: 7 },
-      { label: "Obscure Role", jobCount: 0 },
+      { label: "Test Engineer", jobCount: 13, matched: null },
+      { label: "Software Engineering Manager", jobCount: 140, matched: "Senior Software Engineering Manager" },
+      { label: "Obscure Role", jobCount: 0, matched: null },
     ]);
     const call = fetchImpl.mock.calls.find(([u]) => u.includes("/api/jobs/roles"))!;
     expect(call[0]).toBe("http://jobs.test/api/jobs/roles?q=test%20engineer&limit=8");
@@ -148,13 +151,13 @@ describe("createSearchnapplyClient", () => {
     const fetchImpl = vi.fn<FetchLike>(async (url) => {
       if (url.includes("/api/auth/login")) return res(200, loginBody);
       roleCalls += 1;
-      return roleCalls === 1 ? res(401, {}) : res(200, [{ id: 1, label: "QA Engineer", matched: true, jobCount: 14 }]);
+      return roleCalls === 1 ? res(401, {}) : res(200, [{ id: 1, label: "QA Engineer", matched: null, jobCount: 14 }]);
     });
     const client = createSearchnapplyClient(config, fetchImpl);
 
     const roles = await client.resolveRoles("qa");
 
-    expect(roles).toEqual([{ label: "QA Engineer", jobCount: 14 }]);
+    expect(roles).toEqual([{ label: "QA Engineer", jobCount: 14, matched: null }]);
     const loginCalls = fetchImpl.mock.calls.filter(([u]) => u.includes("/api/auth/login"));
     expect(loginCalls.length).toBe(2); // initial + refresh after 401
   });

@@ -145,15 +145,29 @@ describe("extractProfileFields", () => {
 });
 
 describe("resolveCanonicalRoles (searchnapply autocomplete at extraction)", () => {
-  it("keeps labels with jobCount>0, deduped case-insensitively, using the LABEL only", async () => {
+  it("keeps direct-hit labels with jobCount>0, deduped case-insensitively, using the LABEL only", async () => {
     const resolve = vi.fn(async (phrase: string) =>
       phrase === "SDET"
-        ? [{ label: "SDET", jobCount: 7 }, { label: "Test Engineer", jobCount: 13 }]
-        : [{ label: "test engineer", jobCount: 5 }, { label: "Obscure", jobCount: 0 }],
+        ? [{ label: "SDET", jobCount: 7, matched: null }, { label: "Test Engineer", jobCount: 13, matched: null }]
+        : [{ label: "test engineer", jobCount: 5, matched: null }, { label: "Obscure", jobCount: 0, matched: null }],
     );
     const labels = await resolveCanonicalRoles(resolve, ["SDET", "Test Automation Engineer"]);
     // jobCount 0 dropped ("Obscure"); "test engineer" is a case-insensitive dup of "Test Engineer".
     expect(labels).toEqual(["SDET", "Test Engineer"]);
+  });
+
+  it("DIRECT-ONLY: drops fuzzy alias matches (matched is a string), keeps direct hits (matched null/absent)", async () => {
+    // The autocomplete for a QA/SDET phrase returns the direct canonical hit PLUS foreign-family aliases
+    // (Software Engineering Manager via "Senior Software Engineering Manager", DevOps via an alias). Only
+    // the direct hit belongs in "roles that fit you"; the aliases would flood it with unrelated jobs.
+    const resolve = vi.fn(async () => [
+      { label: "SDET", jobCount: 5, matched: null }, // direct hit -> keep
+      { label: "Software Engineering Manager", jobCount: 140, matched: "Senior Software Engineering Manager" }, // alias -> drop
+      { label: "DevOps Engineer", jobCount: 10, matched: "DevOps Automation Engineer" }, // alias -> drop
+      { label: "Automation Engineer", jobCount: 6 }, // matched absent (== null) -> keep
+    ]);
+    const labels = await resolveCanonicalRoles(resolve, ["Senior Software Engineer in Test"]);
+    expect(labels).toEqual(["SDET", "Automation Engineer"]);
   });
 
   it("dedupes phrases case-insensitively - one autocomplete call per distinct phrase", async () => {

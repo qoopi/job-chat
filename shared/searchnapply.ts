@@ -27,11 +27,18 @@ export const PostingsPageSchema = z.object({
 export type PostingsPage = z.infer<typeof PostingsPageSchema>;
 
 // Role autocomplete (GET /api/jobs/roles). The wire shape is RoleResponse{id,label,matched,jobCount}; we
-// keep ONLY label + jobCount. The id is a 64-bit integer JSON.parse silently rounds past JS's safe-integer
-// limit (it already bit an earlier task) - z.object strips it here (and `matched`) so a corrupted id can
-// never leak into logic. The label is the canonical role string (it matches the postings' role_names);
-// jobCount lets the caller keep only logically-relevant labels.
-export const RoleResponseSchema = z.object({ label: z.string(), jobCount: z.number() });
+// keep label + jobCount + matched. The id is a 64-bit integer JSON.parse silently rounds past JS's
+// safe-integer limit (it already bit an earlier task) - z.object strips it so a corrupted id can never
+// leak into logic. The label is the canonical role string (it matches the postings' role_names); jobCount
+// lets the caller keep only labels the corpus actually has. `matched` is the DIRECT-HIT discriminator:
+// null (or absent) means the query hit this canonical role directly; a string is the fuzzy ALIAS that
+// matched (e.g. query "Senior Software Engineer in Test" -> "Software Engineering Manager" via alias
+// "Senior Software Engineering Manager"). Enrichment keeps ONLY the direct hits (see resolveCanonicalRoles).
+export const RoleResponseSchema = z.object({
+  label: z.string(),
+  jobCount: z.number(),
+  matched: z.string().nullable().optional(),
+});
 export type RoleResponse = z.infer<typeof RoleResponseSchema>;
 
 export interface SearchnapplyClient {
@@ -112,7 +119,7 @@ export function createSearchnapplyClient(
       res = await getRoles(phrase);
     }
     if (!res.ok) throw new Error(`searchnapply roles failed: ${res.status}`);
-    // z.array(RoleResponseSchema) keeps ONLY label + jobCount - the 64-bit id never enters our data.
+    // z.array(RoleResponseSchema) keeps label + jobCount + matched - the 64-bit id never enters our data.
     return z.array(RoleResponseSchema).parse(await res.json());
   }
 

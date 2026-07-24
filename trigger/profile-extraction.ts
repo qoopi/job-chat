@@ -87,17 +87,25 @@ export async function extractProfileFields(
 }
 
 /** The role-autocomplete seam: a phrase -> canonical role labels (searchnapply). Structural (not the
- *  searchnapply type) so the pipeline stays decoupled; undefined when creds are absent. */
-export type ResolveRoles = (phrase: string) => Promise<{ label: string; jobCount: number }[]>;
+ *  searchnapply type) so the pipeline stays decoupled; undefined when creds are absent. `matched` is the
+ *  direct-hit discriminator (null/absent = the query hit this canonical role directly; a string = a fuzzy
+ *  alias match) - enrichment keeps only the direct hits. */
+export type ResolveRoles = (
+  phrase: string,
+) => Promise<{ label: string; jobCount: number; matched?: string | null }[]>;
 
 const MAX_ROLE_PHRASES = 12; // bound the autocomplete fan-out per extraction (one call per distinct phrase)
 const MAX_CANONICAL_ROLES = 10; // cap the stored role set (a profile's canonical roles stay a short list)
 
 /** Resolve the profile's role/title signals to canonical role LABELS via searchnapply autocomplete, at
  *  EXTRACTION (a background enrichment) - NEVER on the chat read path (that stays ClickHouse-only). Keeps
- *  the labels the autocomplete returns with jobCount > 0 (logically-relevant), deduped case-insensitively,
- *  capped. GRACEFUL: a per-phrase failure is swallowed (returns whatever resolved) so the profile always
- *  saves; only the LABEL is used - the autocomplete's 64-bit id is never touched (JSON.parse corrupts it). */
+ *  only DIRECT canonical hits (matched == null): the roles the query landed on itself, not the fuzzy
+ *  ALIAS neighbours the autocomplete also returns. Alias matches inject foreign role families - a QA/SDET
+ *  profile fuzzy-matches Software Engineering Manager (140), DevOps, Infrastructure, Technical Lead - which
+ *  would fill "roles that fit you" with jobs the candidate never does (measured live: direct-only 23 clean
+ *  vs all-jobCount>0 264 mostly-noise). Direct hits also carry jobCount > 0 (the corpus has them), deduped
+ *  case-insensitively, capped. GRACEFUL: a per-phrase failure is swallowed (returns whatever resolved) so
+ *  the profile always saves; only the LABEL is used - the autocomplete's 64-bit id is never touched. */
 export async function resolveCanonicalRoles(resolve: ResolveRoles, phrases: string[]): Promise<string[]> {
   const seenPhrase = new Set<string>();
   const cleanPhrases: string[] = [];
@@ -113,7 +121,7 @@ export async function resolveCanonicalRoles(resolve: ResolveRoles, phrases: stri
   const seenLabel = new Set<string>();
   const labels: string[] = [];
   for (const phrase of cleanPhrases) {
-    let roles: { label: string; jobCount: number }[];
+    let roles: Awaited<ReturnType<ResolveRoles>>;
     try {
       roles = await resolve(phrase);
     } catch (err) {
@@ -121,6 +129,8 @@ export async function resolveCanonicalRoles(resolve: ResolveRoles, phrases: stri
       continue;
     }
     for (const role of roles) {
+      // Skip fuzzy alias matches (matched is a string); keep only direct canonical hits (null/absent).
+      if (role.matched != null) continue;
       const label = role.label.trim();
       const key = label.toLowerCase();
       if (!label || role.jobCount <= 0 || seenLabel.has(key)) continue;
