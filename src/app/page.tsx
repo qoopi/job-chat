@@ -3,6 +3,7 @@ import { LandingComposer } from "@/components/landing/LandingComposer";
 import { LandingSignIn } from "@/components/landing/LandingSignIn";
 import { GITHUB_URL, HACKATHON_URL, SEARCHNAPPLY_URL } from "@/lib/links";
 import { isE2E } from "@/lib/e2e";
+import { getLivePostingCount } from "@/lib/landing-count";
 import { listOwnerConversations, resolveViewer } from "@/lib/server-store";
 
 // Landing: the ask box + chips (LandingComposer) hand off to the chat. Session-aware header (resolveViewer
@@ -15,6 +16,9 @@ export default async function Landing() {
     ? (await listOwnerConversations(viewer.accountUserId))[0]
     : undefined;
   const openChatsHref = recent ? `/chat/${recent.id}` : "/chat/new";
+  // The live corpus size for the tagline (cached read); on a fetch failure the line renders number-free.
+  const liveCount = await getLivePostingCount();
+  const countPhrase = liveCount != null ? `${liveCount.toLocaleString()} live postings` : "live postings";
   return (
     <div
       style={{
@@ -96,7 +100,7 @@ export default async function Landing() {
             maxWidth: 520,
           }}
         >
-          Ask a question, get a verdict with a chart — from 3,483 live postings.
+          Ask a question, get a verdict with a chart — from {countPhrase}.
           Add your resume and it finds the roles that fit you.
         </p>
         {viewer?.signedIn && recent ? (
