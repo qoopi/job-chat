@@ -29,6 +29,7 @@ describe("buildCatalogTools", () => {
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
       corpusSummary: vi.fn(),
+      getPostingDetail: vi.fn(),
       searchPostings: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
@@ -53,6 +54,7 @@ describe("buildCatalogTools", () => {
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
       corpusSummary: vi.fn(),
+      getPostingDetail: vi.fn(),
       searchPostings: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
@@ -76,6 +78,7 @@ describe("buildCatalogTools", () => {
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
       corpusSummary: vi.fn(),
+      getPostingDetail: vi.fn(),
       searchPostings: vi.fn(),
     };
     const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
@@ -94,6 +97,7 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
       runQuery: vi.fn(),
       coverageProfile: vi.fn(),
       corpusSummary: vi.fn(),
+      getPostingDetail: vi.fn(),
       searchPostings: vi.fn(),
       runComposedQuery: vi.fn(async () =>({
         sql: "SELECT company, count() AS count FROM postings FINAL WHERE country = 'United States'",
@@ -176,6 +180,7 @@ describe("buildCatalogTools query_postings (composed tool, AC-1/AC-3/AC-4)", () 
       runQuery: vi.fn(),
       coverageProfile: vi.fn(),
       corpusSummary: vi.fn(),
+      getPostingDetail: vi.fn(),
       searchPostings: vi.fn(),
       runComposedQuery: vi.fn(async () =>{
         throw new Error("ClickHouse unreachable");
@@ -325,6 +330,7 @@ describe("Should_EmitPostingsPart_When_SearchPostingsRuns (AC-7)", () => {
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
       corpusSummary: vi.fn(),
+      getPostingDetail: vi.fn(),
       searchPostings: vi.fn(async () => ({
         rows: rows as never,
         total,
@@ -401,6 +407,7 @@ describe("Should_EmitPostingsPart_When_SearchPostingsRuns (AC-7)", () => {
       runComposedQuery: vi.fn(),
       coverageProfile: vi.fn(),
       corpusSummary: vi.fn(),
+      getPostingDetail: vi.fn(),
       searchPostings: vi.fn(async () => {
         throw new Error("ClickHouse unreachable");
       }),
