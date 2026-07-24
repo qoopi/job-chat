@@ -508,8 +508,9 @@ const SearchPostingsParams = z
   .object({
     titleTerms: z.array(z.string().min(1)).max(10).default([]),
     // Canonical-ish role phrases the model extracts (e.g. "backend engineer"). The runtime resolves
-    // each to role id(s) against the corpus's own role dimension IN ClickHouse; the ids drive the
-    // role-IN match. Empty (the default) = no role phrase, so matching falls to the title-term path.
+    // each to canonical role name(s) against the corpus's own role dimension IN ClickHouse; the names
+    // key the role-IN match (the 64-bit id is never used). Empty (the default) = no role phrase, so
+    // matching falls to the title-term path.
     roles: z.array(z.string().min(1)).max(10).default([]),
     experience: z.string().min(1).nullish(),
     cities: z.array(z.string().min(1)).max(20).default([]),

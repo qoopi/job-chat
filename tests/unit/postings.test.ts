@@ -251,4 +251,16 @@ describe("PostingSchema roles boundary (forward-compatible default, name-keyed)"
     const row = mapPostingToRow(result.data as Posting, ingestedAt);
     expect(row.role_names).toEqual(["Backend Engineer"]);
   });
+
+  it("parses a role that OMITS the inert id (nullish) rather than failing the batch", () => {
+    // id is tolerated-but-unused; a role arriving without it must still parse and project its name,
+    // honoring the never-fail-a-batch intent (the name is the only match key).
+    const result = PostingSchema.safeParse({
+      ...base,
+      roles: [{ name: "Backend Engineer" }],
+    });
+    expect(result.success).toBe(true);
+    const row = mapPostingToRow(result.data as Posting, ingestedAt);
+    expect(row.role_names).toEqual(["Backend Engineer"]);
+  });
 });

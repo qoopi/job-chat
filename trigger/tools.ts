@@ -172,8 +172,9 @@ const SearchPostingsToolInput = z
   .object({
     titleTerms: z.array(z.string().min(1)).max(10).optional(),
     // Canonical role phrases the model extracts from a fit question ("backend engineer"). The server
-    // resolves each to a role id in ClickHouse; a resolved id is the primary match signal, so a fitting
-    // posting is found even when its title never spells out the role. Absent = title-term matching only.
+    // resolves each to a canonical role name in ClickHouse; a resolved name is the primary match signal
+    // (the 64-bit id is never used), so a fitting posting is found even when its title never spells out
+    // the role. Absent = title-term matching only.
     roles: z.array(z.string().min(1)).max(10).optional(),
     cities: z.array(z.string().min(1)).max(20).optional(),
     // A company scope for "am I a fit at X" - the named companies (trimmed, capped at 5) constrain the
@@ -256,8 +257,9 @@ export function mergeSearchParams(input: SearchToolInput, profile: Profile) {
   const baseTitles = input.titleTerms && input.titleTerms.length > 0 ? input.titleTerms : profile.titles;
   return {
     titleTerms: expandTitleTerms(baseTitles), // recall-broadened before the scorer sees them
-    // Model-extracted canonical role phrases; the server resolves them to role ids in ClickHouse. No
-    // profile fallback - only a phrase the model actually named engages the role-IN match.
+    // Model-extracted canonical role phrases; the server resolves them to canonical role names in
+    // ClickHouse (the 64-bit id is never used). No profile fallback - only a phrase the model actually
+    // named engages the role-IN match.
     roles: input.roles && input.roles.length > 0 ? input.roles : undefined,
     experience: profile.seniority ?? undefined, // authoritative - never from the model
     cities: input.cities && input.cities.length > 0 ? input.cities : profile.locations,

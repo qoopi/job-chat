@@ -15,12 +15,12 @@ export const LocationSchema = z.object({
   kind: z.number().nullish(),
 });
 
-// A canonical role the jobs-api tags a posting with. The id is TOLERATED but never used for logic: it is
-// a 64-bit integer JSON.parse silently rounds past the JS safe-integer limit, so only the name (a
-// canonical unique string) is trustworthy. Unknown fields are stripped (not .strict) so an evolving role
-// shape never fails a batch.
+// A canonical role the jobs-api tags a posting with. The id is TOLERATED (nullish) but never used for
+// logic: it is a 64-bit integer JSON.parse silently rounds past the JS safe-integer limit, so only the
+// name (a canonical unique string) is trustworthy. Unknown fields are stripped (not .strict) and the id
+// is optional so an evolving role shape - or a role that omits the id - never fails a batch.
 export const RoleSchema = z.object({
-  id: z.number(),
+  id: z.number().nullish(),
   name: z.string(),
 });
 
