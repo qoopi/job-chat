@@ -28,6 +28,7 @@ function row(over: Partial<PostingRow> & Pick<PostingRow, "external_id" | "title
     apply_url: "",
     role_names: [],
     description_text: "",
+    description_html: "",
     department: "",
     ingested_at: INGESTED,
     ...over,
@@ -49,6 +50,7 @@ const ROWS: PostingRow[] = [
     apply_url: "https://careers.google.com/jobs/results/D1",
     department: "Cloud",
     description_text: "About the role\nOwn the ingest pipeline.",
+    description_html: "<h2>About the role</h2><ul><li>Own the ingest pipeline.</li></ul>",
   }),
   // Forward-compat: a pre-reingest row - empty description_text + department must read back as a valid detail.
   row({ external_id: "D2", title: "Recruiter", company: "Stripe" }),
@@ -94,6 +96,7 @@ describe.skipIf(!hasCreds)("getPostingDetail reads one posting by natural key", 
       salaryMax: 200000,
       department: "Cloud",
       descriptionText: "About the role\nOwn the ingest pipeline.",
+      descriptionHtml: "<h2>About the role</h2><ul><li>Own the ingest pipeline.</li></ul>",
       applyUrl: "https://careers.google.com/jobs/results/D1",
     });
   });
@@ -133,6 +136,7 @@ describe.skipIf(!hasCreds)("getPostingDetail reads one posting by natural key", 
       salaryMax: null,
       department: "",
       descriptionText: "",
+      descriptionHtml: "",
       applyUrl: "",
     });
   });

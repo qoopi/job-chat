@@ -322,11 +322,107 @@ a:hover {
   align-self: flex-start;
 }
 .posting-detail-desc {
-  /* PLAIN TEXT (htmlToText output): newlines survive here, no markup is ever parsed (never innerHTML). */
-  white-space: pre-wrap;
+  /* SANITIZED HTML (sanitizePostingHtml, strict allowlist at ingest) rendered trusted; the child rules below
+     style the allowed structural tags (Tailwind preflight zeroes their defaults, so each is set explicitly).
+     Normal white-space: the block markup owns layout - pre-wrap here would render the source HTML's inter-tag
+     newlines as blank lines. The plain-text fallback branch opts back into pre-wrap via --text below. */
   font-size: var(--fs-sm);
   line-height: 1.6;
   color: var(--text);
+}
+.posting-detail-desc--text {
+  /* Plain-text fallback (htmlToText output): newlines survive via pre-wrap, no markup is ever parsed. */
+  white-space: pre-wrap;
+}
+.posting-detail-desc > :first-child {
+  margin-top: 0;
+}
+.posting-detail-desc > :last-child {
+  margin-bottom: 0;
+}
+.posting-detail-desc p {
+  margin: 0 0 var(--sp-3);
+}
+.posting-detail-desc h1,
+.posting-detail-desc h2,
+.posting-detail-desc h3,
+.posting-detail-desc h4,
+.posting-detail-desc h5,
+.posting-detail-desc h6 {
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.35;
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+.posting-detail-desc h1 {
+  /* Largest allowed heading: a section title one token above h2 (--fs-lg vs --fs-md). */
+  font-size: var(--fs-lg);
+}
+.posting-detail-desc h2 {
+  font-size: var(--fs-md);
+}
+.posting-detail-desc h3,
+.posting-detail-desc h4,
+.posting-detail-desc h5,
+.posting-detail-desc h6 {
+  font-size: var(--fs-base);
+}
+.posting-detail-desc ul,
+.posting-detail-desc ol {
+  margin: 0 0 var(--sp-3);
+  padding-left: var(--sp-5);
+}
+.posting-detail-desc ul {
+  list-style: disc;
+}
+.posting-detail-desc ol {
+  list-style: decimal;
+}
+.posting-detail-desc li {
+  margin: var(--sp-1) 0;
+}
+.posting-detail-desc strong,
+.posting-detail-desc b {
+  color: var(--text);
+  font-weight: 600;
+}
+.posting-detail-desc a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.posting-detail-desc a:hover {
+  color: var(--accent-strong);
+}
+.posting-detail-desc blockquote {
+  /* Indented quote: a left rule + padding, muted text, matched to the paragraph rhythm. */
+  margin: var(--sp-3) 0;
+  padding-left: var(--sp-4);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-2);
+}
+.posting-detail-desc code {
+  /* Inline code: mono on a subtle tint, small padding + radius. */
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+}
+.posting-detail-desc pre {
+  /* Code block: a padded mono panel that scrolls sideways so long lines never widen the layout. */
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  overflow-x: auto;
+}
+.posting-detail-desc pre code {
+  /* Nested code resets the inline tint/padding - the pre owns the surface. */
+  background: none;
+  padding: 0;
+  font-size: inherit;
 }
 .posting-detail-note {
   font-size: var(--fs-sm);

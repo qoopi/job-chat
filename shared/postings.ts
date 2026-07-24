@@ -1,3 +1,4 @@
+import sanitizeHtml from "sanitize-html";
 import { z } from "zod";
 
 // jobs-api item boundary (searchnapply GET /api/jobs/postings); Zod strips the fields the table doesn't need.
@@ -25,8 +26,9 @@ export const RoleSchema = z.object({
 });
 
 // The full posting body the jobs-api already carries per item: raw description HTML + the department string.
-// Both nullish so an item that omits the object (or either field) still ingests. The HTML is NEVER stored or
-// rendered raw - htmlToText strips it to plain text at projection (XSS: no raw HTML anywhere downstream).
+// Both nullish so an item that omits the object (or either field) still ingests. The RAW HTML is never stored:
+// at ingest it is sanitized (sanitizePostingHtml, strict allowlist) into description_html for rich rendering,
+// and htmlToText projects the plain-text fallback into description_text (XSS: no raw HTML anywhere downstream).
 export const DescriptionSchema = z.object({
   descriptionHtml: z.string().nullish(),
   department: z.string().nullish(),
@@ -86,6 +88,30 @@ export function htmlToText(html: string): string {
     .join("\n");
 }
 
+/** Sanitize an ATS description's raw HTML to a STRICT allowlist so it can be rendered as TRUSTED HTML in the
+ *  detail panel. This is the ONE home where raw ATS HTML is neutralized for HTML rendering (htmlToText above is
+ *  the parallel plain-text home). The result is XSS-safe by construction: only structural/formatting tags
+ *  survive (p, br, lists, bold/italic/underline, h1-6, blockquote, code/pre, a). EVERYTHING else is stripped -
+ *  script/style (tag AND content), iframe, img, svg, every on* handler, class/style attributes, and any href
+ *  outside http/https/mailto (so javascript:/data: URLs never survive). Every surviving link is forced to open
+ *  in a new tab with rel="noopener noreferrer nofollow". "" in -> "" out; a body that sanitizes to nothing -> "".
+ *  Because sanitization happens HERE at ingest, the stored description_html is safe for dangerouslySetInnerHTML. */
+export function sanitizePostingHtml(html: string): string {
+  if (!html) return "";
+  return sanitizeHtml(html, {
+    allowedTags: [
+      "p", "br", "ul", "ol", "li", "b", "strong", "i", "em", "u",
+      "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "code", "pre", "a",
+    ],
+    allowedAttributes: { a: ["href", "target", "rel"] },
+    allowedSchemes: ["http", "https", "mailto"],
+    // Force safe new-tab behavior on every surviving anchor (overwrites any attacker-supplied target/rel).
+    transformTags: {
+      a: sanitizeHtml.simpleTransform("a", { target: "_blank", rel: "noopener noreferrer nofollow" }),
+    },
+  }).trim();
+}
+
 export type LocationKind = "onsite" | "remote" | "hybrid";
 
 /** searchnapply classifies each location with an integer `kind`: 0->onsite, 1->remote, 2->hybrid. Unknown
@@ -121,6 +147,10 @@ export interface PostingRow {
   // The description body as PLAIN TEXT (htmlToText output), "" when the item carried none. Fetched on demand
   // for the detail view - NEVER placed in the postings card payload (bloat). CH column is non-nullable, DEFAULT ''.
   description_text: string;
+  // The description body as SANITIZED HTML (sanitizePostingHtml output), "" when the item carried none. Renders
+  // trusted in the detail panel (safe by construction - strict allowlist at ingest); description_text is the
+  // parallel plain-text projection + render fallback. CH column is non-nullable, DEFAULT ''.
+  description_html: string;
   // The posting's department, "" when absent. CH column is non-nullable, DEFAULT ''.
   department: string;
   ingested_at: string;
@@ -164,6 +194,8 @@ export function mapPostingToRow(posting: Posting, ingestedAt: Date): PostingRow 
     role_names: roleNames,
     // Strip the raw HTML to plain text HERE (the one neutralization point); "" when the body is absent.
     description_text: htmlToText(posting.description?.descriptionHtml ?? ""),
+    // Sanitize the raw HTML to a strict allowlist HERE (the one HTML-neutralization point); "" when absent.
+    description_html: sanitizePostingHtml(posting.description?.descriptionHtml ?? ""),
     department: posting.description?.department ?? "",
     ingested_at: toChDateTime(ingestedAt),
   };

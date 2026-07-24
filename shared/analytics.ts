@@ -757,6 +757,7 @@ export function buildPostingDetailSql(source: string, externalId: string, table:
     "  salary_max,",
     "  department,",
     "  description_text,",
+    "  description_html,",
     "  apply_url",
     `FROM ${table} FINAL`,
     `WHERE source = ${chStr(source)} AND external_id = ${chStr(externalId)}`,
@@ -1005,6 +1006,7 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
       salaryMax: r.salary_max == null ? null : Number(r.salary_max),
       department: r.department == null ? "" : String(r.department),
       descriptionText: r.description_text == null ? "" : String(r.description_text),
+      descriptionHtml: r.description_html == null ? "" : String(r.description_html),
       applyUrl: r.apply_url == null ? "" : String(r.apply_url),
     };
   }
