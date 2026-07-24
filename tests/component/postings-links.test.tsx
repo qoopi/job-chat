@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, test } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ScoredPostingRow } from "@shared/insight";
 import { PostingsCard, PostingsPanel } from "@/components/insight/PostingsCard";
 import { DataTable } from "@/components/insight/charts/DataTable";
 
-// AC-1 link-outs: a postings row TITLE becomes a link when apply_url is present, opening in a new tab with
-// the safe rel; an absent/empty apply_url renders EXACTLY as today (plain title, no anchor, no dead link).
-// Two surfaces: the ScoredPostingRow card/panel and the latest_postings DataTable.
+// The postings row TITLE now CLICKS THROUGH to the in-app posting detail (Apply moved into that detail,
+// superseding the old title-as-external-link). A row carrying the natural key (source, externalId) renders a
+// title BUTTON that opens the detail; an older snapshot row (no key) renders plain text - never a link, never
+// a dead affordance. Both card + panel surfaces share the table body. The latest_postings DataTable is a
+// DIFFERENT surface and keeps its own apply_url link-out (asserted below).
 
 afterEach(cleanup);
 
@@ -22,6 +24,8 @@ function scored(over: Partial<ScoredPostingRow> = {}): ScoredPostingRow {
     experience: "Senior",
     publishedAt: "2026-07-18",
     score: 12,
+    source: "GoogleCareers",
+    externalId: "1",
     ...over,
   };
 }
@@ -32,34 +36,65 @@ function expectSafeLink(anchor: HTMLAnchorElement, href: string) {
   expect(anchor.getAttribute("rel")).toBe("noopener noreferrer");
 }
 
-describe("PostingsCard / PostingsPanel title link-out", () => {
-  test("a row WITH apply_url renders the title as a safe new-tab link", () => {
-    const url = "https://careers.google.com/jobs/results/1";
-    render(<PostingsCard rows={[scored({ title: "Role A", applyUrl: url })]} total={1} onOpenPanel={() => {}} />);
-    const anchor = screen.getByRole("link", { name: "Role A" }) as HTMLAnchorElement;
-    expectSafeLink(anchor, url);
+describe("PostingsCard / PostingsPanel title click-through to detail", () => {
+  test("a row WITH the natural key renders a title BUTTON that opens the detail (not a link)", () => {
+    const onOpenPosting = vi.fn();
+    render(
+      <PostingsCard
+        rows={[scored({ title: "Role A", source: "Lever", externalId: "abc" })]}
+        total={1}
+        onOpenPanel={() => {}}
+        onOpenPosting={onOpenPosting}
+      />,
+    );
+    // No external anchor - Apply lives in the detail now.
+    expect(screen.queryByRole("link", { name: "Role A" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Role A" }));
+    expect(onOpenPosting).toHaveBeenCalledWith("Lever", "abc");
   });
 
-  test("a row WITHOUT apply_url renders the title as plain text - no anchor (empty-url snapshot-compat)", () => {
-    render(<PostingsCard rows={[scored({ title: "Role B" })]} total={1} onOpenPanel={() => {}} />);
+  test("a legacy apply_url on the row does NOT make the title a link (Apply moved to the detail)", () => {
+    render(
+      <PostingsCard
+        rows={[scored({ title: "Role L", applyUrl: "https://careers.google.com/jobs/results/1" })]}
+        total={1}
+        onOpenPanel={() => {}}
+        onOpenPosting={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("link", { name: "Role L" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Role L" })).toBeTruthy();
+  });
+
+  test("a row WITHOUT the natural key renders plain text - no button, no anchor (snapshot-compat)", () => {
+    render(
+      <PostingsCard
+        rows={[scored({ title: "Role B", source: undefined, externalId: undefined })]}
+        total={1}
+        onOpenPanel={() => {}}
+        onOpenPosting={() => {}}
+      />,
+    );
     expect(screen.getByText("Role B")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Role B" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Role B" })).toBeNull();
   });
 
-  test("an empty-string apply_url is treated as absent (plain text, never a dead link)", () => {
-    render(<PostingsCard rows={[scored({ title: "Role C", applyUrl: "" })]} total={1} onOpenPanel={() => {}} />);
-    expect(screen.queryByRole("link", { name: "Role C" })).toBeNull();
-  });
-
-  test("the panel list links the same way (both surfaces share the table body)", () => {
-    const url = "https://stripe.com/jobs/listing/9";
+  test("the panel list opens the detail the same way (both surfaces share the table body)", () => {
+    const onOpenPosting = vi.fn();
     render(
       <PostingsPanel
-        rows={[scored({ title: "Linked", applyUrl: url }), scored({ title: "Plain" })]}
+        rows={[
+          scored({ title: "Keyed", source: "Ashby", externalId: "x9" }),
+          scored({ title: "Plain", source: undefined, externalId: undefined }),
+        ]}
         total={2}
+        onOpenPosting={onOpenPosting}
       />,
     );
-    expectSafeLink(screen.getByRole("link", { name: "Linked" }) as HTMLAnchorElement, url);
+    fireEvent.click(screen.getByRole("button", { name: "Keyed" }));
+    expect(onOpenPosting).toHaveBeenCalledWith("Ashby", "x9");
+    expect(screen.queryByRole("button", { name: "Plain" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Plain" })).toBeNull();
   });
 });

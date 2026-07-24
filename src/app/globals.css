@@ -280,6 +280,59 @@ a:hover {
   color: var(--text);
 }
 
+/* ---------- single-posting detail ---------- */
+/* The clickable role title in a postings table: a link-styled button (opens the in-app detail). */
+.posting-title-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.posting-title-btn:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.posting-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.posting-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.posting-detail-title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+.posting-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.posting-detail-apply {
+  align-self: flex-start;
+}
+.posting-detail-desc {
+  /* PLAIN TEXT (htmlToText output): newlines survive here, no markup is ever parsed (never innerHTML). */
+  white-space: pre-wrap;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text);
+}
+.posting-detail-note {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
 /* ---------- sidebar ---------- */
 .sidebar {
   /* 20vw with a floor so a narrow window never crushes the history (operator 039). */
