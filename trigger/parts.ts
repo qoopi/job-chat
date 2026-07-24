@@ -1,6 +1,7 @@
 import {
   DataInsightSchema,
   labelKeyOf,
+  PostingsSchema,
   type ChartType,
   type DataInsight,
   type DataPoint,
@@ -451,18 +452,34 @@ export function refusalPart(id: string, reason: RefusalReason): RefusalPart {
 
 export type ModelMessage = { role: MessageRole; content: string };
 
-/** The text the MODEL sees per turn: an assistant CARD turn contributes the code-derived VERDICT (never the
- *  model's own prose), "" for an error/refusal card; user / card-less turns keep their content verbatim. */
+/** One model-facing sentence for a postings/listing card (parallel to a chart/table card's verdict): it tells
+ *  the model a job listing was ALREADY shown this conversation, so it does not re-run the postings tool and
+ *  re-answer a prior listing. Derived only from the payload - the match total and the header mode (absent =
+ *  the profile-fit card, "latest" = a plain latest-list). */
+function postingsSummary(payload: { total: number; mode?: "latest" }): string {
+  return payload.mode === "latest"
+    ? `Already listed job postings (${payload.total} total), most recent first.`
+    : `Already listed job postings (${payload.total} matching the profile).`;
+}
+
+/** The text the MODEL sees per turn: an assistant CARD turn contributes the code-derived VERDICT for a
+ *  chart/table card or a concise SUMMARY for a postings/listing card (never the model's own prose), "" for an
+ *  error/refusal card; user / card-less turns keep their content verbatim. */
 function modelFacingContent(m: { role: MessageRole; content: string; parts?: unknown }): string {
   if (m.role !== "assistant" || m.parts == null) return m.content;
   const payloads = Array.isArray(m.parts) ? m.parts : [m.parts];
-  const verdicts = payloads
+  const summaries = payloads
     .map((p) => {
-      const parsed = DataInsightSchema.safeParse(p);
-      return parsed.success ? parsed.data.verdict : null;
+      const insight = DataInsightSchema.safeParse(p);
+      if (insight.success) return insight.data.verdict;
+      // A postings card payload matches PostingsSchema, NOT DataInsightSchema - summarize it (else the turn
+      // returns "" and the model, blind to its own prior listing, re-runs the postings tool next turn).
+      const postings = PostingsSchema.safeParse(p);
+      if (postings.success) return postingsSummary(postings.data);
+      return null;
     })
     .filter((v): v is string => v !== null);
-  return verdicts.length > 0 ? verdicts.join(" ") : "";
+  return summaries.length > 0 ? summaries.join(" ") : "";
 }
 
 /** Rebuild the model-input history from the store (the SOURCE OF TRUTH): the SDK's cross-turn replay carries
