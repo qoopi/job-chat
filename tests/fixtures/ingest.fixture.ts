@@ -43,6 +43,7 @@ export function scriptedClient(pages: (PostingsPage | Error)[]): SearchnapplyCli
       if (entry instanceof Error) throw entry;
       return entry;
     },
+    resolveRoles: async () => [], // ingest never resolves roles - extraction does (a separate path)
   };
 }
 

@@ -114,4 +114,57 @@ describe("createSearchnapplyClient", () => {
 
     await expect(client.fetchPostingsPage(1, 100)).rejects.toThrow(/postings failed: 503/);
   });
+
+  // Role autocomplete (GET /api/jobs/roles). The wire shape is RoleResponse{id,label,matched,jobCount};
+  // the client keeps ONLY label + jobCount. The id is a 64-bit integer JSON.parse silently rounds past
+  // JS's safe-integer limit - the body below carries such an id and the client must never surface it.
+  const rolesBody = [
+    { id: 9007199254740993, label: "Test Engineer", matched: true, jobCount: 13 },
+    { id: 9007199254740995, label: "SDET", matched: false, jobCount: 7 },
+    { id: 9007199254740997, label: "Obscure Role", matched: false, jobCount: 0 },
+  ];
+
+  it("resolves a phrase to canonical labels via /api/jobs/roles (Bearer, limit 8, LABEL-only)", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async (url) =>
+      url.includes("/api/auth/login") ? res(200, loginBody) : res(200, rolesBody),
+    );
+    const client = createSearchnapplyClient(config, fetchImpl);
+
+    const roles = await client.resolveRoles("test engineer");
+
+    // Only label + jobCount survive; the 64-bit id and `matched` are stripped (never used in logic).
+    expect(roles).toEqual([
+      { label: "Test Engineer", jobCount: 13 },
+      { label: "SDET", jobCount: 7 },
+      { label: "Obscure Role", jobCount: 0 },
+    ]);
+    const call = fetchImpl.mock.calls.find(([u]) => u.includes("/api/jobs/roles"))!;
+    expect(call[0]).toBe("http://jobs.test/api/jobs/roles?q=test%20engineer&limit=8");
+    expect((call[1]?.headers as Record<string, string>).authorization).toBe("Bearer tok-1");
+  });
+
+  it("re-logs in once and retries resolveRoles when the token is rejected with 401", async () => {
+    let roleCalls = 0;
+    const fetchImpl = vi.fn<FetchLike>(async (url) => {
+      if (url.includes("/api/auth/login")) return res(200, loginBody);
+      roleCalls += 1;
+      return roleCalls === 1 ? res(401, {}) : res(200, [{ id: 1, label: "QA Engineer", matched: true, jobCount: 14 }]);
+    });
+    const client = createSearchnapplyClient(config, fetchImpl);
+
+    const roles = await client.resolveRoles("qa");
+
+    expect(roles).toEqual([{ label: "QA Engineer", jobCount: 14 }]);
+    const loginCalls = fetchImpl.mock.calls.filter(([u]) => u.includes("/api/auth/login"));
+    expect(loginCalls.length).toBe(2); // initial + refresh after 401
+  });
+
+  it("throws a clear error naming the status when the roles fetch fails (non-401)", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async (url) =>
+      url.includes("/api/auth/login") ? res(200, loginBody) : res(503, {}),
+    );
+    const client = createSearchnapplyClient(config, fetchImpl);
+
+    await expect(client.resolveRoles("qa")).rejects.toThrow(/roles failed: 503/);
+  });
 });

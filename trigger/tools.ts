@@ -274,8 +274,12 @@ export function mergeSearchParams(input: SearchToolInput, profile: Profile) {
     titleTerms: expandTitleTerms(baseTitles), // recall-broadened before the scorer sees them
     // Model-extracted canonical role phrases; the server resolves them to canonical role names in
     // ClickHouse (the 64-bit id is never used). No profile fallback - only a phrase the model actually
-    // named engages the role-IN match.
+    // named engages the role-IN match. Ignored downstream when canonicalRoles below is non-empty.
     roles: input.roles && input.roles.length > 0 ? input.roles : undefined,
+    // The PROFILE's canonical role LABELS (searchnapply autocomplete at extraction) - the authoritative
+    // role-IN signal, server-side, NEVER model-supplied. `?? []` guards a legacy profile: the chat read
+    // path reads the JSONB without re-parsing through ProfileSchema, so an older profile has no field.
+    canonicalRoles: profile.canonicalRoles ?? [],
     experience: profile.seniority ?? undefined, // authoritative - never from the model
     cities: input.cities && input.cities.length > 0 ? input.cities : profile.locations,
     // A company scope comes ONLY from the model's read of the question (the profile has no company field);

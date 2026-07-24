@@ -31,6 +31,7 @@ const full: Profile = {
   domains: ["distributed systems", "data tooling"],
   ossHighlights: ["Merged PRs to trigger.dev", "ClickHouse migration CLI", "Kafka connector docs"],
   experience: [],
+  canonicalRoles: [],
 };
 
 describe("profileTitle", () => {

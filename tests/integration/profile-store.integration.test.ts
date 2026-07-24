@@ -20,6 +20,7 @@ const extracted: Profile = {
   domains: ["fintech"],
   ossHighlights: ["maintainer of an OSS CLI"],
   experience: [{ title: "Senior Backend Engineer", company: "Acme", years: "2021-2024", bullets: ["Cut p99 40%"] }],
+  canonicalRoles: [],
 };
 
 describe.skipIf(!hasCreds)("profiles store against real Postgres", () => {

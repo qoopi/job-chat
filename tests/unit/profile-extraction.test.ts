@@ -3,6 +3,7 @@ import {
   buildExtractionPrompt,
   extractProfileFields,
   markProfileExtractionFailed,
+  resolveCanonicalRoles,
   runProfileExtraction,
   type ExtractionMessage,
   type GenerateProfile,
@@ -27,6 +28,7 @@ const PROFILE: Profile = {
   domains: ["fintech"],
   ossHighlights: ["OSS CLI maintainer"],
   experience: [],
+  canonicalRoles: [],
 };
 
 function signals(): GithubSignals {
@@ -142,6 +144,38 @@ describe("extractProfileFields", () => {
   });
 });
 
+describe("resolveCanonicalRoles (searchnapply autocomplete at extraction)", () => {
+  it("keeps labels with jobCount>0, deduped case-insensitively, using the LABEL only", async () => {
+    const resolve = vi.fn(async (phrase: string) =>
+      phrase === "SDET"
+        ? [{ label: "SDET", jobCount: 7 }, { label: "Test Engineer", jobCount: 13 }]
+        : [{ label: "test engineer", jobCount: 5 }, { label: "Obscure", jobCount: 0 }],
+    );
+    const labels = await resolveCanonicalRoles(resolve, ["SDET", "Test Automation Engineer"]);
+    // jobCount 0 dropped ("Obscure"); "test engineer" is a case-insensitive dup of "Test Engineer".
+    expect(labels).toEqual(["SDET", "Test Engineer"]);
+  });
+
+  it("dedupes phrases case-insensitively - one autocomplete call per distinct phrase", async () => {
+    const resolve = vi.fn(async () => [{ label: "QA Engineer", jobCount: 14 }]);
+    await resolveCanonicalRoles(resolve, ["QA Engineer", "qa engineer", "  QA Engineer  "]);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("GRACEFUL: a rejecting resolver yields [] and never throws (the profile still saves)", async () => {
+    const resolve = vi.fn(async () => {
+      throw new Error("searchnapply 503");
+    });
+    await expect(resolveCanonicalRoles(resolve, ["SDET"])).resolves.toEqual([]);
+  });
+
+  it("caps the stored labels at 10", async () => {
+    const resolve = vi.fn(async (phrase: string) => [{ label: `Role ${phrase}`, jobCount: 1 }]);
+    const many = Array.from({ length: 20 }, (_, i) => `p${i}`);
+    expect((await resolveCanonicalRoles(resolve, many)).length).toBe(10);
+  });
+});
+
 describe("markProfileExtractionFailed (terminal-failure marker, must-fix)", () => {
   it("clears the transient PDF and stamps the failure marker via the store", async () => {
     // The task's onFailure hook calls this after ALL retries are exhausted (a PERMANENT failure). The
@@ -219,6 +253,62 @@ describe("runProfileExtraction", () => {
     const text = seen[0].content.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join("\n");
     expect(text).toContain("no resume yet"); // github-only prompt path
     expect(text).toContain("GitHub @octocat");
+  });
+
+  it("resolves + stores canonicalRoles from the profile's title + experience signals (item 3)", async () => {
+    const { store, saved, cards } = fakeStore(row({ raw_resume_text: "x" }));
+    const extracted: Profile = {
+      ...PROFILE,
+      titles: ["QA Automation Engineer"],
+      experience: [{ title: "SDET", company: "Acme", years: "3y", bullets: [] }],
+      canonicalRoles: [], // the model's output; overwritten by autocomplete resolution
+    };
+    const generate = vi.fn<GenerateProfile>(async () => extracted);
+    const resolveRoles = vi.fn(async (phrase: string) =>
+      phrase === "QA Automation Engineer"
+        ? [{ label: "QA Engineer", jobCount: 14 }]
+        : phrase === "SDET"
+          ? [{ label: "SDET", jobCount: 7 }]
+          : [],
+    );
+
+    const result = await runProfileExtraction(
+      { store, fetchGithub: vi.fn(), generate, githubToken: undefined, resolveRoles },
+      { userId: "u1", conversationId: "c1" },
+    );
+
+    expect(result?.canonicalRoles).toEqual(["QA Engineer", "SDET"]);
+    expect(saved[0].canonicalRoles).toEqual(["QA Engineer", "SDET"]); // persisted on the profile
+    expect(cards[0].parts).toMatchObject({ profile: { canonicalRoles: ["QA Engineer", "SDET"] } });
+    // The autocomplete signals are the profile's titles + experience titles.
+    expect(resolveRoles.mock.calls.map((c) => c[0])).toEqual(
+      expect.arrayContaining(["QA Automation Engineer", "SDET"]),
+    );
+  });
+
+  it("GRACEFUL: no resolver (no searchnapply creds) -> canonicalRoles [] and the profile still saves", async () => {
+    const { store, saved } = fakeStore(row({ raw_resume_text: "x" }));
+    const generate = vi.fn<GenerateProfile>(async () => PROFILE);
+    const result = await runProfileExtraction(
+      { store, fetchGithub: vi.fn(), generate, githubToken: undefined },
+      { userId: "u1", conversationId: "c1" },
+    );
+    expect(result?.canonicalRoles).toEqual([]);
+    expect(saved[0].canonicalRoles).toEqual([]);
+  });
+
+  it("GRACEFUL: a failing resolver -> canonicalRoles [] and the profile still saves (never fail the save)", async () => {
+    const { store, saved } = fakeStore(row({ raw_resume_text: "x" }));
+    const generate = vi.fn<GenerateProfile>(async () => PROFILE);
+    const resolveRoles = vi.fn(async () => {
+      throw new Error("searchnapply down");
+    });
+    const result = await runProfileExtraction(
+      { store, fetchGithub: vi.fn(), generate, githubToken: undefined, resolveRoles },
+      { userId: "u1", conversationId: "c1" },
+    );
+    expect(result?.canonicalRoles).toEqual([]);
+    expect(saved[0].canonicalRoles).toEqual([]);
   });
 
   it("is a no-op when the profile row was deleted before the task ran", async () => {

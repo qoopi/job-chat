@@ -70,6 +70,7 @@ const profile: Profile = {
   experience: [
     { title: "Senior Backend Engineer", company: "DataMesh", years: "2021-2026", bullets: ["A", "B", "C", "D", "E"] },
   ],
+  canonicalRoles: [],
 };
 
 const postingsRows = Array.from({ length: 12 }, (_, i) => ({

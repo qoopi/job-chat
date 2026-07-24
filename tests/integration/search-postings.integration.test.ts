@@ -64,8 +64,12 @@ const ROWS: PostingRow[] = [
   row({ external_id: "F", title: "Product Manager", company: "Amazon", city: "Paris", location_kind: "onsite", experience_level: "Mid", published_at: "2026-07-14 10:00:00" }),
   // H: NULL city (the default), scores 0 under PARAMS (no title/exp/city/remote/salary match) so it does
   // not disturb the ordering/meta above. Its own test below searches a term it DOES match to prove the
-  // null-city `city IN (...)` term yields 0 (not NULL) - so the row is not NULL-dropped by WHERE score > 0.
+  // null-city `city IN (...)` term yields 0 (not NULL) - so the row is not NULL-dropped by the gate.
   row({ external_id: "H", title: "Marketing Manager", company: "Spotify", experience_level: "Mid", published_at: "2026-07-13 10:00:00" }),
+  // I (056 B1): seniority-band-ALONE - experience "Senior" = the requested band, but NO title/city/remote/
+  // salary signal. The OLD gate (score > 0) counted it (score 2 - the 5799 inflation); the honest gate
+  // EXCLUDES it. Placed here so it never appears in the ordered matches or meta above.
+  row({ external_id: "I", title: "Office Administrator", company: "Oracle", city: "Paris", location_kind: "onsite", experience_level: "Senior", published_at: "2026-07-12 10:00:00" }),
 ];
 
 describe.skipIf(!hasCreds)("searchPostings scores + orders by the fixed formula (AC-7/AC-8)", () => {
@@ -100,6 +104,13 @@ describe.skipIf(!hasCreds)("searchPostings scores + orders by the fixed formula 
     ]);
     expect(res.rows.map((r) => r.score)).toEqual([12, 10, 9, 7, 6, 6]);
     expect(res.total).toBe(6); // pre-limit count of matches (the "8 of 23" numerator source)
+  });
+
+  it("B1 honest count: a seniority-band-ALONE posting is NOT a match (row I excluded despite scoring 2)", async () => {
+    const res = await analytics.searchPostings({ ...PARAMS, limit: 50 });
+    // Row I matches only the seniority band; under the old `score > 0` gate it counted (the 5799 defect).
+    expect(res.rows.map((r) => r.title)).not.toContain("Office Administrator");
+    expect(res.total).toBe(6); // the honest total never includes the band-alone row
   });
 
   it("maps the row fields (remote boolean, null salary -> null, raw experience, city passthrough)", async () => {
@@ -206,6 +217,22 @@ describe.skipIf(!hasCreds)("searchPostings role-IN matching (populated fixtures)
     const r3 = res.rows.find((r) => r.title === "Backend Ninja")!;
     expect(r1.score).toBe(6);
     expect(r3.score).toBe(3);
+  });
+
+  it("matches via the profile's canonicalRoles DIRECTLY (authoritative, no resolve read) - the has() signal", async () => {
+    // Item 4: canonicalRoles are already canonical (searchnapply autocomplete at extraction), so they key
+    // has(role_names, ...) DIRECTLY - no role-resolve round trip, no model phrase. Same has() semantics as
+    // the resolved-phrase path: R1 by role name, R3 by title fallback, R2 (Data Scientist) excluded.
+    const res = await analytics.searchPostings({
+      titleTerms: ["backend"],
+      canonicalRoles: ["Backend Engineer"], // mixed casing vs stored "backend ENGINEER" - both lowered
+      limit: 50,
+    });
+    const found = res.rows.map((r) => r.title);
+    expect(found).toContain("Platform Wizard"); // R1: role name match, title has no "backend"
+    expect(found).toContain("Backend Ninja"); // R3: unclassified -> title fallback
+    expect(found).not.toContain("Number Cruncher"); // R2: classified as something else
+    expect(res.total).toBe(2);
   });
 
   it("FORWARD-COMPAT: passing role phrases resolves nothing when NO row is classified -> pure title match", async () => {

@@ -779,11 +779,11 @@ describe("Should_ScoreByFixedFormula_When_SearchPostingsBuilt (AC-7/AC-8)", () =
     expect(rowsSql).toContain("1 * (salary_max IS NOT NULL AND salary_max >= 150000)");
   });
 
-  it("orders by score DESC, salary-listed DESC, then publishedAt DESC, over the open set, keeping only matches (score > 0)", () => {
+  it("orders by score DESC, salary-listed DESC, then publishedAt DESC, over the open set, keeping only real-signal matches (B1)", () => {
     const { rowsSql } = buildSearchPostingsSql(params, "postings");
     expect(rowsSql).toContain("FROM postings FINAL");
     expect(rowsSql).toContain("WHERE ingested_at = (SELECT max(ingested_at) FROM postings)");
-    expect(rowsSql).toContain("WHERE score > 0");
+    expect(rowsSql).toContain("WHERE matched"); // B1 honest gate (role/title/city), not seniority-alone score > 0
     // Item 4 (register 20) tie-break: within equal scores, salary-listed rows and freshest first
     // (deterministic - a listed-salary US row never sinks below an unlisted India row on a score tie).
     expect(rowsSql).toContain(
@@ -826,7 +826,7 @@ describe("Should_ScoreByFixedFormula_When_SearchPostingsBuilt (AC-7/AC-8)", () =
     const { metaSql } = buildSearchPostingsSql(params, "postings");
     expect(metaSql).toContain("count() AS c");
     expect(metaSql).toContain("max(ingested_at) AS freshestAt");
-    expect(metaSql).toContain("WHERE score > 0");
+    expect(metaSql).toContain("WHERE matched"); // B1: the honest count gates on a real signal, not score > 0
     expect(metaSql).toContain("GROUP BY company");
     expect(metaSql).toContain("ORDER BY c DESC, company ASC");
   });
@@ -845,6 +845,97 @@ describe("Should_ScoreByFixedFormula_When_SearchPostingsBuilt (AC-7/AC-8)", () =
     expect(() => buildSearchPostingsSql({ titleTerms: ["a"], bogus: 1 }, "postings")).toThrow(); // strict
     expect(() => buildSearchPostingsSql({ limit: 51 }, "postings")).toThrow(); // hard cap 50
     expect(() => buildSearchPostingsSql({ salaryMin: -1 }, "postings")).toThrow(); // positive
+  });
+});
+
+// B1 HONEST COUNT (056): the fit gate must require a REAL role/title/city signal. Seniority band alone
+// scored 2 and passed the old `score > 0` gate (every senior posting counted - the 5799 inflation). The
+// new gate is `matched` = (roleOrTitleTerm > 0) OR cityTerm; seniority/salary/remote still rank but never
+// alone make a match. A legacy (canonicalRoles empty) title-only match MUST still count.
+describe("B1 honest-count gate: a real role/title/city signal, not seniority-alone (056)", () => {
+  it("gates rows + meta on `matched`, and the gate never references the seniority band", () => {
+    const { rowsSql, metaSql } = buildSearchPostingsSql(
+      { titleTerms: ["engineer"], experience: "senior" }, // senior band present, NO city
+      "postings",
+    );
+    expect(rowsSql).toContain("WHERE matched");
+    expect(metaSql).toContain("WHERE matched");
+    expect(rowsSql).not.toContain("WHERE score > 0");
+    expect(metaSql).not.toContain("WHERE score > 0");
+    // matched = (roleOrTitleTerm > 0) OR cityTerm; with no city it is `OR 0`, and it never carries the
+    // band comparison (= 'senior') - so a seniority-band-alone posting no longer counts.
+    expect(rowsSql).toContain("((least((title ILIKE '%engineer%'), 2)) > 0 OR 0) AS matched");
+  });
+
+  it("a legacy (canonicalRoles empty) title-only match STILL counts - the title term drives the gate", () => {
+    const { rowsSql } = buildSearchPostingsSql({ titleTerms: ["qa", "test"] }, "postings");
+    expect(rowsSql).toContain(
+      "((least((title ILIKE '%qa%') + (title ILIKE '%test%'), 2)) > 0 OR 0) AS matched",
+    );
+    expect(rowsSql).toContain("WHERE matched");
+  });
+
+  it("a city match alone (no title/role) still counts - a location signal is real", () => {
+    const { rowsSql } = buildSearchPostingsSql({ cities: ["Berlin"] }, "postings");
+    expect(rowsSql).toContain("((0) > 0 OR (lowerUTF8(city) IN (lowerUTF8('Berlin')))) AS matched");
+  });
+
+  it("folds a resolved canonical role into the gate (roleMatch OR title fallback), still excluding seniority-alone", () => {
+    const { rowsSql } = buildSearchPostingsSql(
+      { titleTerms: ["engineer"], experience: "senior" },
+      "postings",
+      ["sdet", "test engineer"], // already-lowercased canonical role names
+    );
+    expect(rowsSql).toContain(
+      "((multiIf(hasAny(arrayMap(rn -> lowerUTF8(rn), role_names), ['sdet', 'test engineer']), 2, empty(role_names), least((title ILIKE '%engineer%'), 2), 0)) > 0 OR 0) AS matched",
+    );
+  });
+});
+
+// Item 4 (056): searchPostings keys the role-IN signal off the PROFILE's canonicalRoles (server-side,
+// authoritative), NOT the model's role phrases, when the profile carries them. They are already canonical
+// (resolved from searchnapply autocomplete at extraction), so they are used DIRECTLY (lowercased) and the
+// query-time role-resolve CH read is skipped. A legacy profile (canonicalRoles empty) falls back to
+// resolving the model's role phrases against the corpus, exactly as before.
+describe("searchPostings uses the profile's canonicalRoles authoritatively (056 item 4)", () => {
+  function recordingClient() {
+    const queries: string[] = [];
+    const client = {
+      query: async ({ query }: { query: string }) => {
+        queries.push(query);
+        return { json: async () => [] as unknown[] };
+      },
+    } as unknown as ClickHouseClient;
+    return { client, queries };
+  }
+
+  it("uses canonicalRoles directly (lowercased) for has(role_names, ...) and SKIPS the role-resolve read", async () => {
+    const { client, queries } = recordingClient();
+    const analytics = createAnalytics({ client, table: "postings" });
+    await analytics.searchPostings({
+      titleTerms: ["engineer"],
+      roles: ["ignored model phrase"], // ignored when canonicalRoles is present
+      canonicalRoles: ["SDET", "Test Engineer"],
+      limit: 50,
+    });
+    expect(queries.some((q) => q.includes("arrayJoin(role_names)"))).toBe(false); // no role-resolve read
+    const rowsQuery = queries.find((q) => q.includes("AS matched"))!;
+    expect(rowsQuery).toContain(
+      "hasAny(arrayMap(rn -> lowerUTF8(rn), role_names), ['sdet', 'test engineer'])",
+    );
+    expect(rowsQuery).not.toContain("ignored model phrase"); // the model phrase never keys the role signal
+  });
+
+  it("falls back to resolving the model's role phrases when canonicalRoles is empty (legacy profile)", async () => {
+    const { client, queries } = recordingClient();
+    const analytics = createAnalytics({ client, table: "postings" });
+    await analytics.searchPostings({
+      titleTerms: ["engineer"],
+      roles: ["backend engineer"],
+      canonicalRoles: [],
+      limit: 50,
+    });
+    expect(queries.some((q) => q.includes("arrayJoin(role_names)"))).toBe(true); // the resolve read fires
   });
 });
 

@@ -40,6 +40,7 @@ const E2E_PROFILE: Profile = {
   experience: [
     { title: "Senior Backend Engineer", company: "DataMesh", years: "2021-2026", bullets: ["Led the ClickHouse migration"] },
   ],
+  canonicalRoles: [],
 };
 
 function reasonMessage(reason: "unauthorized" | "too-large" | "empty" | "enqueue-failed"): string {

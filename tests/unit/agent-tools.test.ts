@@ -246,6 +246,7 @@ const PROFILE: Profile = {
   domains: ["fintech"],
   ossHighlights: [],
   experience: [],
+  canonicalRoles: [],
 };
 
 describe("buildCatalogTools registers the fit tools (search_postings + request_profile)", () => {
@@ -292,6 +293,21 @@ describe("mergeSearchParams (server-authoritative profile merge)", () => {
     expect(withRole.roles).toEqual(["backend engineer"]);
     // No role named by the model -> no role phrase (the profile's titles do NOT auto-become roles).
     expect(mergeSearchParams({ titleTerms: ["staff engineer"] }, PROFILE).roles).toBeUndefined();
+  });
+
+  it("carries the profile's canonicalRoles as the server-authoritative role-IN signal (item 4)", () => {
+    // canonicalRoles come from the PROFILE (searchnapply autocomplete at extraction), never from the model.
+    const withRoles = { ...PROFILE, canonicalRoles: ["SDET", "Test Engineer"] };
+    const merged = mergeSearchParams({ titleTerms: ["qa engineer"], roles: ["ignored model phrase"] }, withRoles);
+    expect(merged.canonicalRoles).toEqual(["SDET", "Test Engineer"]);
+  });
+
+  it("FORWARD-COMPAT: a legacy profile whose JSONB lacks canonicalRoles merges to [] (no throw)", () => {
+    // The chat read path reads the profiles JSONB WITHOUT re-parsing through ProfileSchema, so a pre-056
+    // profile arrives with canonicalRoles === undefined at runtime; the merge must degrade it to [].
+    const legacy = { ...PROFILE } as Profile;
+    delete (legacy as { canonicalRoles?: unknown }).canonicalRoles;
+    expect(mergeSearchParams({ titleTerms: ["qa engineer"] }, legacy).canonicalRoles).toEqual([]);
   });
 
   // Mutation check: the tool schema's `.strict()` blocks an injected experience/salaryMin key BEFORE it
