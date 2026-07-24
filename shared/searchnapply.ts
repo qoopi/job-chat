@@ -26,9 +26,20 @@ export const PostingsPageSchema = z.object({
 
 export type PostingsPage = z.infer<typeof PostingsPageSchema>;
 
+// Role autocomplete (GET /api/jobs/roles). The wire shape is RoleResponse{id,label,matched,jobCount}; we
+// keep ONLY label + jobCount. The id is a 64-bit integer JSON.parse silently rounds past JS's safe-integer
+// limit (it already bit an earlier task) - z.object strips it here (and `matched`) so a corrupted id can
+// never leak into logic. The label is the canonical role string (it matches the postings' role_names);
+// jobCount lets the caller keep only logically-relevant labels.
+export const RoleResponseSchema = z.object({ label: z.string(), jobCount: z.number() });
+export type RoleResponse = z.infer<typeof RoleResponseSchema>;
+
 export interface SearchnapplyClient {
   login(): Promise<string>;
   fetchPostingsPage(page: number, pageSize: number): Promise<PostingsPage>;
+  /** Resolve a role/title phrase to canonical role labels (autocomplete caps at 8). Enrichment-only -
+   *  called at profile extraction, NEVER on the chat read path (that stays ClickHouse-only). */
+  resolveRoles(phrase: string): Promise<RoleResponse[]>;
 }
 
 // Validated as its own slice, so ingestion stays decoupled from AWS/Bedrock creds (ISP).
@@ -86,5 +97,24 @@ export function createSearchnapplyClient(
     return PostingsPageSchema.parse(await res.json());
   }
 
-  return { login, fetchPostingsPage };
+  async function getRoles(phrase: string) {
+    return fetchImpl(
+      `${config.jobsUrl}/api/jobs/roles?q=${encodeURIComponent(phrase)}&limit=8`,
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+  }
+
+  async function resolveRoles(phrase: string): Promise<RoleResponse[]> {
+    if (!token) await login();
+    let res = await getRoles(phrase);
+    if (res.status === 401) {
+      await login(); // token expired mid-run; refresh once and retry
+      res = await getRoles(phrase);
+    }
+    if (!res.ok) throw new Error(`searchnapply roles failed: ${res.status}`);
+    // z.array(RoleResponseSchema) keeps ONLY label + jobCount - the 64-bit id never enters our data.
+    return z.array(RoleResponseSchema).parse(await res.json());
+  }
+
+  return { login, fetchPostingsPage, resolveRoles };
 }

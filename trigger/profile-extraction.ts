@@ -86,11 +86,59 @@ export async function extractProfileFields(
   }
 }
 
+/** The role-autocomplete seam: a phrase -> canonical role labels (searchnapply). Structural (not the
+ *  searchnapply type) so the pipeline stays decoupled; undefined when creds are absent. */
+export type ResolveRoles = (phrase: string) => Promise<{ label: string; jobCount: number }[]>;
+
+const MAX_ROLE_PHRASES = 12; // bound the autocomplete fan-out per extraction (one call per distinct phrase)
+const MAX_CANONICAL_ROLES = 10; // cap the stored role set (a profile's canonical roles stay a short list)
+
+/** Resolve the profile's role/title signals to canonical role LABELS via searchnapply autocomplete, at
+ *  EXTRACTION (a background enrichment) - NEVER on the chat read path (that stays ClickHouse-only). Keeps
+ *  the labels the autocomplete returns with jobCount > 0 (logically-relevant), deduped case-insensitively,
+ *  capped. GRACEFUL: a per-phrase failure is swallowed (returns whatever resolved) so the profile always
+ *  saves; only the LABEL is used - the autocomplete's 64-bit id is never touched (JSON.parse corrupts it). */
+export async function resolveCanonicalRoles(resolve: ResolveRoles, phrases: string[]): Promise<string[]> {
+  const seenPhrase = new Set<string>();
+  const cleanPhrases: string[] = [];
+  for (const raw of phrases) {
+    const phrase = raw.trim();
+    const key = phrase.toLowerCase();
+    if (!phrase || seenPhrase.has(key)) continue;
+    seenPhrase.add(key);
+    cleanPhrases.push(phrase);
+    if (cleanPhrases.length >= MAX_ROLE_PHRASES) break;
+  }
+
+  const seenLabel = new Set<string>();
+  const labels: string[] = [];
+  for (const phrase of cleanPhrases) {
+    let roles: { label: string; jobCount: number }[];
+    try {
+      roles = await resolve(phrase);
+    } catch (err) {
+      console.error(`[extract-profile] role autocomplete failed for ${JSON.stringify(phrase)} - skipping it`, err);
+      continue;
+    }
+    for (const role of roles) {
+      const label = role.label.trim();
+      const key = label.toLowerCase();
+      if (!label || role.jobCount <= 0 || seenLabel.has(key)) continue;
+      seenLabel.add(key);
+      labels.push(label);
+      if (labels.length >= MAX_CANONICAL_ROLES) return labels;
+    }
+  }
+  return labels;
+}
+
 export interface ExtractionDeps {
   store: Store;
   fetchGithub: (username: string, token: string | undefined) => Promise<GithubSignals>;
   generate: GenerateProfile;
   githubToken: string | undefined;
+  /** Optional (undefined = no searchnapply creds): resolves the role/title signals to canonical labels. */
+  resolveRoles?: ResolveRoles;
 }
 
 /** Run the extraction for one save: read the row, enrich from GitHub (resume-only if the fetch throws),
@@ -118,18 +166,25 @@ export async function runProfileExtraction(
     githubSignals,
   });
 
+  // Enrich with canonical role labels resolved from the profile's title + experience-title signals via
+  // searchnapply autocomplete (background only). Absent creds or any failure -> [] (never blocks the save);
+  // the enriched profile is what persists and rides the card.
+  const roleSignals = [...profile.titles, ...profile.experience.map((e) => e.title)];
+  const canonicalRoles = deps.resolveRoles ? await resolveCanonicalRoles(deps.resolveRoles, roleSignals) : [];
+  const enriched: Profile = { ...profile, canonicalRoles };
+
   // The profile write matches no row if deleted mid-extraction: skip the card + PDF clear (no orphan card).
-  const updated = await deps.store.saveExtractedProfile(payload.userId, profile);
+  const updated = await deps.store.saveExtractedProfile(payload.userId, enriched);
   if (!updated) return null;
 
   await deps.store.appendProfileCard(payload.conversationId, profileCardMessageId(payload.conversationId), {
     kind: "profile-card",
-    profile,
+    profile: enriched,
   });
   // Clear the transient PDF ONLY after the card append succeeds: a transient failure retries the whole run
   // with the PDF still present (a PDF-only resume re-extracts); a permanent failure clears it via onFailure.
   await deps.store.clearResumePdf(payload.userId);
-  return profile;
+  return enriched;
 }
 
 /** Terminal-failure handler (onFailure, all retries exhausted): clears the transient resume PDF (never

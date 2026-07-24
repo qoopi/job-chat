@@ -4,8 +4,18 @@ import { generateObject } from "ai";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 import { ProfileSchema } from "@shared/profile";
+import {
+  createSearchnapplyClient,
+  SearchnapplyEnvSchema,
+  searchnapplyConfigFromEnv,
+} from "@shared/searchnapply";
 import { fetchGithubProfile } from "./github-profile";
-import { markProfileExtractionFailed, runProfileExtraction, type GenerateProfile } from "./profile-extraction";
+import {
+  markProfileExtractionFailed,
+  runProfileExtraction,
+  type GenerateProfile,
+  type ResolveRoles,
+} from "./profile-extraction";
 import { MODEL_ID } from "./model-id";
 import { withStore } from "./store-session";
 
@@ -35,6 +45,15 @@ const generate: GenerateProfile = async ({ system, messages }) => {
   return object;
 };
 
+// Build the role-autocomplete resolver from the ingest's SEARCHNAPPLY_* env (already present in Trigger
+// prod). Absent/invalid creds -> undefined, so extraction resolves NO canonical roles and still saves the
+// profile. Enrichment-only: this runs in the background task, never on the chat read path.
+function buildRoleResolver(): ResolveRoles | undefined {
+  if (!SearchnapplyEnvSchema.safeParse(process.env).success) return undefined;
+  const client = createSearchnapplyClient(searchnapplyConfigFromEnv());
+  return (phrase) => client.resolveRoles(phrase);
+}
+
 export const extractProfileTask = schemaTask({
   id: "extract-profile",
   schema: z.object({ userId: z.string(), conversationId: z.string() }),
@@ -42,7 +61,13 @@ export const extractProfileTask = schemaTask({
   run: async (payload) =>
     withStore((store) =>
       runProfileExtraction(
-        { store, fetchGithub: fetchGithubProfile, generate, githubToken: process.env.GITHUB_TOKEN },
+        {
+          store,
+          fetchGithub: fetchGithubProfile,
+          generate,
+          githubToken: process.env.GITHUB_TOKEN,
+          resolveRoles: buildRoleResolver(),
+        },
         payload,
       ),
     ),
