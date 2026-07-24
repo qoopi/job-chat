@@ -1283,6 +1283,12 @@ a:hover {
   gap: 5px;
   padding: 14px 16px;
 }
+/* the optional narration line before the dots (parsing a profile / looking for fitting postings) */
+.answering-label {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin-right: 2px;
+}
 .answering-dot {
   width: 7px;
   height: 7px;

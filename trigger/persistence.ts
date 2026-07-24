@@ -7,6 +7,7 @@ import {
   PostingsSchema,
   ProfileCardSchema,
   ProfileInviteSchema,
+  SuggestionsSchema,
 } from "@shared/insight";
 import type { Store, MessageRole } from "@shared/store";
 import { MAX_INPUT_CHARS } from "./guard";
@@ -23,6 +24,7 @@ function isPersistablePayload(data: unknown): boolean {
   if (PostingsSchema.safeParse(data).success) return true;
   if (AuthInviteSchema.safeParse(data).success) return true;
   if (ProfileInviteSchema.safeParse(data).success) return true;
+  if (SuggestionsSchema.safeParse(data).success) return true; // additive discovery-suggestions part
   if (typeof data !== "object" || data === null) return false;
   const d = data as Record<string, unknown>;
   if (isErrorKind(d.kind)) return true; // error marker
@@ -54,7 +56,8 @@ export function extractAssistantPersistence(message: MessageLike): {
       p.type === "data-profile-card" ||
       p.type === "data-postings" ||
       p.type === "data-auth-invite" ||
-      p.type === "data-profile-invite"
+      p.type === "data-profile-invite" ||
+      p.type === "data-suggestions"
     ) {
       byId.set(p.id ?? `#${anon++}`, p.data);
     }

@@ -126,6 +126,12 @@ export function ChatClient({
   // Instant "answering" feedback set the moment a turn is sent, to bridge the run-wake gap before the SDK moves
   // `status` off "ready". `pending = isStreaming(status) || awaiting`; the send/attach `finally` clears it, never stuck.
   const [awaiting, setAwaiting] = useState(false);
+  // The in-thread "Parsing your profile..." indicator, on while the ProfilePanel extraction poll runs; it
+  // yields to the profile card when it lands. Transient - never persisted.
+  const [parsingProfile, setParsingProfile] = useState(false);
+  // A narration label for the pending indicator - set when the auto-continued fit search fires, cleared the
+  // moment the turn is no longer pending. Transient only.
+  const [pendingLabel, setPendingLabel] = useState<string | null>(null);
   const started = useRef(false);
   // Cold-start warm: once per mount, warm the Trigger session for the conversation the
   // first send will use, so the agent's boot overlaps mount/typing rather than stacking after the send.
@@ -291,7 +297,7 @@ export function ChatClient({
   );
 
   const send = useCallback(
-    async (raw: string) => {
+    async (raw: string, pendingLabelArg?: string) => {
       const text = raw.trim();
       if (!text) return;
       // While capped, a send queues the draft (composer + sessionStorage, surviving the Google redirect) and opens the dialog; the post-auth mount auto-sends it.
@@ -305,6 +311,8 @@ export function ChatClient({
       sendingRef.current = true;
       setFailed(null);
       setAwaiting(true); // instant answering indicator + streaming composer through the run-wake gap
+      // Narration for THIS turn's pending indicator (the auto-continued fit search); a plain send clears it.
+      setPendingLabel(pendingLabelArg ?? null);
 
       // The first message after New chat starts a NEW conversation, then soft-navigates carrying `?q=` - the new
       // page delivers turn 1 on arrival. Awaiting stays set through the navigation; a refusal clears it and shows the notice.
@@ -398,11 +406,12 @@ export function ChatClient({
 
   // Fire the armed one-shot fit question. Null the ref BEFORE the send so a double-fire can never send
   // twice; `send` still enforces the reentrancy + cap guards. One home for both firing sites: a profile save
-  // and the profile-already-on-file post-auth auto-continue.
+  // and the profile-already-on-file post-auth auto-continue. The pending indicator reads as a fit search.
   const fireAutoContinue = useCallback(() => {
     const question = autoContinueRef.current;
     autoContinueRef.current = null;
-    if (question) void send(question);
+    // Narrate the auto-continued fit search on its pending indicator (transient only).
+    if (question) void send(question, "Looking for postings that fit you...");
   }, [send]);
 
   // The profile card is out-of-band: the task persists it under a DETERMINISTIC id, and the form injects it
@@ -416,6 +425,7 @@ export function ChatClient({
         parts: [{ type: "data-profile-card", id: `${id}-card`, data: { kind: "profile-card", profile } }],
       } as UIMessage;
       setMessages((prev) => (prev.some((m) => m.id === id) ? prev.map((m) => (m.id === id ? card : m)) : [...prev, card]));
+      setParsingProfile(false); // the card has landed - the parsing indicator yields to it (same commit)
       // If an invite started this flow, re-run the fit question it interrupted.
       fireAutoContinue();
     },
@@ -622,6 +632,7 @@ export function ChatClient({
             onClose={closeProfile}
             onFindJob={() => void send("Find me a job that fits")}
             onProfileSaved={onProfileSaved}
+            onParsingChange={setParsingProfile}
           />
         ) : postingContent ? (
           <DetailPanel content={postingContent} onClose={clearPostingDetail} onOpenPosting={openPosting} />
@@ -651,6 +662,8 @@ export function ChatClient({
               onEditProfile={onEditProfile}
               onAuthInvite={onAuthInvite}
               liveError={liveError}
+              parsingProfile={parsingProfile}
+              pendingLabel={pendingLabel ?? undefined}
             />
           </div>
           <Composer

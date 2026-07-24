@@ -5,12 +5,14 @@ import {
   isRefusalReason,
   PostingsSchema,
   ProfileCardSchema,
+  SuggestionsSchema,
   type ChartType,
   type DataInsight,
   type ErrorKind,
   type PostingDetail,
   type RefusalReason,
   type ScoredPostingRow,
+  type SuggestionItem,
 } from "@shared/insight";
 import type { Profile } from "@shared/profile";
 
@@ -32,6 +34,7 @@ export type CardClass =
   | { kind: "postings"; rows: ScoredPostingRow[]; total: number }
   | { kind: "auth-invite" }
   | { kind: "profile-invite" }
+  | { kind: "suggestions"; items: SuggestionItem[] }
   | { kind: "unknown" };
 
 /** The `data-<kind>` wire type per card kind; one home so resume + live writer tag parts identically. */
@@ -43,6 +46,7 @@ const PART_TYPE_BY_KIND: Record<string, string> = {
   postings: "data-postings",
   "auth-invite": "data-auth-invite",
   "profile-invite": "data-profile-invite",
+  suggestions: "data-suggestions",
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -117,6 +121,10 @@ export function classifyCardData(data: unknown): CardClass {
     }
     if (data.kind === "auth-invite") return { kind: "auth-invite" };
     if (data.kind === "profile-invite") return { kind: "profile-invite" };
+    if (data.kind === "suggestions") {
+      const s = SuggestionsSchema.safeParse(data);
+      if (s.success) return { kind: "suggestions", items: s.data.items };
+    }
   }
   return { kind: "unknown" };
 }

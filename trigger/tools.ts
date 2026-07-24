@@ -6,7 +6,7 @@ import {
   type Analytics,
   type TemplateName,
 } from "@shared/analytics";
-import { ChartTypeSchema, type ChartType } from "@shared/insight";
+import { ChartTypeSchema, SuggestionItemSchema, type ChartType } from "@shared/insight";
 import type { Profile } from "@shared/profile";
 import type { CallerKind } from "./guard";
 import {
@@ -59,7 +59,15 @@ export type InviteEmitPart = {
   id: string;
   data: unknown;
 };
-export type EmitPart = InsightPart | ErrorPart | RefusalPart | PostingsEmitPart | InviteEmitPart;
+/** The additive discovery-suggestions part (chips offered on a capabilities turn). */
+export type SuggestionsEmitPart = { type: "data-suggestions"; id: string; data: unknown };
+export type EmitPart =
+  | InsightPart
+  | ErrorPart
+  | RefusalPart
+  | PostingsEmitPart
+  | InviteEmitPart
+  | SuggestionsEmitPart;
 export type { ErrorPart, RefusalPart };
 export type Emit = (part: EmitPart) => void;
 
@@ -340,11 +348,40 @@ function requestProfileTool(deps: CatalogDeps) {
   });
 }
 
+// The discovery-suggestions tool: a lightweight direct-part emit (no ClickHouse). On a capabilities turn
+// the agent replies briefly then calls this with the chips it wants offered - one fit question plus a few
+// corpus-grounded data questions. The part renders as tappable chips beside the reply; it never suppresses
+// the prose (an additive part, not an answer card).
+const SUGGEST_DESCRIPTION =
+  "After a brief reply to a capabilities question (what can you do / how can you help), call this to offer " +
+  "3-4 tappable suggestion chips: ONE personal-fit question plus 2-3 concrete data questions grounded in the " +
+  "live corpus (a real role, city, or company). Each item has a short chip `label` and the full `question` " +
+  "sent when it is tapped. The chips render beneath your reply - keep the reply itself to at most two sentences.";
+
+const SuggestToolInput = z
+  .object({ items: z.array(SuggestionItemSchema).min(1).max(4) })
+  .strict();
+
+function suggestTool(deps: CatalogDeps) {
+  return tool({
+    description: SUGGEST_DESCRIPTION,
+    inputSchema: SuggestToolInput,
+    execute: async (rawInput, { toolCallId }) => {
+      const id = toolCallId;
+      // Re-validate here (trim + caps) before emitting - the runtime never trusts the raw call.
+      const { items } = SuggestToolInput.parse(rawInput);
+      deps.emit({ type: "data-suggestions", id, data: { kind: "suggestions", items } });
+      return { count: items.length, note: "The suggestion chips are shown beneath your reply - add no more prose." };
+    },
+  });
+}
+
 export function buildCatalogTools(deps: CatalogDeps): ToolSet {
   const tools: ToolSet = {};
   for (const name of CATALOG_TOOL_NAMES) tools[name] = catalogTool(name, deps);
   tools.query_postings = composedTool(deps);
   tools.search_postings = searchPostingsTool(deps);
   tools.request_profile = requestProfileTool(deps);
+  tools.suggest_questions = suggestTool(deps);
   return tools;
 }

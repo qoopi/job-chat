@@ -10,8 +10,9 @@ test("Should_RenderCreditLinks_On_Landing", async ({ page }) => {
     page.locator('a[href="https://triggerdev.clickhouse.com/?utm_source=luma"]'),
   ).toBeVisible();
 
-  // data credit -> searchnapply.com
-  await expect(page.locator('a[href*="searchnapply.com"]')).toBeVisible();
+  // data credit -> plain text "Data by searchnapply" (no link; the site does not exist)
+  await expect(page.getByText("Data by searchnapply")).toBeVisible();
+  await expect(page.locator('a[href*="searchnapply"]')).toHaveCount(0);
 
   // GitHub repo link
   const github = page.getByRole("link", { name: "GitHub" });

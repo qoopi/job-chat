@@ -71,6 +71,7 @@ export function ProfilePanel({
   onClose,
   onFindJob,
   onProfileSaved,
+  onParsingChange,
 }: {
   conversationId: string;
   e2e?: boolean;
@@ -79,6 +80,8 @@ export function ProfilePanel({
   onFindJob?: () => void;
   /** Inject / replace the profile card in the live thread after a successful save. */
   onProfileSaved: (profile: Profile) => void | Promise<void>;
+  /** Toggle the in-thread "Parsing your profile..." indicator while the extraction poll is active. */
+  onParsingChange?: (active: boolean) => void;
 }) {
   // e2e opens straight on the empty form (no store); otherwise start on a skeleton and resolve the real
   // state asynchronously below.
@@ -106,6 +109,9 @@ export function ProfilePanel({
       mounted.current = false;
     };
   }, []);
+  // Clear the in-thread indicator if the panel unmounts mid-poll (close / New chat while the extraction
+  // runs), so it never strands. onParsingChange is the parent's stable setter, so this runs only on unmount.
+  useEffect(() => () => onParsingChange?.(false), [onParsingChange]);
 
   // Initial load: resolve the real state (saved/github-skipped/error/empty); e2e opens on the empty form.
   useEffect(() => {
@@ -180,6 +186,7 @@ export function ProfilePanel({
     }
 
     const token = ++pollToken.current;
+    onParsingChange?.(true); // the extraction poll is active - show the in-thread indicator
     const outcome = await pollProfileSave(
       {
         getMyProfile: () => getMyProfile().catch(() => null),
@@ -188,16 +195,19 @@ export function ProfilePanel({
       },
       { runId: res.runId, priorExtractedAt, hadPriorProfile },
     );
-    if (!mounted.current || token !== pollToken.current) return; // superseded by a newer save / unmounted
+    // Stale: a newer save now owns the indicator, or the panel unmounted (the effect cleanup cleared it).
+    if (!mounted.current || token !== pollToken.current) return;
     if (outcome.outcome === "error") {
+      onParsingChange?.(false); // no card will land - drop the indicator now
       setErrorHadPriorProfile(outcome.hadPriorProfile);
       setStatus("error");
       return;
     }
     setProfile(outcome.profile);
     setStatus(outcome.outcome);
+    // onProfileSaved (in the parent) clears the indicator WITH the injected card - no empty gap.
     void onProfileSaved(outcome.profile);
-  }, [conversationId, e2e, githubInput, resumeText, onProfileSaved]);
+  }, [conversationId, e2e, githubInput, resumeText, onProfileSaved, onParsingChange]);
 
   // Delete the profile ROW; the streamed profile card stays in the thread as history. The panel
   // returns to the empty/upload form so the user can build a fresh profile.

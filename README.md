@@ -74,15 +74,32 @@ How the entry maps to the rubric:
   `messages`, `profiles`) runs alongside ClickHouse (analytics), with the `users` table mirrored into
   ClickHouse via the built-in CDC ClickPipe.
 
-```
-Next.js (this repo, Vercel)          Trigger.dev cloud                Data
-  chat UI (useChat over    ----->    chat.agent() - one durable       ClickHouse Cloud
-  useTriggerChatTransport)           run per conversation;              postings corpus +
-  server actions: guest              tools = fixed + composed SQL       all analytical reads
-  cookie, session tokens,            catalog (analytics.ts) against   ClickHouse Managed Postgres
-  start-chat/send                    ClickHouse; scheduled ingest      (OLTP: users, conversations,
-                                     + profile-extraction tasks         messages, profiles);
-                                                                        users --CDC--> ClickHouse
+```mermaid
+flowchart LR
+  API["api.searchnapply.com"]
+
+  subgraph Browser["Browser - Next.js / Vercel"]
+    UI["Chat UI<br/>useChat + useTriggerChatTransport"]
+  end
+
+  subgraph Trigger["Trigger.dev Cloud"]
+    Agent["chat.agent() - one durable run / conversation<br/>Bedrock + tools"]
+    Ingest["Scheduled ingest<br/>hourly"]
+    Extract["Profile extraction<br/>resume + GitHub"]
+  end
+
+  subgraph Data["Data"]
+    CH["ClickHouse - postings + analytics core<br/>all Show-query SQL"]
+    PG["Managed Postgres<br/>users, conversations, messages, profiles"]
+  end
+
+  UI <-->|"Realtime stream"| Agent
+  Agent -->|"parameterized SQL"| CH
+  Agent -->|"persist turns"| PG
+  Extract --> PG
+  API -->|"GET /api/jobs/postings"| Ingest
+  Ingest --> CH
+  PG -. "CDC ClickPipe" .-> CH
 ```
 
 - **Trigger.dev** (`trigger/`): the `chat.agent()` conversation loop (Bedrock, catalog tools,
@@ -102,12 +119,14 @@ Next.js (this repo, Vercel)          Trigger.dev cloud                Data
 - **LLM**: Claude via AWS Bedrock (`@ai-sdk/amazon-bedrock`, `eu.` inference profile) - Sonnet 4.5
   for both the chat agent and profile extraction (the extraction task imports the same `MODEL_ID`).
 
-### About searchnapply.com
+### About the searchnapply API
 
-[searchnapply.com](https://searchnapply.com) is a pre-existing, independent job-search platform
-operated by this team. Job.Chat consumes it strictly as an **external REST API** — a job-postings
-source for scheduled ingestion into ClickHouse. None of its code is part of this repository or
-this submission; everything here was built during the hackathon window.
+**`api.searchnapply.com`** is a pre-existing, independent job-search API operated by this
+team. Job.Chat consumes it strictly as an **external data source** - the origin of the job
+postings that a scheduled Trigger.dev task ingests into ClickHouse (authenticate for a
+bearer token, then page `GET /api/jobs/postings`). None of the searchnapply service's code
+is part of this repository or this submission; everything here was built during the
+hackathon window.
 
 ## Repo map
 
