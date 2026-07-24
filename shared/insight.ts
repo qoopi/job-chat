@@ -132,7 +132,15 @@ export const ProfileCardSchema = z
   .strict();
 
 export const PostingsSchema = z
-  .object({ kind: z.literal("postings"), rows: z.array(ScoredPostingRowSchema), total: z.number() })
+  .object({
+    kind: z.literal("postings"),
+    rows: z.array(ScoredPostingRowSchema),
+    total: z.number(),
+    // Header mode. Absent = the profile-fit card (default wording: "N postings match your profile"). "latest"
+    // = a plain latest-list, so the card drops the fit/best-by-score framing for a neutral header. Optional so
+    // an older persisted fit snapshot (no mode) still parses and renders as the fit card unchanged.
+    mode: z.literal("latest").optional(),
+  })
   .strict();
 
 export const AuthInviteSchema = z.object({ kind: z.literal("auth-invite") }).strict();

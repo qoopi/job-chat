@@ -31,7 +31,7 @@ export type CardClass =
   | { kind: "error"; errorKind: ErrorKind }
   | { kind: "refusal"; reason: RefusalReason }
   | { kind: "profile-card"; profile: Profile }
-  | { kind: "postings"; rows: ScoredPostingRow[]; total: number }
+  | { kind: "postings"; rows: ScoredPostingRow[]; total: number; mode?: "latest" }
   | { kind: "auth-invite" }
   | { kind: "profile-invite" }
   | { kind: "suggestions"; items: SuggestionItem[] }
@@ -76,7 +76,7 @@ export type PostingDetailState =
 export type DetailContent =
   | { kind: "table"; insight: DataInsight }
   | { kind: "profile-card"; profile: Profile }
-  | { kind: "postings"; rows: ScoredPostingRow[]; total: number }
+  | { kind: "postings"; rows: ScoredPostingRow[]; total: number; mode?: "latest" }
   // The on-demand single posting: NOT resolved from a message payload (getPostingDetail feeds it), so
   // resolveDetailContent never yields this - ChatClient builds it from its own fetch state.
   | { kind: "posting"; state: PostingDetailState };
@@ -90,7 +90,7 @@ export function resolveDetailContent(messages: UIMessage[], target: DetailTarget
   const cls = classifyCardData(part.data);
   if (cls.kind === "insight") return { kind: "table", insight: cls.insight };
   if (cls.kind === "profile-card") return { kind: "profile-card", profile: cls.profile };
-  if (cls.kind === "postings") return { kind: "postings", rows: cls.rows, total: cls.total };
+  if (cls.kind === "postings") return { kind: "postings", rows: cls.rows, total: cls.total, mode: cls.mode };
   return null;
 }
 
@@ -117,7 +117,7 @@ export function classifyCardData(data: unknown): CardClass {
     }
     if (data.kind === "postings") {
       const p = PostingsSchema.safeParse(data);
-      if (p.success) return { kind: "postings", rows: p.data.rows, total: p.data.total };
+      if (p.success) return { kind: "postings", rows: p.data.rows, total: p.data.total, mode: p.data.mode };
     }
     if (data.kind === "auth-invite") return { kind: "auth-invite" };
     if (data.kind === "profile-invite") return { kind: "profile-invite" };

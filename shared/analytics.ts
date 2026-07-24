@@ -289,17 +289,24 @@ export function buildTemplateSql(
       if (p.role) filters.push(roleFilter(p.role, roleNames));
       filters.push(openSetFilter(table));
       const where = whereClause(filters);
+      // Same column shape as buildSearchPostingsSql (title..externalId) so the postings card reads either
+      // identically via toScoredPostingRow - the natural key (source, external_id) rides each row so a title
+      // click can fetch the on-demand detail. `score` is a neutral 0: this is a recency list, not a relevance
+      // search (rows are ORDER BY published_at DESC), so no fake relevance is invented.
       const sql = assemble([
         "SELECT",
         "  title,",
         "  company,",
         "  city,",
-        "  experience_level,",
+        "  (location_kind = 'remote') AS remote,",
         "  salary_min,",
         "  salary_max,",
-        "  salary_currency,",
-        "  toString(published_at) AS published_at,",
-        "  apply_url",
+        "  experience_level AS experience,",
+        "  toString(published_at) AS publishedAt,",
+        "  apply_url,",
+        "  source,",
+        "  external_id AS externalId,",
+        "  0 AS score",
         `FROM ${table} FINAL`,
         where,
         "ORDER BY published_at DESC, external_id DESC",
@@ -714,6 +721,27 @@ export interface SearchPostingsResult {
   meta: { freshestAt: string; topCompany: string; topShare: number };
 }
 
+/** Map one raw CH row to a ScoredPostingRow. search_postings and latest_postings emit the SAME column names
+ *  (title, company, city, remote, salary_min, salary_max, experience, publishedAt, apply_url, source,
+ *  external_id AS externalId, score), so the postings card reads either identically. NULL/empty city -> null,
+ *  absent apply_url -> "". The natural key (source, externalId) rides the row so a title click fetches the detail. */
+export function toScoredPostingRow(r: Record<string, unknown>): ScoredPostingRow {
+  return {
+    title: String(r.title),
+    company: String(r.company),
+    city: r.city == null || r.city === "" ? null : String(r.city),
+    remote: Number(r.remote) === 1,
+    salaryMin: r.salary_min == null ? null : Number(r.salary_min),
+    salaryMax: r.salary_max == null ? null : Number(r.salary_max),
+    experience: String(r.experience),
+    publishedAt: String(r.publishedAt),
+    applyUrl: r.apply_url == null ? "" : String(r.apply_url),
+    source: String(r.source),
+    externalId: String(r.externalId),
+    score: Number(r.score),
+  };
+}
+
 /** SELECT one posting by its natural key (source, external_id) for the on-demand detail view. FINAL collapses
  *  the ReplacingMergeTree so the freshest snapshot wins; both key values are chStr-escaped (injection-safe). */
 export function buildPostingDetailSql(source: string, externalId: string, table: string): string {
@@ -937,21 +965,7 @@ export function createAnalytics(config: { client: ClickHouseClient; table?: stri
         .query({ query: metaSql, format: "JSONEachRow", clickhouse_settings: QUERY_SETTINGS })
         .then((rs) => rs.json<{ company: string; c: number; freshestAt: string }>()),
     ]);
-    const rows: ScoredPostingRow[] = rawRows.map((r) => ({
-      title: String(r.title),
-      company: String(r.company),
-      city: r.city == null || r.city === "" ? null : String(r.city),
-      remote: Number(r.remote) === 1,
-      salaryMin: r.salary_min == null ? null : Number(r.salary_min),
-      salaryMax: r.salary_max == null ? null : Number(r.salary_max),
-      experience: String(r.experience),
-      publishedAt: String(r.publishedAt),
-      applyUrl: r.apply_url == null ? "" : String(r.apply_url),
-      // The natural key rides the row so a title click can fetch the on-demand detail (getPostingDetail).
-      source: String(r.source),
-      externalId: String(r.externalId),
-      score: Number(r.score),
-    }));
+    const rows: ScoredPostingRow[] = rawRows.map(toScoredPostingRow);
     const total = metaRows.reduce((sum, m) => sum + Number(m.c), 0);
     const top = metaRows[0]; // ordered c DESC, company ASC - the dominant company
     const freshestAt = metaRows.reduce(

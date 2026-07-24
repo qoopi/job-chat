@@ -56,6 +56,13 @@ export function postingsVerdict(total: number, shown: number): string {
   return `${total} postings match your profile — showing the best ${shown}.`;
 }
 
+/** The NEUTRAL header for a latest_postings list (not a profile fit): no "match your profile", no best-by-score
+ *  framing - rows are ordered by recency, so it reads "showing the latest N". */
+export function latestPostingsVerdict(total: number, shown: number): string {
+  if (shown >= total) return `${total} postings.`;
+  return `${total} postings — showing the latest ${shown}.`;
+}
+
 /** The postings emitter hard cap (mergeSearchParams mirrors this 50); the part carries ALL matches up to it. */
 export const POSTINGS_ROWS_CAP = 50;
 

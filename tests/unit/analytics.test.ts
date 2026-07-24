@@ -140,6 +140,21 @@ describe("buildTemplateSql", () => {
     expect(sql).toContain("apply_url");
   });
 
+  // latest_postings renders the interactive postings card, so its SELECT must match the postings-card row
+  // contract (buildSearchPostingsSql's shape): the natural key (source, external_id AS externalId) for the
+  // click-to-detail, remote/experience/publishedAt aliases, and a NEUTRAL constant score (recency list, not a
+  // relevance search). salary_currency is dropped (the card carries no currency).
+  it("latest_postings projects the postings-card row shape (natural key, remote, neutral score)", () => {
+    const { sql } = buildTemplateSql("latest_postings", {}, "postings");
+    expect(sql).toContain("source,");
+    expect(sql).toContain("external_id AS externalId");
+    expect(sql).toContain("(location_kind = 'remote') AS remote");
+    expect(sql).toContain("experience_level AS experience");
+    expect(sql).toContain("toString(published_at) AS publishedAt");
+    expect(sql).toContain("0 AS score"); // a recency list has no relevance score - a neutral constant
+    expect(sql).not.toContain("salary_currency"); // the postings card shows no currency
+  });
+
   // Country is a chStr-equality filter on the two v1 templates the composed builder cannot
   // serve (latest_postings is an entity list; salary_distribution is the v1-only histogram shape).
   it("adds a country equality filter to latest_postings (same shape as city)", () => {

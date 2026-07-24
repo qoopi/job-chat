@@ -3,6 +3,7 @@ import type { Analytics } from "@shared/analytics";
 import type { Profile } from "@shared/profile";
 import { buildCatalogTools, CATALOG_TOOL_NAMES, expandTitleTerms, mergeSearchParams } from "../../trigger/tools";
 import type { EmitPart } from "../../trigger/tools";
+import { classifyCardData } from "@/lib/chat-ui";
 
 const opts = { toolCallId: "call-1", messages: [] } as unknown as Parameters<
   NonNullable<ReturnType<typeof buildCatalogTools>["salary_distribution"]["execute"]>
@@ -86,6 +87,91 @@ describe("buildCatalogTools", () => {
 
     expect(emitted.some((p) => p.type === "data-error" && p.data.kind === "system")).toBe(true);
     expect((out as { error: string }).error).toBeTruthy();
+  });
+});
+
+// latest_postings routes to the INTERACTIVE postings card (clickable rows -> in-app detail), not the generic
+// static table: it emits a data-postings part (same wire shape as search_postings) whose rows carry the natural
+// key (source, external_id), in the neutral "latest" header mode. No chart skeleton is emitted (it would not
+// reconcile with the data-postings part). The other five templates keep the data-insight/table path unchanged.
+describe("latest_postings renders the interactive postings card (kind:postings, keyed rows)", () => {
+  function latestAnalytics(rows: Record<string, unknown>[], sampleN: number): Analytics {
+    return {
+      runQuery: vi.fn(async () => ({
+        sql: "SELECT ... FROM postings FINAL ORDER BY published_at DESC",
+        rows,
+        meta: { sampleN, freshestAt: "2026-07-18 06:00:00", openSet: true },
+      })),
+      runComposedQuery: vi.fn(),
+      coverageProfile: vi.fn(),
+      corpusSummary: vi.fn(),
+      getPostingDetail: vi.fn(),
+      searchPostings: vi.fn(),
+    };
+  }
+
+  // The raw ClickHouse row shape the new latest_postings SELECT returns (aliased to the postings-card contract).
+  const rawRow = (over: Record<string, unknown> = {}) => ({
+    title: "Senior Cloud Engineer",
+    company: "ClickHouse",
+    city: "Amsterdam",
+    remote: 1,
+    salary_min: 150000,
+    salary_max: 190000,
+    experience: "Senior",
+    publishedAt: "2026-07-20 10:00:00",
+    apply_url: "https://careers.example.com/1",
+    source: "Greenhouse",
+    externalId: "1752360931",
+    score: 0,
+    ...over,
+  });
+
+  it("emits ONLY a data-postings part (no chart skeleton) whose rows carry (source, external_id) and classify as kind:postings", async () => {
+    const emitted: EmitPart[] = [];
+    const analytics = latestAnalytics([rawRow(), rawRow({ title: "SRE", remote: 0, source: "Lever", externalId: "abc" })], 42);
+    const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
+
+    const out = await tools.latest_postings.execute!({}, opts);
+
+    // No data-insight skeleton (or any data-insight) is emitted for latest_postings - only the postings card.
+    expect(emitted.every((p) => p.type !== "data-insight")).toBe(true);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({ type: "data-postings", id: "call-1", data: { kind: "postings", total: 42, mode: "latest" } });
+
+    // The part classifies as the postings card, and its rows carry the natural key + are mapped to ScoredPostingRow.
+    const cls = classifyCardData(emitted[0].data);
+    expect(cls.kind).toBe("postings");
+    if (cls.kind === "postings") {
+      expect(cls.mode).toBe("latest");
+      expect(cls.total).toBe(42);
+      expect(cls.rows).toHaveLength(2);
+      const [first, second] = cls.rows;
+      expect(first.source).toBe("Greenhouse");
+      expect(first.externalId).toBe("1752360931");
+      expect(first.remote).toBe(true); // remote:1 -> boolean true
+      expect(second.remote).toBe(false); // remote:0 -> boolean false
+      // Every delivered row carries a non-empty (source, external_id) - the click-to-detail key.
+      for (const r of cls.rows) {
+        expect(r.source).toBeTruthy();
+        expect(r.externalId).toBeTruthy();
+      }
+    }
+    // The card is the whole answer (the model view carries the count + note, not prose).
+    expect((out as { total: number }).total).toBe(42);
+    expect(String((out as { note: string }).note)).toMatch(/postings card/i);
+  });
+
+  it("keeps the plain-prose path for 0 rows (empty marker, no postings card)", async () => {
+    const emitted: EmitPart[] = [];
+    const analytics = latestAnalytics([], 0);
+    const tools = buildCatalogTools({ analytics, emit: (p) => emitted.push(p) });
+
+    const out = await tools.latest_postings.execute!({ company: "Nobody" }, opts);
+
+    expect(emitted).toEqual([{ type: "data-insight", id: "call-1", data: { status: "empty" } }]);
+    expect(emitted.some((p) => p.type === "data-postings")).toBe(false);
+    expect((out as { empty?: boolean }).empty).toBe(true);
   });
 });
 
