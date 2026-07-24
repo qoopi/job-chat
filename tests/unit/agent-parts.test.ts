@@ -152,6 +152,106 @@ describe("buildModelHistory substitutes the verdict for card turns (F8)", () => 
   });
 });
 
+// A strict-valid postings-card payload (PostingsSchema): the shape persisted for a listing turn. `mode` absent
+// = the profile-fit card; `mode:"latest"` = a plain latest-list. Carries one valid ScoredPostingRow so the
+// safeParse matches on realistic data, not an empty-rows shortcut.
+function postingsPayload(total: number, mode?: "latest") {
+  const row = {
+    title: "Senior Software Engineer",
+    company: "YouTube",
+    city: "San Bruno",
+    remote: false,
+    salaryMin: 180000,
+    salaryMax: 220000,
+    experience: "senior",
+    publishedAt: "2026-07-20",
+    score: 0.9,
+  };
+  return { kind: "postings" as const, rows: [row], total, ...(mode ? { mode } : {}) };
+}
+
+// A postings/listing card matches PostingsSchema, NOT DataInsightSchema, so modelFacingContent used to return
+// "" for it - buildModelHistory then DROPPED the whole turn and coalesced the two surrounding user questions
+// into one. The model never saw the prior listing and re-ran the postings tool, persisting a SECOND postings
+// card (the observed listing-only duplication). The fix summarizes a postings turn into a concise, code-derived
+// sentence so the listing is visible. Nothing here keys on a company name - the fix is general.
+describe("buildModelHistory makes a prior postings/listing turn visible to the model (postings-turn visibility fix)", () => {
+  it("summarizes a profile-fit postings turn (mode absent) into a non-empty assistant message, not the prose", () => {
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "Show me jobs that fit my profile" },
+      { role: "assistant", content: "Here are some roles you might like.", parts: postingsPayload(42) },
+      { role: "user", content: "What about remote ones?" },
+    ]);
+    expect(rebuilt).toEqual([
+      { role: "user", content: "Show me jobs that fit my profile" },
+      { role: "assistant", content: "Already listed job postings (42 matching the profile)." },
+      { role: "user", content: "What about remote ones?" },
+    ]);
+    expect(rebuilt[1].content).not.toContain("might like"); // the model's own prose never reaches the model
+  });
+
+  it("summarizes a latest-list postings turn (mode 'latest') with the neutral, non-fit wording", () => {
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "Latest jobs at YouTube" },
+      { role: "assistant", content: "prose", parts: postingsPayload(9, "latest") },
+    ]);
+    expect(rebuilt[1].content).toBe("Already listed job postings (9 total), most recent first.");
+    expect(rebuilt[1].content).not.toContain("profile"); // a plain latest-list is not a profile fit
+  });
+
+  // The exact defect scenario: a listing turn between two questions. Pre-fix, the assistant turn was dropped
+  // and "Show me jobs at YouTube" + "What about ClickHouse?" coalesced into ONE user message, so the model
+  // re-answered the YouTube listing. Post-fix the listing is a distinct assistant message and the questions
+  // stay separate. General, not company-specific: the same holds for any (listing-turn, next-query) pair.
+  it("keeps a postings turn as a DISTINCT assistant message so the surrounding user questions are not coalesced/re-asked", () => {
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "Show me jobs at YouTube" },
+      { role: "assistant", content: "Here are YouTube openings.", parts: postingsPayload(7, "latest") },
+      { role: "user", content: "What about ClickHouse?" },
+    ]);
+    expect(rebuilt.map((m) => m.role)).toEqual(["user", "assistant", "user"]); // role-alternating, listing visible
+    expect(rebuilt[1].content).toBe("Already listed job postings (7 total), most recent first.");
+    expect(rebuilt[0].content).toBe("Show me jobs at YouTube");
+    expect(rebuilt[2].content).toBe("What about ClickHouse?"); // NOT merged with the YouTube question
+    expect(rebuilt[2].content).not.toContain("YouTube");
+  });
+
+  it("still hands the model the VERDICT for a chart/table card, and drops an unknown payload to '' (coalesced away)", () => {
+    const chart = buildInsight({
+      id: "c1",
+      tool: "top_companies",
+      params: {},
+      result: result([{ company: "Google", count: 4 }], 10),
+    });
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "Who is hiring most?" },
+      { role: "assistant", content: "prose", parts: chart }, // chart card -> its verdict (path unchanged)
+      { role: "user", content: "First unknown-payload probe" },
+      { role: "assistant", content: "prose", parts: { kind: "mystery" } }, // unknown -> "" -> dropped
+      { role: "user", content: "Second unknown-payload probe" },
+    ]);
+    expect(rebuilt[1].content).toBe(chart.verdict); // DataInsight path untouched
+    // the unknown-payload assistant row is dropped, so its two surrounding users coalesce (proving "")
+    expect(rebuilt.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(rebuilt[2].content).toContain("First unknown-payload probe");
+    expect(rebuilt[2].content).toContain("Second unknown-payload probe");
+  });
+
+  it("yields non-empty text for a turn carrying BOTH a chart and a postings card (verdict + summary joined)", () => {
+    const chart = buildInsight({
+      id: "c1",
+      tool: "top_companies",
+      params: {},
+      result: result([{ company: "Google", count: 4 }], 10),
+    });
+    const rebuilt = buildModelHistory([
+      { role: "user", content: "q" },
+      { role: "assistant", content: "prose", parts: [chart, postingsPayload(5, "latest")] },
+    ]);
+    expect(rebuilt[1].content).toBe(`${chart.verdict} Already listed job postings (5 total), most recent first.`);
+  });
+});
+
 describe("chartTypeFor maps each catalog tool to its designated visual (AC-11)", () => {
   it("pins the visuals from the brief case table", () => {
     expect(chartTypeFor("salary_distribution")).toBe("histogram");
